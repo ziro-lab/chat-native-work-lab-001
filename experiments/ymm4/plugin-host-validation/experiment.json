@@ -1,0 +1,25 @@
+{
+  "schema": "chat-native-work-lab.experiment.v1",
+  "id": "ymm4-plugin-host-validation",
+  "goal": "Prove that real YMM4 4.55.1.1 Lite loads a minimal .NET 10 plugin on a GitHub-hosted Windows runner.",
+  "host": {
+    "name": "YukkuriMovieMaker4 Lite",
+    "version": "4.55.1.1",
+    "archive_sha256": "125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b"
+  },
+  "runtime": ".NET 10",
+  "pass_assertions": [
+    "host archive hash matches",
+    "probe build succeeds with warnings as errors",
+    "real YukkuriMovieMaker.exe launches",
+    "ILocalizePlugin.SetCulture callback executes",
+    "marker reports expected probe name and loaded assembly SHA256"
+  ],
+  "not_proven": [
+    "tool UI interaction",
+    "timeline mutation",
+    "undo redo",
+    "ymme installer behavior",
+    "other YMM4 versions"
+  ]
+}
