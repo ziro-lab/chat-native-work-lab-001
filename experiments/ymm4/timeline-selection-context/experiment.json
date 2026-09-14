@@ -1,0 +1,16 @@
+{
+  "schema": "chat-native-work-lab.experiment.v1",
+  "id": "ymm4-timeline-selection-context-002",
+  "title": "YMM4 Timeline Selection Context",
+  "host": "YukkuriMovieMaker4 4.55.1.1 Lite",
+  "question": "Can a Timeline Tool observe single VoiceItem/TachieFaceItem selection, Character context, and selection clear through its public Timeline surface?",
+  "phase": "runtime-behavior-proof",
+  "pass_means": "The real YMM4 Timeline supplied through TimelineToolInfo exposes selected Voice/Face items and emits selection PropertyChanged notifications sufficient for event-driven Character Palette context switching.",
+  "not_proven": [
+    "physical mouse automation",
+    "playhead quick drop",
+    "front/back layer placement",
+    "template identity across restart",
+    "other YMM4 versions"
+  ]
+}
