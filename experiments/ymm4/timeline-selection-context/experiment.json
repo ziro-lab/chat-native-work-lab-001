@@ -3,13 +3,14 @@
   "id": "ymm4-timeline-selection-context-002",
   "title": "YMM4 Timeline Selection Context",
   "host": "YukkuriMovieMaker4 4.55.1.1 Lite",
-  "question": "Can a Timeline Tool observe a single selected VoiceItem/TachieFaceItem and its Character using a small stable host surface?",
-  "phase": "runtime-discovery",
-  "pass_means": "The real YMM4 host provided the Timeline Tool context and emitted an auditable selection-related API surface for assertion design.",
+  "question": "Can a Timeline Tool observe single VoiceItem/TachieFaceItem selection, Character context, and selection clear through its public Timeline surface?",
+  "phase": "runtime-behavior-proof",
+  "pass_means": "The real YMM4 Timeline supplied through TimelineToolInfo exposes selected Voice/Face items and emits selection PropertyChanged notifications sufficient for event-driven Character Palette context switching.",
   "not_proven": [
-    "actual user selection change observation",
-    "selection clear observation",
     "physical mouse automation",
+    "playhead quick drop",
+    "front/back layer placement",
+    "template identity across restart",
     "other YMM4 versions"
   ]
 }
