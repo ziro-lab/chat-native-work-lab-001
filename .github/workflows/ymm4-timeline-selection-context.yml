@@ -68,28 +68,23 @@ jobs:
           New-Item -ItemType Directory -Force $dest | Out-Null
           Copy-Item out/probe/Ymm4SelectionProbe.dll $dest
 
-      - name: Run discovery inside real YMM4
+      - name: Run discovery and behavior proof inside real YMM4
         shell: pwsh
         run: |
           ./experiments/ymm4/timeline-selection-context/RunNative.ps1 `
             -Ymm4Dir $env:YMM4_DIR `
             -OutputDir (Join-Path $PWD 'out/evidence')
 
-      - name: Print compact discovery evidence
+      - name: Print compact evidence
         if: always()
         shell: pwsh
         run: |
-          if (Test-Path out/evidence/result.txt) {
-            Write-Host '=== RESULT ==='
-            Get-Content out/evidence/result.txt
-          }
-          if (Test-Path out/evidence/timeline-fixture.txt) {
-            Write-Host '=== FIXTURE ==='
-            Get-Content out/evidence/timeline-fixture.txt
-          }
-          if (Test-Path out/evidence/selection-surface.txt) {
-            Write-Host '=== SELECTION SURFACE ==='
-            Get-Content out/evidence/selection-surface.txt
+          foreach ($file in @('result.txt','behavior-result.txt','timeline-fixture.txt','behavior-surface.txt','selection-surface.txt')) {
+            $path=Join-Path 'out/evidence' $file
+            if (Test-Path $path) {
+              Write-Host "=== $file ==="
+              Get-Content $path
+            }
           }
 
       - name: Record provenance
@@ -100,11 +95,12 @@ jobs:
           $event=Get-Content -Raw $env:GITHUB_EVENT_PATH | ConvertFrom-Json
           $sourceHead=if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $event.pull_request.head.sha } else { $env:GITHUB_SHA }
           $probeHash=if (Test-Path out/probe/Ymm4SelectionProbe.dll) { (Get-FileHash out/probe/Ymm4SelectionProbe.dll -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
-          $result=if (Test-Path out/evidence/result.txt) { (Get-Content -Raw out/evidence/result.txt).Trim() } else { 'NO_RESULT' }
+          $discovery=if (Test-Path out/evidence/result.txt) { (Get-Content -Raw out/evidence/result.txt).Trim() } else { 'NO_RESULT' }
+          $behavior=if (Test-Path out/evidence/behavior-result.txt) { (Get-Content -Raw out/evidence/behavior-result.txt).Trim() } else { 'NO_BEHAVIOR_RESULT' }
           [ordered]@{
             schema='chat-native-work-lab.provenance.v1'
             experiment='ymm4-timeline-selection-context-002'
-            phase='runtime-discovery'
+            phase='runtime-behavior-proof'
             repository=$env:GITHUB_REPOSITORY
             source_head=$sourceHead
             checkout_sha=$env:GITHUB_SHA
@@ -116,7 +112,8 @@ jobs:
             ymm4_version='4.55.1.1 Lite'
             ymm4_zip_sha256='125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
             probe_dll_sha256=$probeHash
-            result=$result
+            discovery_result=$discovery
+            behavior_result=$behavior
           } | ConvertTo-Json -Depth 4 | Set-Content out/evidence/provenance.json
 
       - name: Upload compact evidence
