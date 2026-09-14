@@ -1,0 +1,8 @@
+{
+  "schema": "chat-native-work-lab.experiment.v1",
+  "id": "ymm4-character-layer-placement-004",
+  "title": "YMM4 Character Front / Back Layer Placement",
+  "host": "YukkuriMovieMaker4 4.55.1.1 Lite",
+  "question": "Can same-Character max/min Layer baselines and full-span collision search place stacked Face items in a real Timeline?",
+  "phase": "runtime-behavior-proof"
+}

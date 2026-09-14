@@ -1,0 +1,50 @@
+name: YMM4 character layer placement
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['experiments/ymm4/character-layer-placement/**','.github/workflows/ymm4-character-layer-placement.yml']
+  pull_request:
+    paths: ['experiments/ymm4/character-layer-placement/**','.github/workflows/ymm4-character-layer-placement.yml']
+permissions: { contents: read }
+concurrency: { group: 'ymm4-character-layer-${{ github.ref }}', cancel-in-progress: true }
+jobs:
+  native-proof:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false, fetch-depth: 1 }
+      - name: Verify environment and download exact YMM4
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object dotnet-sdks.txt
+          if(-not(Select-String dotnet-sdks.txt -Pattern '^10\.')){throw '.NET 10 SDK missing'}
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip
+          if($LASTEXITCODE -ne 0){throw 'YMM4 download failed'}
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant();if($hash -ne '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'){throw "hash mismatch $hash"}
+          Expand-Archive ymm4.zip ymm4; $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1;"YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build and install probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe|Out-Null
+          dotnet build experiments/ymm4/character-layer-placement/src/Ymm4LayerProbe/Ymm4LayerProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1|Tee-Object out/build.txt
+          if($LASTEXITCODE -ne 0){throw 'build failed'}
+          $dest=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4LayerProbe';New-Item -ItemType Directory -Force $dest|Out-Null;Copy-Item out/probe/Ymm4LayerProbe.dll $dest
+      - name: Run real YMM4 proof
+        shell: pwsh
+        run: ./experiments/ymm4/character-layer-placement/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - name: Print evidence
+        if: always()
+        shell: pwsh
+        run: if(Test-Path out/evidence/result.txt){Get-Content out/evidence/result.txt}
+      - name: Record provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/evidence|Out-Null;$event=Get-Content -Raw $env:GITHUB_EVENT_PATH|ConvertFrom-Json;$source=if($env:GITHUB_EVENT_NAME -eq 'pull_request'){$event.pull_request.head.sha}else{$env:GITHUB_SHA}
+          [ordered]@{schema='chat-native-work-lab.provenance.v1';experiment='ymm4-character-layer-placement-004';source_head=$source;run_id=$env:GITHUB_RUN_ID;run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID";ymm4_version='4.55.1.1 Lite';ymm4_zip_sha256='125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b';result=if(Test-Path out/evidence/result.txt){(Get-Content -Raw out/evidence/result.txt).Trim()}else{'NO_RESULT'}}|ConvertTo-Json|Set-Content out/evidence/provenance.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: { name: ymm4-character-layer-placement, path: 'out/', retention-days: 14 }
