@@ -1,0 +1,8 @@
+{
+  "schema":"chat-native-work-lab.experiment.v1",
+  "id":"ymm4-template-identity-005",
+  "title":"YMM4 ItemTemplate Identity",
+  "host":"YukkuriMovieMaker4 4.55.1.1 Lite",
+  "phase":"runtime-discovery",
+  "question":"What public identity/persistence surface can a Plugin Library use to re-identify YMM4 ItemTemplates?"
+}

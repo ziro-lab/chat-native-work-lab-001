@@ -1,0 +1,38 @@
+name: YMM4 template identity
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['experiments/ymm4/template-identity/**','.github/workflows/ymm4-template-identity.yml']
+  pull_request:
+    paths: ['experiments/ymm4/template-identity/**','.github/workflows/ymm4-template-identity.yml']
+permissions: {contents: read}
+concurrency: {group: 'ymm4-template-identity-${{ github.ref }}',cancel-in-progress: true}
+jobs:
+  native-discovery:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false,fetch-depth: 1}
+      - name: Verify environment and download exact YMM4
+        shell: pwsh
+        run: |
+          dotnet --list-sdks|Tee-Object dotnet-sdks.txt;if(-not(Select-String dotnet-sdks.txt -Pattern '^10\.')){throw '.NET 10 SDK missing'}
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip;if($LASTEXITCODE-ne 0){throw 'download failed'}
+          $h=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant();if($h-ne'125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'){throw "hash mismatch $h"};Expand-Archive ymm4.zip ymm4;$e=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1;"YMM4_DIR=$($e.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build and install probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe|Out-Null;dotnet build experiments/ymm4/template-identity/src/Ymm4TemplateIdentityProbe/Ymm4TemplateIdentityProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1|Tee-Object out/build.txt;if($LASTEXITCODE-ne 0){throw 'build failed'};$d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4TemplateIdentityProbe';New-Item -ItemType Directory -Force $d|Out-Null;Copy-Item out/probe/Ymm4TemplateIdentityProbe.dll $d
+      - name: Run real YMM4 discovery
+        shell: pwsh
+        run: ./experiments/ymm4/template-identity/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - name: Print evidence
+        if: always()
+        shell: pwsh
+        run: foreach($f in @('result.txt','surface.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: {name: ymm4-template-identity,path: 'out/',retention-days: 14}
