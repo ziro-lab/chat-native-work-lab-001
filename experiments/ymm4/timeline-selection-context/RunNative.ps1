@@ -76,9 +76,11 @@ try {
 
     if (-not (Test-Path $behaviorPath)) { throw 'Behavioral selection probe did not produce behavior-result.txt.' }
     $behavior = Get-Content $behaviorPath
-    $status = $behavior | Where-Object { $_ -like 'status=*' } | Select-Object -First 1
-    if ($status -notin @('status=PASS_BEHAVIOR_MODEL','status=PASS_BEHAVIOR_VM','status=PARTIAL_BEHAVIOR')) {
-        throw "Unexpected behavioral result:`n$($behavior -join "`n")"
+    if ($behavior -notcontains 'status=PASS_TIMELINE_SELECTION') {
+        throw "Public Timeline selection proof did not pass:`n$($behavior -join "`n")"
+    }
+    foreach ($required in @('voice_selected=True','face_selected=True','selection_clear=True','character_readable=True')) {
+        if ($behavior -notcontains $required) { throw "Missing required selection assertion: $required" }
     }
 }
 finally {
