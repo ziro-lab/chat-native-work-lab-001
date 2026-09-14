@@ -1,0 +1,12 @@
+bin/
+obj/
+out/
+artifacts/
+*.user
+*.suo
+*.log
+.vs/
+.idea/
+.DS_Store
+ymm4/
+ymm4.zip
