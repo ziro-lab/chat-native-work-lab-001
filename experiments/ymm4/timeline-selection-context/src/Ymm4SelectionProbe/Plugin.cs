@@ -51,6 +51,7 @@ public sealed class SelectionProbeViewModel : ITimelineToolViewModel, IToolViewM
     public ToolState SaveState() => new() { Title = Title };
     public void LoadState(ToolState stateData) { }
     public void Dispose() { }
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
     public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested { add { } remove { } }
 }
 
