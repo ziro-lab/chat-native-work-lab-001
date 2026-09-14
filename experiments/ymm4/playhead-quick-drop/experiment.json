@@ -1,0 +1,9 @@
+{
+  "schema": "chat-native-work-lab.experiment.v1",
+  "id": "ymm4-playhead-quick-drop-003",
+  "title": "YMM4 Playhead Quick Drop",
+  "host": "YukkuriMovieMaker4 4.55.1.1 Lite",
+  "question": "Can a Timeline Tool read a public playhead frame and place an independent live Template clone there with intrinsic Length preserved?",
+  "phase": "runtime-discovery-and-behavior",
+  "pass_means": "A public playhead surface is behaviorally tied to a known frame and a live registered Template clone is placed at that frame with source Length preserved."
+}
