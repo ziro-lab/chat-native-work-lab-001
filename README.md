@@ -39,13 +39,13 @@ Every experiment should define:
 4. **PASS boundary** — what success proves.
 5. **NOT PROVEN** — nearby claims that the experiment does not prove.
 6. **Reproduction** — how to run it again.
-7. **Evidence** — commit, workflow run, artifact identity and relevant hashes.
+7. **Evidence** — source identity, actual tested checkout when relevant, workflow run, artifact identity and hashes.
 
 See [`docs/EXPERIMENT_CONTRACT.md`](docs/EXPERIMENT_CONTRACT.md) and [`docs/EVIDENCE_POLICY.md`](docs/EVIDENCE_POLICY.md).
 
-## First seed experiment
+## YMM4 experiment set
 
-The first experiment is a minimal YukkuriMovieMaker4 (YMM4) host validation:
+The first seed was a minimal YukkuriMovieMaker4 (YMM4) host-validation proof:
 
 ```text
 GitHub Actions Windows runner
@@ -58,9 +58,11 @@ GitHub Actions Windows runner
 → preserve evidence without redistributing YMM4 itself
 ```
 
-See [`experiments/ymm4/plugin-host-validation/`](experiments/ymm4/plugin-host-validation/).
+The lab has since grown into several independent YMM4 experiments covering plugin load, Timeline selection context, playhead placement, Character-relative Layer behavior and ItemTemplate identity/restart ambiguity.
 
-This is intentionally smaller than the separate YMM4 Template Placer product proof. The lab seed establishes a reusable minimal host-validation baseline instead of copying product logic here.
+See [`experiments/ymm4/`](experiments/ymm4/) for the current list.
+
+These experiments later informed a larger downstream YMM4 Template Placer implementation. The product re-ran integrated native acceptance rather than treating lab PASS results as product acceptance. The lessons fed back into this repository are recorded in [`docs/DOWNSTREAM_FEEDBACK.md`](docs/DOWNSTREAM_FEEDBACK.md).
 
 ## Repository layout
 
@@ -71,7 +73,7 @@ experiments/               isolated target-specific experiments
   ymm4/                    YMM4 experiments
 ```
 
-Shared helpers should only be introduced after the same mechanism has been repeated and proven across multiple experiments.
+Shared helpers should only be introduced after the same mechanism has been repeated and proven across multiple experiments. The current YMM4 set is large enough to consider a small shared helper for repeated host download/hash/launch mechanics when a future experiment needs it, but experiment assertions should remain local.
 
 ## Public-repository rules
 
@@ -81,6 +83,7 @@ Shared helpers should only be introduced after the same mechanism has been repea
 - Pin exact versions/hashes when practical.
 - Do not interpret a green workflow as sufficient evidence by itself; assertions and artifacts must support the stated claim.
 - Record failure boundaries and unproven claims explicitly.
+- Treat infrastructure failures before the assertion boundary as BLOCKED rather than silently turning them into product failures.
 
 ## License
 
@@ -90,4 +93,4 @@ Third-party applications, binaries, trademarks, screenshots, names and other thi
 
 ## Status
 
-**v0.1 / bootstrap** — experiment contract + first native-host seed.
+**v0.2 / downstream-validated lab process** — experiment contract plus five independent YMM4 native-host experiments, with product-integration feedback incorporated into the evidence and experiment policies.
