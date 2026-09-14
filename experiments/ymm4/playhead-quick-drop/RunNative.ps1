@@ -33,6 +33,7 @@ try {
   Start-Sleep -Milliseconds 500
  }
  if(-not(Test-Path $result)){throw 'Playhead probe did not produce result.txt.'}
- $lines=Get-Content $result;$status=$lines|Where-Object{$_ -like 'status=*'}|Select-Object -First 1
- if($status -notin @('status=PASS_PLAYHEAD_QUICK_DROP','status=DISCOVERY_NO_PUBLIC_FRAME','status=DISCOVERY_PUBLIC_FRAME_READ_ONLY')){throw "Unexpected playhead result:`n$($lines -join "`n")"}
+ $lines=Get-Content $result
+ if($lines -notcontains 'status=PASS_PLAYHEAD_QUICK_DROP'){throw "Playhead Quick Drop proof did not pass:`n$($lines -join "`n")"}
+ foreach($required in @('public_frame_property=CurrentFrame','frame_matches=True','length_preserved=True','source_unchanged=True','independent_clone=True','placed=True')){if($lines -notcontains $required){throw "Missing required Quick Drop assertion: $required"}}
 } finally {if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue};Remove-Item Env:CNWL_YMM4_PLAYHEAD_DIR -ErrorAction SilentlyContinue}
