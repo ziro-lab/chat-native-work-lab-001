@@ -6,8 +6,9 @@ param(
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force $OutputDir | Out-Null
 $resultPath = Join-Path $OutputDir 'result.txt'
+$behaviorPath = Join-Path $OutputDir 'behavior-result.txt'
 $hostLog = Join-Path $OutputDir 'host-log.txt'
-Remove-Item $resultPath,$hostLog -Force -ErrorAction SilentlyContinue
+Remove-Item $resultPath,$behaviorPath,$hostLog -Force -ErrorAction SilentlyContinue
 
 $exe = Join-Path $Ymm4Dir 'YukkuriMovieMaker.exe'
 $pluginDll = Join-Path $Ymm4Dir 'user\plugin\Ymm4SelectionProbe\Ymm4SelectionProbe.dll'
@@ -50,7 +51,7 @@ $p = Start-Process -FilePath $exe -WorkingDirectory $Ymm4Dir -PassThru
 
 try {
     for ($i = 0; $i -lt 120; $i++) {
-        if (Test-Path $resultPath) { break }
+        if ((Test-Path $resultPath) -and (Test-Path $behaviorPath)) { break }
         if ($p.HasExited) { break }
 
         foreach ($w in (Get-CnwlWindows)) {
@@ -72,6 +73,13 @@ try {
     }
     if ($result -notcontains 'tool_info_received=True') { throw 'Timeline Tool did not receive TimelineToolInfo.' }
     if ($result -notcontains 'fixture_inserted=True') { throw 'Synthetic Timeline fixture was not inserted.' }
+
+    if (-not (Test-Path $behaviorPath)) { throw 'Behavioral selection probe did not produce behavior-result.txt.' }
+    $behavior = Get-Content $behaviorPath
+    $status = $behavior | Where-Object { $_ -like 'status=*' } | Select-Object -First 1
+    if ($status -notin @('status=PASS_BEHAVIOR_MODEL','status=PASS_BEHAVIOR_VM','status=PARTIAL_BEHAVIOR')) {
+        throw "Unexpected behavioral result:`n$($behavior -join "`n")"
+    }
 }
 finally {
     if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
