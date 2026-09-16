@@ -39,7 +39,8 @@ internal static class Probe
             var offset = TimeSpan.FromSeconds(4);
             var contentLength = TimeSpan.FromSeconds(100);
             var rates = new[] { 50d, 100d, 200d };
-            var itemTimes = new[] { 0d, 1d, 2.5d, 5d };
+            var interiorItemTimes = new[] { 0d, 1d, 2.5d, 4.999d };
+            var itemEndSeconds = length / (double)fps;
 
             var mapProperty = typeof(VideoItem).GetProperty("PlaybackRateMap", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 ?? throw new InvalidOperationException("BaseItem.PlaybackRateMap property missing.");
@@ -86,7 +87,7 @@ internal static class Probe
                 Assert((bool)(isConstant!.GetValue(map) ?? false), $"{rate:0}% map reports IsConstant");
                 AssertNear(Convert.ToDouble(firstRate!.GetValue(map), CultureInfo.InvariantCulture), rate, $"{rate:0}% map FirstRate matches PlaybackRate2");
 
-                foreach (var itemSeconds in itemTimes)
+                foreach (var itemSeconds in interiorItemTimes)
                 {
                     var itemTime = TimeSpan.FromSeconds(itemSeconds);
                     var expectedSource = TimeSpan.FromSeconds(offset.TotalSeconds + itemSeconds * rate / 100d);
@@ -95,9 +96,17 @@ internal static class Probe
                     AssertNear(actualSource.TotalSeconds, expectedSource.TotalSeconds, $"{rate:0}% GetSourceTime item={itemSeconds:R}s");
 
                     var inverse = findFirst!.Invoke(map, [actualSource, length, fps, offset, contentLength]);
-                    if (inverse is not TimeSpan inverseTime) throw new InvalidOperationException($"FindFirstTimeForSourceTime returned null for rate={rate:R}, item={itemSeconds:R}.");
+                    if (inverse is not TimeSpan inverseTime) throw new InvalidOperationException($"FindFirstTimeForSourceTime returned null for interior rate={rate:R}, item={itemSeconds:R}.");
                     AssertNear(inverseTime.TotalSeconds, itemTime.TotalSeconds, $"{rate:0}% inverse mapping item={itemSeconds:R}s");
                 }
+
+                var endTime = TimeSpan.FromSeconds(itemEndSeconds);
+                var expectedEndSource = TimeSpan.FromSeconds(offset.TotalSeconds + itemEndSeconds * rate / 100d);
+                var actualEndSource = (TimeSpan)(getSourceTime!.Invoke(map, [endTime, length, fps, offset, contentLength])
+                    ?? throw new InvalidOperationException("GetSourceTime(end) returned null."));
+                AssertNear(actualEndSource.TotalSeconds, expectedEndSource.TotalSeconds, $"{rate:0}% GetSourceTime accepts exact item end");
+                var endInverse = findFirst!.Invoke(map, [actualEndSource, length, fps, offset, contentLength]);
+                Assert(endInverse == null, $"{rate:0}% inverse lookup treats exact item end as outside half-open item range");
             }
 
             Assert(getSourceTime!.IsPublic, "PlaybackRateMap.GetSourceTime is public once the map instance is obtained");
@@ -109,7 +118,8 @@ internal static class Probe
                 "get_source_time_public=" + getSourceTime.IsPublic,
                 "find_first_time_public=" + findFirst.IsPublic,
                 "constant_rates_verified=50,100,200",
-                "content_offset_source_time_seconds=4"
+                "content_offset_source_time_seconds=4",
+                "inverse_item_domain=half-open"
             ], new UTF8Encoding(false));
         }
         catch (Exception ex)
