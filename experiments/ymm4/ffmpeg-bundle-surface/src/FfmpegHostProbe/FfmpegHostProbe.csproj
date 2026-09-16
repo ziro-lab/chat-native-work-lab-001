@@ -9,11 +9,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="YukkuriMovieMaker.Plugin">
-      <HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath>
+      <HintPath>$(YMM4DirPath)\YukkuriMovieMaker.Plugin.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="YukkuriMovieMaker.Plugin.FileSource.FFmpeg">
-      <HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.FileSource.FFmpeg.dll</HintPath>
+      <HintPath>$(YMM4DirPath)\YukkuriMovieMaker.Plugin.FileSource.FFmpeg.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
