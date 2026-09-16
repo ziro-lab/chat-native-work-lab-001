@@ -84,7 +84,7 @@ internal static class Probe
         Append($"HOST timelineAssembly={typeof(Timeline).Assembly.FullName}");
         var videoType = typeof(Timeline).Assembly.GetType("YukkuriMovieMaker.Project.Items.VideoItem", throwOnError: false);
         Assert(videoType != null, "VideoItem type exists");
-        videoType!;
+        if (videoType == null) throw new InvalidOperationException("VideoItem type disappeared after assertion.");
 
         Append("TYPE " + videoType.FullName);
         foreach (var ctor in videoType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).OrderBy(x => x.GetParameters().Length))
