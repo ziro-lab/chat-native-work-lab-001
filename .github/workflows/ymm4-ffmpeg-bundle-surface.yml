@@ -51,12 +51,25 @@ jobs:
         shell: pwsh
         run: |
           dotnet run --project experiments/ymm4/ffmpeg-bundle-surface/src/FfmpegSurfaceProbe/FfmpegSurfaceProbe.csproj -c Release -- "$env:YMM4_DIR" "$PWD/out/reflection.txt"
+      - name: Build and install in-host locator probe
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/ffmpeg-bundle-surface/src/FfmpegHostProbe/FfmpegHostProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/host-probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){ throw 'Host probe build failed' }
+          $dest=Join-Path $env:YMM4_DIR 'user\plugin\FfmpegHostProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/host-probe/FfmpegHostProbe.dll $dest
+      - name: Invoke locator inside real YMM4 host
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/ffmpeg-bundle-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/host')
       - name: Print evidence
         shell: pwsh
         run: |
           Write-Host '=== result ==='; Get-Content out/result.txt
           Write-Host '=== distribution hits ==='; if(Test-Path out/distribution-hits.txt){ Get-Content out/distribution-hits.txt | Select-Object -First 200 }
           Write-Host '=== reflection ==='; if(Test-Path out/reflection.txt){ Get-Content out/reflection.txt | Select-Object -First 400 }
+          Write-Host '=== host locator ==='; if(Test-Path out/host/host-locator.txt){ Get-Content out/host/host-locator.txt }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ymm4-ffmpeg-bundle-surface
