@@ -20,7 +20,7 @@ internal static class Probe
 {
     private static bool scheduled;
     private static string output = "";
-    private static readonly string[] Keywords = ["save", "write", "serial", "json", "file", "project", "copy", "clone", "load"];
+    private static readonly string[] Keywords = ["save", "write", "serial", "json", "file", "project", "copy", "clone", "load", "read", "deserial"];
 
     public static void Schedule()
     {
@@ -104,9 +104,28 @@ internal static class Probe
         var assemblies = AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true)
             .ToArray();
+
+        var jsonType = assemblies.SelectMany(SafeTypes).FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Json.Json");
+        Assert(jsonType != null, "YukkuriMovieMaker.Json.Json type exists");
+        Append("JSON_TYPE " + jsonType!.AssemblyQualifiedName);
+        var jsonMethods = jsonType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .OrderBy(m => m.Name).ThenBy(m => m.GetParameters().Length).ToArray();
+        var jsonProperties = jsonType.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .OrderBy(p => p.Name).ToArray();
+        var jsonFields = jsonType.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .OrderBy(f => f.Name).ToArray();
+        Append("=== JSON HELPER MEMBERS ===");
+        foreach (var p in jsonProperties) Append("JSON_MEMBER " + Describe(p));
+        foreach (var f in jsonFields) Append("JSON_MEMBER " + Describe(f));
+        foreach (var m in jsonMethods) Append("JSON_MEMBER " + Describe(m));
+
+        var serializerCandidates = jsonMethods.Where(m => Keywords.Any(k => m.Name.Contains(k, StringComparison.OrdinalIgnoreCase))).ToArray();
+        Append("=== JSON SERIALIZATION CANDIDATES ===");
+        foreach (var m in serializerCandidates) Append("JSON_CANDIDATE " + Describe(m));
+        Assert(serializerCandidates.Length > 0, "Json helper exposes at least one serialization/read/write candidate");
+
         var methodCandidates = new List<MethodBase>();
         var typeCandidates = new List<Type>();
-
         foreach (var assembly in assemblies)
         {
             foreach (var type in SafeTypes(assembly))
@@ -117,7 +136,7 @@ internal static class Probe
                 foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
                     var nameInteresting = Keywords.Any(k => method.Name.Contains(k, StringComparison.OrdinalIgnoreCase));
-                    var projectRelated = method.ReturnType == projectType || method.GetParameters().Any(p => p.ParameterType == projectType || p.ParameterType.IsAssignableFrom(projectType) || projectType.IsAssignableFrom(p.ParameterType));
+                    var projectRelated = method.ReturnType == projectType || method.GetParameters().Any(p => p.ParameterType == projectType);
                     if (nameInteresting && projectRelated) methodCandidates.Add(method);
                 }
                 foreach (var ctor in type.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -127,13 +146,11 @@ internal static class Probe
             }
         }
 
-        Append("=== CANDIDATE TYPES ===");
-        foreach (var type in typeCandidates.Distinct().OrderBy(t => t.FullName).Take(400)) Append("TYPE_CANDIDATE " + type.FullName);
-        Append("=== PROJECT SERIALIZATION CANDIDATES ===");
+        Append("=== DIRECT PROJECT SERIALIZATION CANDIDATES ===");
         foreach (var method in methodCandidates.Distinct().OrderBy(m => m.DeclaringType?.FullName).ThenBy(m => m.Name)) Append("METHOD_CANDIDATE " + Describe(method));
 
         Assert(ContainsTimelineMarker(detached, "CNWL_DETACHED_PROJECT_MARKER"), "detached Project contains saved timeline marker");
-        WriteResult("PASS_DETACHED_PROJECT_SERIALIZATION_DISCOVERY", methodCandidates.Distinct().Count(), typeCandidates.Distinct().Count(), projectType.FullName ?? "");
+        WriteResult("PASS_DETACHED_PROJECT_SERIALIZATION_DISCOVERY", methodCandidates.Distinct().Count(), serializerCandidates.Length, projectType.FullName ?? "");
     }
 
     private static bool ContainsTimelineMarker(object root, string marker)
@@ -164,10 +181,10 @@ internal static class Probe
 
     private static string Describe(MemberInfo member) => member switch
     {
-        MethodInfo m => $"METHOD access={(m.IsPublic ? "public" : "nonpublic")} static={m.IsStatic} {m.ReturnType.FullName} {m.DeclaringType?.FullName}::{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))})",
+        MethodInfo m => $"METHOD access={(m.IsPublic ? "public" : "nonpublic")} static={m.IsStatic} generic={m.IsGenericMethodDefinition} {m.ReturnType.FullName} {m.DeclaringType?.FullName}::{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))})",
         ConstructorInfo c => $"CTOR access={(c.IsPublic ? "public" : "nonpublic")} {c.DeclaringType?.FullName}({string.Join(",", c.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))})",
-        PropertyInfo p => $"PROPERTY access={(p.GetMethod?.IsPublic == true ? "public" : "nonpublic")} {p.PropertyType.FullName} {p.Name}",
-        FieldInfo f => $"FIELD access={(f.IsPublic ? "public" : "nonpublic")} {f.FieldType.FullName} {f.Name}",
+        PropertyInfo p => $"PROPERTY access={(p.GetMethod?.IsPublic == true ? "public" : "nonpublic")} static={p.GetMethod?.IsStatic == true} {p.PropertyType.FullName} {p.Name}",
+        FieldInfo f => $"FIELD access={(f.IsPublic ? "public" : "nonpublic")} static={f.IsStatic} {f.FieldType.FullName} {f.Name}",
         _ => member.MemberType + " " + member.DeclaringType?.FullName + "::" + member.Name
     };
 
@@ -183,9 +200,9 @@ internal static class Probe
         Append("ASSERT PASS: " + message);
     }
 
-    private static void WriteResult(string status, int methods, int types, string detail)
+    private static void WriteResult(string status, int directProjectMethods, int jsonCandidates, string detail)
     {
-        File.WriteAllLines(Path.Combine(output, "result.txt"), ["status=" + status, "method_candidate_count=" + methods, "type_candidate_count=" + types, "detail=" + detail], new UTF8Encoding(false));
+        File.WriteAllLines(Path.Combine(output, "result.txt"), ["status=" + status, "direct_project_method_candidate_count=" + directProjectMethods, "json_candidate_count=" + jsonCandidates, "detail=" + detail], new UTF8Encoding(false));
     }
 
     private static void Append(string line) => File.AppendAllText(Path.Combine(output, "surface.txt"), line + Environment.NewLine, new UTF8Encoding(false));
