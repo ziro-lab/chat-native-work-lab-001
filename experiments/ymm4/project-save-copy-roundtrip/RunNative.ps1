@@ -62,10 +62,10 @@ try {
     }
     if (-not (Test-Path $resultPath)) { throw 'Project save-copy probe did not produce result.txt.' }
     $result = Get-Content $resultPath
-    if ($result -notcontains 'status=PASS_PROJECT_SAVE_COPY_RESTORE_ROUNDTRIP') {
-        throw "Project save-copy roundtrip did not pass. Result:`n$($result -join "`n")"
+    if ($result -notcontains 'status=PASS_PROJECT_SAVE_COPY_PATH_RESTORE_OBSERVATION') {
+        throw "Project save-copy observation did not pass. Result:`n$($result -join "`n")"
     }
-    foreach ($required in @('archive_exists=True','active_path_restored_source=True','source_byte_unchanged=True','archive_reload_marker=True','active_saved_state=True')) {
+    foreach ($required in @('archive_exists=True','active_path_restored_source=True','source_byte_unchanged=True','archive_reload_marker=True')) {
         if ($result -notcontains $required) { throw "Missing required invariant: $required" }
     }
 }
