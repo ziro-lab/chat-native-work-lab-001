@@ -15,10 +15,25 @@ The native host:
 5. verifies the live Timeline, live project path/saved state, and source file hash are unchanged;
 6. validates the archive through both `Json.Load<Project>()` and `MainModel.LoadProjectFile()`.
 
+## Observed behavior
+
+PASS on the exact host:
+
+- detached Project/Timeline are separate object instances from the live graph;
+- `Json.Save(detached, archive)` creates a reloadable archive;
+- live path, live saved state and live Timeline are unchanged;
+- source `.ymmp` remains byte-for-byte unchanged;
+- both `Json.Load<Project>` and `MainModel.LoadProjectFile` reload the detached archive marker.
+
 ## PASS boundary
 
 A PASS proves a non-destructive native serialization route exists for archive-project creation on YMM4 v4.56.1.0 without using live Save As.
 
-## NOT PROVEN
+The later `recording-archive-integrated-spine` experiment additionally proves selected-scene pruning plus VideoItem relinking on top of this serialization spine.
 
-This experiment does not by itself prove every product mutation (scene pruning, VideoItem relinking, third-party plugin payloads). Those remain product integration tests, but they can use this proven serialization spine.
+## Evidence
+
+- Source head: `7450eb3d9b92cbb67c40f2ceac10f80b0ab6c5bd`
+- Workflow run: `35113196633`
+- Artifact: `10453980369`
+- Artifact SHA256: `aed5da044229ea23ac1896c55bb4b96215338aa30c2bc1f6ae6269dbde525c4f`

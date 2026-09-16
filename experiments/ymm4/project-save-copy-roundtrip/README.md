@@ -1,53 +1,47 @@
-# Project archive save-copy roundtrip
+# Project save-copy path observation
 
 ## Question
 
-On YMM4 v4.56.1.0, can a loaded Plugin create a second `.ymmp` through the native save path while keeping the original Project path active and leaving the original file byte-for-byte unchanged?
+On YMM4 v4.56.1.0, can the live Project use native `SaveProject(archive)` as a non-disruptive archive-copy operation while keeping the original Project active?
 
 ## Status
+
+**PASS — the live Save-As route is unsuitable for the recording-archive product contract.**
 
 - Date: 2026-09-16
 - YMM4 version: **v4.56.1.0 Lite**
 - Evidence type: native automated behavior
-- Current state: prepared; PASS requires the native Actions run.
 
-## Preconditions from discovery
+## Observed behavior
 
-The earlier `project-save-archive-surface` experiment proved that the pinned host exposes:
+A disposable live Project was saved to `source.ymmp`, then saved again to `archive.ymmp` with `KeepProjectPath=true`.
 
-- `MainViewModel.SaveProject(string)`
-- `MainViewModel.KeepProjectPath`
-- `MainModel.ProjectFilePath`
-- `MainModel.LoadProjectFile(string)`
+Observed on the exact host:
 
-This experiment tests one exact route rather than doing more reflection discovery.
+- `archive.ymmp` is created and reloadable;
+- `source.ymmp` remains byte-for-byte unchanged;
+- `KeepProjectPath=true` does **not** keep the live active path on `source.ymmp`; the live path becomes `archive.ymmp`;
+- calling public `MainModel.ChangeProjectPath(source)` restores the path text, but the live model becomes unsaved (`IsProjectFileSaved=false`).
 
-## Procedure
-
-Inside the real YMM4 host on a disposable new Project:
-
-1. Rename the active Timeline to a deterministic marker.
-2. Call native `MainViewModel.SaveProject(source.ymmp)`.
-3. Record active `MainModel.ProjectFilePath` and SHA256 of `source.ymmp`.
-4. Set `MainViewModel.KeepProjectPath = true`.
-5. Call native `MainViewModel.SaveProject(archive.ymmp)`.
-6. Restore the previous `KeepProjectPath` value.
-7. Assert `archive.ymmp` exists.
-8. Assert active `MainModel.ProjectFilePath` still identifies `source.ymmp`.
-9. Assert SHA256 of `source.ymmp` is unchanged by the archive save.
-10. Call public `MainModel.LoadProjectFile(archive.ymmp)` and assert it returns a Project.
-11. Verify the loaded archive contains the deterministic Timeline marker.
+Therefore live Save-As + path restore does not satisfy the desired invariant that archive generation must leave the user's open Project completely untouched.
 
 ## PASS boundary
 
-PASS proves that this exact native route can create a reloadable archive Project copy without switching away from or rewriting the original Project file on YMM4 v4.56.1.0.
+PASS proves only the observation above for YMM4 v4.56.1.0. In particular, it proves that this live Save-As route should **not** be used as the recording-archive implementation spine.
 
-It does **not** prove safe scene removal or VideoItem relinking; those remain separate transformations to perform on a disposable archive model/copy before final save.
+It also proves that the archive file itself is valid/reloadable and that native SaveProject does not rewrite the original source file.
 
-## Safety
+## Adopted downstream decision
 
-Only files under the workflow's temporary evidence directory are created. No user Project or persistent YMM4 state is used.
+Use a detached archive graph instead:
 
-## Downstream impact
+`LoadProjectFile(source) -> detached Project -> detached-only mutation -> Json.Save(archive) -> LoadProjectFile(archive) validation`
 
-A PASS lets the recording-archive plugin prefer native `SaveProject(path)` with `KeepProjectPath=true` for final archive output rather than directly serializing the live original `.ymmp`.
+That route is separately proven by `detached-project-json-save-roundtrip` and the integrated recording-archive spine.
+
+## Evidence
+
+- Source head: `7450eb3d9b92cbb67c40f2ceac10f80b0ab6c5bd`
+- Workflow run: `35113196362`
+- Artifact: `10453940616`
+- Artifact SHA256: `98ea36b07ae5be82ba52ab795a8595483a803f3f6a36a1744bbc8a55680d60a6`
