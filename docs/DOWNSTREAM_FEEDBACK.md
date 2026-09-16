@@ -77,6 +77,107 @@ small public experiment
 → human/user acceptance where needed
 ```
 
+### 6. Functional acceptance and UI/UX acceptance should be separate claims
+
+The downstream v0.4.2 work reached a point where the intended features existed and were functionally correct, but the UI still exposed too much of the implementation taxonomy and relation-engine parameter model.
+
+That made one lesson explicit:
+
+> a feature being present and executable is not proof that the user-facing workflow matches the user's editing model.
+
+For UI-heavy experiments or product proofs, define a separate UI/UX acceptance layer when appropriate. Examples of claims worth checking independently are:
+
+- selecting an Item reveals only meaningful actions for that context;
+- intent, reusable Set and concrete action are distinct interaction levels;
+- a high-frequency action is one direct action after setup, without asking again for lower-level engine choices;
+- navigation and Set switching are zero-mutation operations;
+- an empty state leads to the correct recovery action instead of only explaining that nothing is available;
+- settings use progressive disclosure so irrelevant parameters are actually hidden for the current choice.
+
+Do not infer those properties merely because the underlying commands and settings model exist.
+
+### 7. `IsVisible` is weaker evidence than physical layout containment
+
+The downstream UI proof initially checked WPF visibility state and captured screenshots. Manual review of the resulting evidence showed that a control can be logically visible while a test-sized host surface still makes the lower edge look clipped or ambiguous.
+
+For narrow-window acceptance, a stronger pattern is:
+
+```text
+assert semantic visibility/state
+→ assert ActualWidth/ActualHeight are non-zero
+→ translate the important control bounds into the tested surface
+→ assert the complete bounds remain inside that surface
+→ capture a screenshot for human audit
+```
+
+A screenshot is useful corroborating evidence, but it should not be the only machine-checkable UI claim. Likewise, `IsVisible == true` alone should not be treated as proof that the action is physically discoverable in the tested viewport.
+
+### 8. Packaging / installation behavior is a separate acceptance boundary
+
+The downstream plugin exposed an installation failure mode that a normal DLL load test would not catch.
+
+A versioned outer package filename does not by itself define a safe upgrade path. For the tested YMM4 `.ymme` behavior, the archive's top-level plugin directory affected the installation directory. A package layout that effectively created version-named plugin directories could leave old and new Candidate versions installed side by side instead of upgrading one stable plugin location.
+
+The downstream fix used a stable internal install root independent of the outer package version, for example:
+
+```text
+PluginName-v0.4.2.ymme
+└─ PluginName/
+   ├─ PluginName.dll
+   └─ ...
+```
+
+The package proof then checked the archive paths themselves, not only file existence:
+
+- every allowlisted payload file is below the one stable internal plugin root;
+- no plugin DLL exists at a flat archive root;
+- no version-named internal plugin root is accepted;
+- the DLL archived in the installer package has the same hash as the distribution DLL that passed the native host smoke test;
+- upgrade cleanup instructions are explicit if an earlier Candidate used a bad install layout.
+
+The general lesson is:
+
+> "the plugin binary loads" and "the package installs/upgrades into the intended location" are different claims and need different evidence.
+
+### 9. Acceptance evidence should not certify itself
+
+The downstream release lane generated acceptance manifests, but final packaging did not trust the producer's own `PASS` flag alone. A separate consumer validated the manifest identity, version, required stage set, unique requirement IDs and failure markers.
+
+Negative fixtures deliberately removed or corrupted required evidence and had to be rejected. Useful corruption cases include:
+
+- missing required stage;
+- duplicate stage or requirement ID;
+- old manifest version;
+- explicit failed requirement;
+- missing requirement;
+- weakened required-stage list;
+- wrong host identity;
+- failure text present in the native log.
+
+For high-value release evidence, prefer:
+
+```text
+producer creates evidence
+→ independent consumer validates structure + semantics
+→ negative tests prove the consumer rejects weakened evidence
+```
+
+rather than allowing the producer to define and approve its own success contract.
+
+### 10. Keep claim layers explicit
+
+The downstream work is easier to reason about when these claims stay separate:
+
+```text
+native host/API behavior
+→ product functional integration
+→ product UI/UX behavior
+→ package/install/upgrade behavior
+→ real-user acceptance
+```
+
+Passing one layer should never silently imply the later layers. This separation also makes regressions easier to localize: a package-layout defect does not invalidate a proven placement algorithm, and a UI mental-model defect does not mean the native host API experiment was wrong.
+
 ## Shared-helper threshold
 
 The YMM4 lab now has several independent workflows that repeat host download, hash verification and launch setup. This is enough evidence to consider a **small** shared helper for those repeated mechanics when the next experiment needs it.
