@@ -61,23 +61,21 @@ public sealed class PluginEntry : ILocalizePlugin
                 "content offset is additive at zero rate");
 
             evidence.AppendLine("=== NEGATIVE_RATE_ATTEMPT ===");
-            try
+            animation.SetFirstValue(-100);
+            animation.SetAnimationParameters(video.Length, fps);
+            evidence.AppendLine($"negative First={animation.GetFirstValue()} HasErrors={animation.HasErrors} Min={animation.MinValue}");
+            var negativeMap = mapProperty.GetValue(video)!;
+            evidence.AppendLine($"negative map IsConstant={Read(negativeMap, "IsConstant")} FirstRate={Read(negativeMap, "FirstRate")}");
+            foreach (var seconds in new[] { 0d, 1d, 2.5d, 4.9d })
             {
-                animation.SetFirstValue(-100);
-                animation.SetAnimationParameters(video.Length, fps);
-                evidence.AppendLine($"negative First={animation.GetFirstValue()} HasErrors={animation.HasErrors} Min={animation.MinValue}");
-                var negativeMap = mapProperty.GetValue(video)!;
-                evidence.AppendLine($"negative map IsConstant={Read(negativeMap, "IsConstant")} FirstRate={Read(negativeMap, "FirstRate")}");
-                var negGet = GetSourceMethod(negativeMap);
-                foreach (var seconds in new[] { 0d, 1d, 2.5d, 4.9d })
-                    evidence.AppendLine($"negative t={seconds:F3} source={Source(negGet, negativeMap, seconds, 10):F9}");
-                var consumed = GetConsumedRange(negativeMap, video.Length, fps);
-                if (consumed != null) DumpObject(evidence, "negative ConsumedContentRange", consumed);
+                var row = SourceWithOrigin(negativeMap, seconds, 10, 30);
+                evidence.AppendLine($"negative30 t={seconds:F3} source={row.Source:F9} startsEnd={row.StartsFromEnd}");
+                Check(row.StartsFromEnd, $"negative rate starts from content end at t={seconds}");
             }
-            catch (Exception ex)
-            {
-                evidence.AppendLine("negative rejected: " + ex.GetBaseException().GetType().FullName + ": " + ex.GetBaseException().Message);
-            }
+            var negativeConsumed = GetConsumedRange(negativeMap, video.Length, fps);
+            if (negativeConsumed != null) DumpObject(evidence, "negative ConsumedContentRange", negativeConsumed);
+            CheckArchiveTranslation(evidence, negativeMap, oldOffset: 10, oldContentLength: 30,
+                clipStart: 12, clipContentLength: 13, "constant negative rate archive translation");
 
             evidence.AppendLine("=== ANIMATION_TYPES_FROM50_TO200 ===");
             var typeProperty = animation.GetType().GetProperty("AnimationType") ?? throw new Exception("AnimationType property missing");
@@ -112,6 +110,29 @@ public sealed class PluginEntry : ILocalizePlugin
                 }
             }
 
+            var linear = Enum.GetValues(animation.AnimationType.GetType()).Cast<object>()
+                .First(x => x.ToString() == "直線移動");
+
+            evidence.AppendLine("=== MIXED_POSITIVE_TO_NEGATIVE ===");
+            fromProperty.SetValue(animation, 100d);
+            toProperty.SetValue(animation, -100d);
+            typeProperty.SetValue(animation, linear);
+            animation.SetAnimationParameters(video.Length, fps);
+            var positiveToNegative = mapProperty.GetValue(video)!;
+            DumpObject(evidence, "positive-to-negative range", GetConsumedRange(positiveToNegative, video.Length, fps)!);
+            CheckArchiveTranslation(evidence, positiveToNegative, oldOffset: 10, oldContentLength: 30,
+                clipStart: 8, clipContentLength: 6, "positive-to-negative variable archive translation");
+
+            evidence.AppendLine("=== MIXED_NEGATIVE_TO_POSITIVE ===");
+            fromProperty.SetValue(animation, -100d);
+            toProperty.SetValue(animation, 100d);
+            typeProperty.SetValue(animation, linear);
+            animation.SetAnimationParameters(video.Length, fps);
+            var negativeToPositive = mapProperty.GetValue(video)!;
+            DumpObject(evidence, "negative-to-positive range", GetConsumedRange(negativeToPositive, video.Length, fps)!);
+            CheckArchiveTranslation(evidence, negativeToPositive, oldOffset: 5, oldContentLength: 30,
+                clipStart: 20, clipContentLength: 8, "negative-to-positive variable archive translation");
+
             File.WriteAllText(Path.Combine(output, "rate-modes.txt"), evidence.ToString(), new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(output, "result.txt"), $"status=PASS_ARCHIVE_RATE_MODES_SURFACE\nassertions={assertions}\n", new UTF8Encoding(false));
         }
@@ -128,6 +149,24 @@ public sealed class PluginEntry : ILocalizePlugin
             assertions++;
             evidence.AppendLine("PASS: " + name);
         }
+
+        void CheckArchiveTranslation(StringBuilder text, object map, double oldOffset, double oldContentLength,
+            double clipStart, double clipContentLength, string name)
+        {
+            var oldAnchor = SourceWithOrigin(map, 0, oldOffset, oldContentLength);
+            var desiredLocalAnchor = oldAnchor.Source - clipStart;
+            var newOffset = oldAnchor.StartsFromEnd ? clipContentLength - desiredLocalAnchor : desiredLocalAnchor;
+            text.AppendLine($"TRANSLATE {name}: oldAnchor={oldAnchor.Source:F9} startsEnd={oldAnchor.StartsFromEnd} clipStart={clipStart:F9} clipLength={clipContentLength:F9} newOffset={newOffset:F9}");
+            Check(newOffset >= -1e-9, name + " produces nonnegative ContentOffset");
+            foreach (var seconds in new[] { 0d, 0.5d, 1d, 2.5d, 4.9d })
+            {
+                var old = SourceWithOrigin(map, seconds, oldOffset, oldContentLength);
+                var local = SourceWithOrigin(map, seconds, newOffset, clipContentLength);
+                text.AppendLine($"  t={seconds:F3} old={old.Source:F9} local={local.Source:F9} expected={old.Source - clipStart:F9} oldEnd={old.StartsFromEnd} localEnd={local.StartsFromEnd}");
+                Check(old.StartsFromEnd == local.StartsFromEnd, name + $" preserves origin direction at t={seconds}");
+                Check(Math.Abs(local.Source - (old.Source - clipStart)) < 2e-6, name + $" preserves source mapping at t={seconds}");
+            }
+        }
     }
 
     private static MethodInfo GetSourceMethod(object map) => map.GetType().GetMethod("GetSourceTime", new[] { typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan) })
@@ -136,6 +175,15 @@ public sealed class PluginEntry : ILocalizePlugin
     private static double Source(MethodInfo method, object map, double itemSeconds, double offsetSeconds) =>
         ((TimeSpan)(method.Invoke(map, new object[] { TimeSpan.FromSeconds(itemSeconds), 300, 60, TimeSpan.FromSeconds(offsetSeconds), TimeSpan.FromSeconds(1000) })
             ?? throw new Exception("source time missing"))).TotalSeconds;
+
+    private static (double Source, bool StartsFromEnd) SourceWithOrigin(object map, double itemSeconds, double offsetSeconds, double contentLengthSeconds)
+    {
+        var method = map.GetType().GetMethod("GetSourceTime", new[] { typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan), typeof(bool).MakeByRefType() })
+            ?? throw new Exception("GetSourceTime(..., out bool) missing");
+        object[] args = { TimeSpan.FromSeconds(itemSeconds), 300, 60, TimeSpan.FromSeconds(offsetSeconds), TimeSpan.FromSeconds(contentLengthSeconds), false };
+        var source = (TimeSpan)(method.Invoke(map, args) ?? throw new Exception("source time missing"));
+        return (source.TotalSeconds, (bool)args[5]);
+    }
 
     private static object? GetConsumedRange(object map, int length, int fps) =>
         map.GetType().GetMethod("GetConsumedContentRange", new[] { typeof(int), typeof(int) })?.Invoke(map, new object[] { length, fps });
