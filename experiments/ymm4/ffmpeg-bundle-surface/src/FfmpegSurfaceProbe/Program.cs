@@ -18,6 +18,7 @@ AssemblyLoadContext.Default.Resolving += (_, name) =>
 };
 
 var lines = new List<string>();
+Type? locatorType = null;
 foreach (var path in Directory.EnumerateFiles(root, "YukkuriMovieMaker*.dll", SearchOption.TopDirectoryOnly).OrderBy(x => x))
 {
     try
@@ -25,6 +26,7 @@ foreach (var path in Directory.EnumerateFiles(root, "YukkuriMovieMaker*.dll", Se
         var asm = AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
         foreach (var type in SafeTypes(asm))
         {
+            if (type.FullName == "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegResourceLocator") locatorType = type;
             var typeHit = Contains(type.FullName);
             var members = type.GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
                 .Where(m => Contains(m.Name) || (m is MethodInfo mi && (Contains(mi.ReturnType.FullName) || mi.GetParameters().Any(p => Contains(p.ParameterType.FullName)))) || (m is PropertyInfo pi && Contains(pi.PropertyType.FullName)))
@@ -40,6 +42,47 @@ foreach (var path in Directory.EnumerateFiles(root, "YukkuriMovieMaker*.dll", Se
         lines.Add($"ASSEMBLY_ERROR {Path.GetFileName(path)} {ex.GetBaseException().Message}");
     }
 }
+
+if (locatorType != null)
+{
+    lines.Add("=== LOCATOR INVOCATION ===");
+    foreach (var name in new[] { "GetFFmpegDirectory", "GetFFmpegDllDirectory", "GetFFmpegExePath", "GetUserFFmpegDirectory" })
+    {
+        try
+        {
+            var method = locatorType.GetMethod(name, BindingFlags.Public | BindingFlags.Static, Type.EmptyTypes)
+                ?? throw new MissingMethodException(locatorType.FullName, name);
+            var value = method.Invoke(null, null) as string ?? "";
+            lines.Add($"LOCATOR {name}={value}");
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                var exists = name.EndsWith("Path", StringComparison.Ordinal) ? File.Exists(value) : Directory.Exists(value);
+                lines.Add($"LOCATOR_EXISTS {name}={exists}");
+            }
+        }
+        catch (Exception ex)
+        {
+            lines.Add($"LOCATOR_ERROR {name} {ex.GetBaseException().Message}");
+        }
+    }
+
+    try
+    {
+        var dir = locatorType.GetMethod("GetFFmpegDirectory", BindingFlags.Public | BindingFlags.Static, Type.EmptyTypes)?.Invoke(null, null) as string ?? "";
+        var probe = string.IsNullOrWhiteSpace(dir) ? "" : Path.Combine(dir, "ffprobe.exe");
+        lines.Add($"DERIVED_FFPROBE={probe}");
+        lines.Add($"DERIVED_FFPROBE_EXISTS={(!string.IsNullOrWhiteSpace(probe) && File.Exists(probe))}");
+    }
+    catch (Exception ex)
+    {
+        lines.Add($"DERIVED_FFPROBE_ERROR {ex.GetBaseException().Message}");
+    }
+}
+else
+{
+    lines.Add("LOCATOR_TYPE_MISSING");
+}
+
 File.WriteAllLines(output, lines);
 Console.WriteLine($"hits={lines.Count}");
 return 0;
