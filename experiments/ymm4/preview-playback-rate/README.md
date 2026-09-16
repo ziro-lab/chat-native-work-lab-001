@@ -83,6 +83,6 @@ Migrate a minimal playback-rate probe into this repository and run it against an
 
 This observation is the basis for the initial Garage candidate:
 
-- [`ziro-lab/ymm4-plugin-garage` — `plugins/preview-dopagaki/`](https://github.com/ziro-lab/ymm4-plugin-garage/tree/main/plugins/preview-dopagaki)
+- [`YMM4 プレビュー再生速度拡張プラグイン`](https://github.com/ziro-lab/ymm4-plugin-garage/tree/main/plugins/preview-speed-extension)
 
 The intended plugin should **reuse YMM4's native playback-rate path** and only make high rates easier to select. It should not implement its own high-speed video/audio engine unless a later Lab experiment proves that native behavior is insufficient.
