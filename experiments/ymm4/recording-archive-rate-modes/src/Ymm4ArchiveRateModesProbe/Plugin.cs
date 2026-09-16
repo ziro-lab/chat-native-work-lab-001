@@ -24,6 +24,9 @@ public sealed class PluginEntry : ILocalizePlugin
             const int fps = 60;
             var animation = video.PlaybackRate2;
             DumpType(evidence, "ANIMATION", animation.GetType());
+            evidence.AppendLine($"ANIMATION_DEFAULTS Default={animation.DefaultValue} Min={animation.MinValue} Max={animation.MaxValue} Loop={animation.Loop} First={animation.GetFirstValue()} Type={animation.AnimationType}");
+            evidence.AppendLine("ANIMATION_TYPE_ENUM=" + string.Join(",", Enum.GetNames(animation.AnimationType.GetType())));
+            if (animation.KeyFrames != null) DumpType(evidence, "KEYFRAMES", animation.KeyFrames.GetType());
             DumpMatchingMembers(evidence, "VIDEOITEM_DIRECTION_MEMBERS", typeof(VideoItem),
                 "reverse", "backward", "direction", "loop", "ping", "playback");
 
@@ -36,33 +39,76 @@ public sealed class PluginEntry : ILocalizePlugin
                 animation.SetAnimationParameters(video.Length, fps);
                 var map = mapProperty.GetValue(video) ?? throw new Exception("map missing");
                 if (rate == 0) DumpType(evidence, "PLAYBACK_RATE_MAP", map.GetType());
-                var getSourceTime = map.GetType().GetMethod("GetSourceTime", new[] { typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan) })
-                    ?? throw new Exception("GetSourceTime missing");
-                var consumed = map.GetType().GetMethod("GetConsumedContentRange", new[] { typeof(int), typeof(int) })?.Invoke(map, new object[] { video.Length, fps });
+                var getSourceTime = GetSourceMethod(map);
+                var consumed = GetConsumedRange(map, video.Length, fps);
                 evidence.AppendLine($"RATE {rate}");
                 evidence.AppendLine($"  IsConstant={Read(map, "IsConstant")}");
                 evidence.AppendLine($"  FirstRate={Read(map, "FirstRate")}");
                 if (consumed != null) DumpObject(evidence, "  ConsumedContentRange", consumed);
                 foreach (var seconds in new[] { 0d, 1d, 2.5d, 4.9d })
                 {
-                    var source = (TimeSpan)(getSourceTime.Invoke(map, new object[] { TimeSpan.FromSeconds(seconds), video.Length, fps, video.ContentOffset, TimeSpan.FromSeconds(100) })
-                        ?? throw new Exception("source time missing"));
-                    evidence.AppendLine($"  t={seconds:F3} source={source.TotalSeconds:F9}");
-                    if (rate == 0)
-                    {
-                        Check(Math.Abs(source.TotalSeconds - 10) < 1e-9, $"zero rate freezes source time at offset for t={seconds}");
-                    }
+                    var source = Source(getSourceTime, map, seconds, 10);
+                    evidence.AppendLine($"  t={seconds:F3} source={source:F9}");
+                    if (rate == 0) Check(Math.Abs(source - 10) < 1e-9, $"zero rate freezes source time at offset for t={seconds}");
                 }
             }
 
             animation.SetFirstValue(0);
             animation.SetAnimationParameters(video.Length, fps);
             var zeroMap = mapProperty.GetValue(video)!;
-            var zeroGet = zeroMap.GetType().GetMethod("GetSourceTime", new[] { typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan) })!;
-            static double Get(MethodInfo m, object map, TimeSpan offset) => ((TimeSpan)m.Invoke(map,
-                new object[] { TimeSpan.FromSeconds(2), 300, 60, offset, TimeSpan.FromSeconds(100) })!).TotalSeconds;
-            Check(Math.Abs((Get(zeroGet, zeroMap, TimeSpan.FromSeconds(10)) - Get(zeroGet, zeroMap, TimeSpan.FromSeconds(3))) - 7) < 1e-9,
+            var zeroGet = GetSourceMethod(zeroMap);
+            Check(Math.Abs((Source(zeroGet, zeroMap, 2, 10) - Source(zeroGet, zeroMap, 2, 3)) - 7) < 1e-9,
                 "content offset is additive at zero rate");
+
+            evidence.AppendLine("=== NEGATIVE_RATE_ATTEMPT ===");
+            try
+            {
+                animation.SetFirstValue(-100);
+                animation.SetAnimationParameters(video.Length, fps);
+                evidence.AppendLine($"negative First={animation.GetFirstValue()} HasErrors={animation.HasErrors} Min={animation.MinValue}");
+                var negativeMap = mapProperty.GetValue(video)!;
+                evidence.AppendLine($"negative map IsConstant={Read(negativeMap, "IsConstant")} FirstRate={Read(negativeMap, "FirstRate")}");
+                var negGet = GetSourceMethod(negativeMap);
+                foreach (var seconds in new[] { 0d, 1d, 2.5d, 4.9d })
+                    evidence.AppendLine($"negative t={seconds:F3} source={Source(negGet, negativeMap, seconds, 10):F9}");
+                var consumed = GetConsumedRange(negativeMap, video.Length, fps);
+                if (consumed != null) DumpObject(evidence, "negative ConsumedContentRange", consumed);
+            }
+            catch (Exception ex)
+            {
+                evidence.AppendLine("negative rejected: " + ex.GetBaseException().GetType().FullName + ": " + ex.GetBaseException().Message);
+            }
+
+            evidence.AppendLine("=== ANIMATION_TYPES_FROM50_TO200 ===");
+            var typeProperty = animation.GetType().GetProperty("AnimationType") ?? throw new Exception("AnimationType property missing");
+            foreach (var enumValue in Enum.GetValues(animation.AnimationType.GetType()).Cast<object>())
+            {
+                try
+                {
+                    animation.SetFirstValue(100);
+                    animation.From = 50;
+                    animation.To = 200;
+                    typeProperty.SetValue(animation, enumValue);
+                    animation.SetAnimationParameters(video.Length, fps);
+                    evidence.AppendLine($"ANIM {enumValue} values=" + string.Join(",", new[] { 0L, 60L, 150L, 240L, 299L }.Select(f => animation.GetValue(f, video.Length, fps).ToString("F6", CultureInfo.InvariantCulture))));
+                    var map = mapProperty.GetValue(video)!;
+                    evidence.AppendLine($"  map IsConstant={Read(map, "IsConstant")} FirstRate={Read(map, "FirstRate")}");
+                    var consumed = GetConsumedRange(map, video.Length, fps);
+                    if (consumed != null) DumpObject(evidence, "  ConsumedContentRange", consumed);
+                    var get = GetSourceMethod(map);
+                    foreach (var seconds in new[] { 0d, 1d, 2.5d, 4.9d })
+                    {
+                        var at10 = Source(get, map, seconds, 10);
+                        var at3 = Source(get, map, seconds, 3);
+                        evidence.AppendLine($"  t={seconds:F3} source10={at10:F9} source3={at3:F9} delta={at10 - at3:F9}");
+                        Check(Math.Abs((at10 - at3) - 7) < 1e-7, $"content offset stays additive for animation {enumValue} at t={seconds}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    evidence.AppendLine($"ANIM {enumValue} ERROR {ex.GetBaseException().GetType().Name}: {ex.GetBaseException().Message}");
+                }
+            }
 
             File.WriteAllText(Path.Combine(output, "rate-modes.txt"), evidence.ToString(), new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(output, "result.txt"), $"status=PASS_ARCHIVE_RATE_MODES_SURFACE\nassertions={assertions}\n", new UTF8Encoding(false));
@@ -81,6 +127,16 @@ public sealed class PluginEntry : ILocalizePlugin
             evidence.AppendLine("PASS: " + name);
         }
     }
+
+    private static MethodInfo GetSourceMethod(object map) => map.GetType().GetMethod("GetSourceTime", new[] { typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan) })
+        ?? throw new Exception("GetSourceTime missing");
+
+    private static double Source(MethodInfo method, object map, double itemSeconds, double offsetSeconds) =>
+        ((TimeSpan)(method.Invoke(map, new object[] { TimeSpan.FromSeconds(itemSeconds), 300, 60, TimeSpan.FromSeconds(offsetSeconds), TimeSpan.FromSeconds(1000) })
+            ?? throw new Exception("source time missing"))).TotalSeconds;
+
+    private static object? GetConsumedRange(object map, int length, int fps) =>
+        map.GetType().GetMethod("GetConsumedContentRange", new[] { typeof(int), typeof(int) })?.Invoke(map, new object[] { length, fps });
 
     private static object? Read(object value, string name) => value.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public)?.GetValue(value);
 
