@@ -19,7 +19,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet --list-sdks | Tee-Object dotnet-sdks.txt
-          if(-not (Select-String dotnet-sdks.txt '^10\.')){ throw '.NET 10 missing' }
+          if(-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')){ throw '.NET 10 missing' }
       - name: Download and expand exact YMM4 Lite
         shell: pwsh
         run: |
