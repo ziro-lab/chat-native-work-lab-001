@@ -2,34 +2,58 @@
 
 ## Question
 
-Can a real Timeline Tool on YMM4 Lite 4.56.1.0 receive the current Timeline, obtain a public FPS context and selected VideoItems, retain their session-local references independently of selection, and navigate the public integer playhead without editing the Items?
+Can a real Timeline Tool receive the current Timeline, obtain public FPS metadata and selected VideoItems, retain session-local references independently of selection, and navigate the integer playhead without editing the Items?
 
-This is a narrow version-update/context probe for Highlight Navigator W1. It does not modify the recording-archive experiments or rediscover their already-proven PlaybackRateMap formula.
+This version-update/context experiment supports Highlight Navigator W1. It does not modify recording-archive experiments or rediscover their PlaybackRateMap formula.
 
 ## Reuse
 
-- Recording-archive evidence at `0b69aed70a3f8a84cc2ede539d794cb4e8108677`: PlaybackRate2, map method signatures and constant-positive source-time meaning.
-- Selection and playhead experiments on 4.55.1.1: hypotheses to revalidate on 4.56.1.0, not evidence of compatibility by themselves.
+- Recording-archive evidence at `0b69aed70a3f8a84cc2ede539d794cb4e8108677`: PlaybackRate2 and native map semantics.
+- Selection/playhead experiments on 4.55.1.1 supplied hypotheses, not proof of compatibility with 4.56.1.0.
 
-## Procedure / required claims
+## Observed result — PASS
 
-The runner generates a disposable MP4 and starts the pinned real host. A real Tool menu command opens the registered Timeline Tool; its SetTimelineToolInfo callback must be received. The probe reads public FPS metadata, inserts two separate VideoItems using the same source, snapshots their references, changes selection, and checks that the snapshot and Item parameters remain unchanged. It then exercises integer Timeline.CurrentFrame and a non-frame-aligned source timestamp through the host map. The rounding-to-frame policy is a product decision: this probe records a fractional item-local result rather than pretending that it establishes a universal host rounding rule.
+Real YMM4 Lite **4.56.1.0**, release SHA256 `49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a`.
 
-Required IDs are independently enumerated in RunNative.ps1. The producer cannot reduce the requirement set and still pass. Output contains checkout/source identity, host version, requirement results and the exact FPS access path.
+All 16 independently required assertions passed; build warnings/errors were 0/0.
+
+- Actual Tool menu invocation delivered `ITimelineToolViewModel.SetTimelineToolInfo`.
+- `TimelineToolInfo.Timeline` is public.
+- Public FPS path is **`Timeline.VideoInfo.FPS`**, observed value 60.
+- Public `Timeline.SelectedItems` yielded two separate `VideoItem` objects pointing at the same generated recording.
+- A saved array of object references remained intact and those Items remained in `Timeline.Items` after selection was cleared. Selection notifications were observed.
+- Public integer `Timeline.CurrentFrame` accepted/read back positions in both Item occurrences.
+- The adopted native PlaybackRateMap returned a fractional item-local inverse time of **0.5173 seconds**. A consumer-selected ceiling policy mapped that to local frame 32 at 60fps.
+- The recorded Item parameters were unchanged by the navigation operations.
+
+The ceiling choice is a **product rounding policy**, not a claim that the host rounds all timestamps that way. Consumers must check that the chosen frame actually lies inside the candidate and the half-open Item interval.
+
+## Evidence
+
+- Source head / tested checkout: `3b52a3acff544ed0ec759d657f48364a415c485c`
+- Source tree: `19d3b10569103addb79c63653ed0c8e49f85b1d4`
+- [Workflow run 35120206452](https://github.com/ziro-lab/chat-native-work-lab-001/actions/runs/35120206452)
+- Job: `104875765200`
+- Artifact: `10457134077`
+- Artifact ZIP SHA256: `78b2b65c8ea6e7438e0f79775388d2d5a6d8159df25a69f0038ec5650931d2ab`
+- Result: `PASS_NAVIGATION_CONTEXT`
+- Actual FPS path: `Timeline.VideoInfo.FPS`
+
+`RunNative.ps1` enumerates the required IDs independently of the producer and rejects missing/duplicate/failed assertions, wrong schema/host/checkout or stale evidence. This documentation-only update does not change tested code or need another host run.
 
 ## PASS boundary
 
-After a successful run, PASS establishes only the named model/API assertions on 4.56.1.0. Session object-reference identity is not a durable identity across project reloads. Consumers must invalidate/rebind targets when the Timeline/Project instance changes and reject detached/changed Items.
+PASS establishes the named model/API assertions only on the pinned host. Session object-reference identity is not durable identity across project reloads. Consumers must invalidate/rebind targets when the Timeline/Project instance changes, and reject detached or changed Items.
 
 ## NOT PROVEN
 
-- physical keyboard/mouse interaction or decoded preview-frame correspondence;
-- stable item identity across restart, project reload, deletion/recreation or Undo/Redo;
-- animated, zero, negative, reverse or non-monotonic playback;
-- other YMM4 versions;
+- physical keyboard/mouse operation or decoded preview-frame correspondence;
+- stable identity across restart, project reload, deletion/recreation or Undo/Redo;
+- animated, zero, reverse, negative or non-monotonic rates;
+- arbitrary FPS values, other YMM4 versions;
 - Navigator product integration, end-user UX or installation;
 - archive cutting, relinking or saving.
 
-## Status
+## Downstream use
 
-PREPARED. Native acceptance is recorded after the workflow finishes. Never infer PASS from build-only or artifact-upload success.
+Navigator may use the public Timeline/FPS/selection/playhead surfaces and keep a session reference locator behind its host adapter. Product tests still need explicit snapshot lifetime, stale-target rejection, same-source multi-occurrence projection and real Plugin integration checks. This PASS is not a blanket W1 product PASS.
