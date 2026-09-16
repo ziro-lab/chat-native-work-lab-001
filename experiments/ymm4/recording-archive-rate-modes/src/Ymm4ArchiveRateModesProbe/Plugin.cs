@@ -81,13 +81,15 @@ public sealed class PluginEntry : ILocalizePlugin
 
             evidence.AppendLine("=== ANIMATION_TYPES_FROM50_TO200 ===");
             var typeProperty = animation.GetType().GetProperty("AnimationType") ?? throw new Exception("AnimationType property missing");
+            var fromProperty = animation.GetType().GetProperty("From") ?? throw new Exception("From property missing");
+            var toProperty = animation.GetType().GetProperty("To") ?? throw new Exception("To property missing");
             foreach (var enumValue in Enum.GetValues(animation.AnimationType.GetType()).Cast<object>())
             {
                 try
                 {
                     animation.SetFirstValue(100);
-                    animation.From = 50;
-                    animation.To = 200;
+                    fromProperty.SetValue(animation, 50d);
+                    toProperty.SetValue(animation, 200d);
                     typeProperty.SetValue(animation, enumValue);
                     animation.SetAnimationParameters(video.Length, fps);
                     evidence.AppendLine($"ANIM {enumValue} values=" + string.Join(",", new[] { 0L, 60L, 150L, 240L, 299L }.Select(f => animation.GetValue(f, video.Length, fps).ToString("F6", CultureInfo.InvariantCulture))));
