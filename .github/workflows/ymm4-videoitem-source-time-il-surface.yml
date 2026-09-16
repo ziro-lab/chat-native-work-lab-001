@@ -1,0 +1,79 @@
+name: YMM4 VideoItem source-time IL surface
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/recording-archive-behavior]
+    paths:
+      - 'experiments/ymm4/videoitem-source-time-il-surface/**'
+      - '.github/workflows/ymm4-videoitem-source-time-il-surface.yml'
+  pull_request:
+    paths:
+      - 'experiments/ymm4/videoitem-source-time-il-surface/**'
+      - '.github/workflows/ymm4-videoitem-source-time-il-surface.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-videoitem-source-time-il-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-static-inspection:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK missing' }
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 exe missing.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe | Out-Null
+          dotnet build experiments/ymm4/videoitem-source-time-il-surface/src/Ymm4SourceTimeIlProbe/Ymm4SourceTimeIlProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Source-time IL probe build failed.' }
+      - name: Install probe into temporary YMM4 host
+        shell: pwsh
+        run: |
+          $dest=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4SourceTimeIlProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/probe/Ymm4SourceTimeIlProbe.dll $dest
+      - name: Run native static inspection
+        shell: pwsh
+        run: ./experiments/ymm4/videoitem-source-time-il-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - name: Print compact evidence
+        if: always()
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence/result.txt){Get-Content out/evidence/result.txt}
+          if(Test-Path out/evidence/il-surface.txt){Select-String -Path out/evidence/il-surface.txt -Pattern '^=== HIT|^REF |^ASSERT PASS|^SUMMARY' | Select-Object -First 300 | ForEach-Object {$_.Line}}
+      - name: Upload compact evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-videoitem-source-time-il-surface
+          path: |
+            out/evidence/
+            out/build.txt
+            out/probe/Ymm4SourceTimeIlProbe.dll
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,101 @@
+name: YMM4 VideoItem media length rate mapping
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/recording-archive-behavior]
+    paths:
+      - 'experiments/ymm4/videoitem-media-length-rate-mapping/**'
+      - '.github/workflows/ymm4-videoitem-media-length-rate-mapping.yml'
+  pull_request:
+    paths:
+      - 'experiments/ymm4/videoitem-media-length-rate-mapping/**'
+      - '.github/workflows/ymm4-videoitem-media-length-rate-mapping.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-videoitem-media-length-rate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-behavior:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK missing' }
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 exe missing.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install fixture-generator FFmpeg 7.1.1
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=7.1.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned FFmpeg install failed.' }
+          $ffmpeg=Get-Command ffmpeg -ErrorAction Stop
+          $ffprobe=Get-Command ffprobe -ErrorAction Stop
+          "FFMPEG_EXE=$($ffmpeg.Source)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "FFPROBE_EXE=$($ffprobe.Source)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          & $ffmpeg.Source -version | Select-Object -First 6 | Set-Content ffmpeg-version.txt
+      - name: Generate deterministic 30s 60fps media fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/fixture | Out-Null
+          & $env:FFMPEG_EXE -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=60:duration=30" -an -c:v libx264 -preset ultrafast -g 300 -keyint_min 300 -sc_threshold 0 -pix_fmt yuv420p out/fixture/clock.mp4
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path out/fixture/clock.mp4)) { throw 'fixture generation failed.' }
+          & $env:FFPROBE_EXE -v error -show_entries format=duration -show_entries stream=codec_name,r_frame_rate,nb_frames -of default=noprint_wrappers=1 out/fixture/clock.mp4 | Set-Content fixture-probe.txt
+      - name: Build probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe | Out-Null
+          dotnet build experiments/ymm4/videoitem-media-length-rate-mapping/src/Ymm4MediaLengthRateProbe/Ymm4MediaLengthRateProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Media length rate probe build failed.' }
+      - name: Install probe into temporary YMM4 host
+        shell: pwsh
+        run: |
+          $dest=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4MediaLengthRateProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/probe/Ymm4MediaLengthRateProbe.dll $dest
+      - name: Run native behavior
+        shell: pwsh
+        run: ./experiments/ymm4/videoitem-media-length-rate-mapping/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence') -MediaPath (Join-Path $PWD 'out/fixture/clock.mp4')
+      - name: Print compact evidence
+        if: always()
+        shell: pwsh
+        run: |
+          foreach($file in @('result.txt','mapping.txt')){
+            $path=Join-Path 'out/evidence' $file
+            if(Test-Path $path){Write-Host "=== $file ==="; Get-Content $path}
+          }
+          if(Test-Path fixture-probe.txt){Write-Host '=== fixture-probe.txt ==='; Get-Content fixture-probe.txt}
+      - name: Upload compact evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-videoitem-media-length-rate-mapping
+          path: |
+            out/evidence/
+            out/build.txt
+            out/probe/Ymm4MediaLengthRateProbe.dll
+            dotnet-sdks.txt
+            ffmpeg-version.txt
+            fixture-probe.txt
+          if-no-files-found: warn
+          retention-days: 14
