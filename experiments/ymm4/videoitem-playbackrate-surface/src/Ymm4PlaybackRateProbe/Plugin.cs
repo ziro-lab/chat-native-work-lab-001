@@ -36,19 +36,28 @@ internal static class Probe
         {
             var item = new VideoItem();
             Append("HOST assembly=" + typeof(VideoItem).Assembly.FullName);
-            Append("VIDEOITEM PlaybackRate=" + item.PlaybackRate.ToString(CultureInfo.InvariantCulture));
+
+            var legacy = typeof(VideoItem).GetProperty("PlaybackRate", BindingFlags.Instance | BindingFlags.Public)?.GetValue(item);
+            Append("VIDEOITEM legacy PlaybackRate via reflection=" + Convert.ToString(legacy, CultureInfo.InvariantCulture));
             Append("VIDEOITEM ContentLength=" + item.ContentLength);
             Append("VIDEOITEM OriginalContentLength=" + item.OriginalContentLength);
 
-            var p2 = item.PlaybackRate2;
-            Assert(p2 != null, "PlaybackRate2 instance exists");
+            var p2 = item.PlaybackRate2 ?? throw new InvalidOperationException("PlaybackRate2 instance missing.");
             var type = p2.GetType();
             Append("PLAYBACKRATE2 type=" + type.AssemblyQualifiedName);
 
             var publicProperties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
                 .OrderBy(x => x.Name).ToArray();
             foreach (var p in publicProperties)
-                Append($"PROPERTY {p.PropertyType.FullName} {p.Name} read={p.CanRead} write={p.CanWrite}");
+            {
+                object? value = null;
+                var readable = p.CanRead && p.GetIndexParameters().Length == 0;
+                if (readable)
+                {
+                    try { value = p.GetValue(p2); } catch { }
+                }
+                Append($"PROPERTY {p.PropertyType.FullName} {p.Name} read={p.CanRead} write={p.CanWrite} value={Safe(value)}");
+            }
 
             var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
                 .Where(m => !m.IsSpecialName)
@@ -59,16 +68,20 @@ internal static class Probe
                 Append($"METHOD {m.ReturnType.FullName} {m.Name}({string.Join(",", m.GetParameters().Select(x => x.ParameterType.FullName + " " + x.Name))})");
 
             var getValue = methods.Where(m => m.Name == "GetValue").ToArray();
-            var setValue = methods.Where(m => m.Name.Contains("Value", StringComparison.OrdinalIgnoreCase) || m.Name.Contains("Constant", StringComparison.OrdinalIgnoreCase)).ToArray();
-            Assert(getValue.Length > 0, "PlaybackRate2 exposes at least one public GetValue overload");
+            Assert(getValue.Any(m => m.ReturnType == typeof(double) && m.GetParameters().Select(x => x.ParameterType).SequenceEqual([typeof(long), typeof(long), typeof(int)])),
+                "PlaybackRate2 exposes public double GetValue(long,long,int)");
+
+            var defaultValue = p2.GetValue(0, 1, 60);
+            Append("PLAYBACKRATE2 default GetValue(0,1,60)=" + defaultValue.ToString(CultureInfo.InvariantCulture));
+            Assert(defaultValue > 0, "PlaybackRate2 default evaluates to a positive rate");
 
             File.WriteAllLines(Path.Combine(output, "result.txt"),
             [
                 "status=PASS_VIDEOITEM_PLAYBACKRATE_SURFACE",
-                "playback_rate_default=" + item.PlaybackRate.ToString(CultureInfo.InvariantCulture),
+                "legacy_playback_rate=" + Convert.ToString(legacy, CultureInfo.InvariantCulture),
                 "playback_rate2_type=" + type.FullName,
-                "public_getvalue_overloads=" + getValue.Length,
-                "value_related_methods=" + setValue.Length
+                "playback_rate2_default_value=" + defaultValue.ToString(CultureInfo.InvariantCulture),
+                "public_getvalue_overloads=" + getValue.Length
             ], new UTF8Encoding(false));
         }
         catch (Exception ex)
@@ -80,6 +93,14 @@ internal static class Probe
                 "detail=" + ex.GetBaseException().Message
             ], new UTF8Encoding(false));
         }
+    }
+
+    private static string Safe(object? value)
+    {
+        if (value == null) return "<null>";
+        if (value is string s) return '"' + s + '"';
+        if (value is IEnumerable<object> seq) return "[" + string.Join(",", seq.Take(8)) + "]";
+        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "<null-string>";
     }
 
     private static void Assert(bool value, string message)
