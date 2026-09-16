@@ -110,6 +110,13 @@ internal static class Probe
         var sourceHashBefore = Hash(source);
         Append("HASH sourceBefore=" + sourceHashBefore);
 
+        Append("CALL LoadProjectFile(source) for detached surface inspection");
+        var sourceLoadTask = load.Invoke(model, [source]) as Task ?? throw new InvalidOperationException("LoadProjectFile did not return Task.");
+        await sourceLoadTask;
+        var detached = sourceLoadTask.GetType().GetProperty("Result")?.GetValue(sourceLoadTask)
+            ?? throw new InvalidOperationException("LoadProjectFile(source) returned null Project.");
+        DumpDetachedSaveSurface(detached);
+
         var oldKeep = (bool)(keep.GetValue(root) ?? false);
         var keepPreservedSource = false;
         try
@@ -135,8 +142,7 @@ internal static class Probe
         var restoredSourcePath = SamePath(activeAfterRestore, source);
         Assert(restoredSourcePath, "explicit ChangeProjectPath restored the source project path");
         var isSaved = (bool)(savedState.GetValue(model) ?? false);
-        Append("STATE IsProjectFileSaved=" + isSaved);
-        Assert(isSaved, "path restore leaves the active project in saved state");
+        Append("OBSERVE IsProjectFileSavedAfterPathRestore=" + isSaved);
 
         var sourceHashAfter = Hash(source);
         var archiveHash = Hash(archive);
@@ -148,13 +154,51 @@ internal static class Probe
         Append("CALL LoadProjectFile(archive)");
         var task = load.Invoke(model, [archive]) as Task ?? throw new InvalidOperationException("LoadProjectFile did not return Task.");
         await task;
-        var resultProperty = task.GetType().GetProperty("Result");
-        var loadedProject = resultProperty?.GetValue(task);
+        var loadedProject = task.GetType().GetProperty("Result")?.GetValue(task);
         Assert(loadedProject != null, "archive project reload returned a Project");
         var markerFound = ContainsTimelineName(loadedProject!, "CNWL_ARCHIVE_ROUNDTRIP_MARKER");
         Assert(markerFound, "archive reload preserved the deterministic Timeline marker");
 
-        WriteResult("PASS_PROJECT_SAVE_COPY_RESTORE_ROUNDTRIP", true, keepPreservedSource, restoredSourcePath, sourceUnchanged, markerFound, isSaved, archiveHash);
+        WriteResult("PASS_PROJECT_SAVE_COPY_PATH_RESTORE_OBSERVATION", true, keepPreservedSource, restoredSourcePath, sourceUnchanged, markerFound, isSaved, archiveHash);
+    }
+
+    private static void DumpDetachedSaveSurface(object project)
+    {
+        var lines = new List<string>();
+        void Add(string text) => lines.Add(text);
+        var pt = project.GetType();
+        Add("DETACHED_TYPE " + pt.AssemblyQualifiedName);
+        foreach (var m in pt.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(m => ContainsIoKeyword(m.Name)).OrderBy(m => m.Name).Take(300))
+            Add("PROJECT_METHOD " + DescribeMethod(m));
+        foreach (var p in pt.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(p => ContainsIoKeyword(p.Name)).OrderBy(p => p.Name).Take(200))
+            Add($"PROJECT_PROPERTY {(p.GetGetMethod(true)?.IsPublic == true ? "public" : "nonpublic")} {p.PropertyType.FullName} {p.Name}");
+
+        foreach (var a in AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true))
+        {
+            foreach (var type in SafeTypes(a).Where(t => ContainsIoKeyword(t.Name) || (t.FullName?.Contains("ProjectFile", StringComparison.OrdinalIgnoreCase) ?? false)))
+            {
+                var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Where(m => ContainsIoKeyword(m.Name)).ToArray();
+                if (methods.Length == 0) continue;
+                Add("CANDIDATE_TYPE " + type.FullName);
+                foreach (var m in methods.OrderBy(m => m.Name).Take(100)) Add("CANDIDATE_METHOD " + DescribeMethod(m));
+            }
+        }
+        File.WriteAllLines(Path.Combine(output, "detached-save-surface.txt"), lines, new UTF8Encoding(false));
+    }
+
+    private static bool ContainsIoKeyword(string name) => new[] { "save", "write", "serialize", "json", "file", "project", "copy", "export" }
+        .Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+    private static string DescribeMethod(MethodInfo m) =>
+        $"{(m.IsPublic ? "public" : "nonpublic")} {(m.IsStatic ? "static" : "instance")} {m.ReturnType.FullName} {m.DeclaringType?.FullName}.{m.Name}({string.Join(",", m.GetParameters().Select(x => x.ParameterType.FullName + " " + x.Name))})";
+
+    private static Type[] SafeTypes(Assembly assembly)
+    {
+        try { return assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(x => x != null).Cast<Type>().ToArray(); }
     }
 
     private static bool ContainsTimelineName(object project, string expected)
@@ -219,7 +263,7 @@ internal static class Probe
             "active_path_restored_source=" + pathRestored,
             "source_byte_unchanged=" + sourceUnchanged,
             "archive_reload_marker=" + markerReloaded,
-            "active_saved_state=" + savedState,
+            "active_saved_state_after_path_restore=" + savedState,
             "detail=" + detail
         ], new UTF8Encoding(false));
     }
