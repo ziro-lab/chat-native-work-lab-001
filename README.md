@@ -58,11 +58,21 @@ GitHub Actions Windows runner
 → preserve evidence without redistributing YMM4 itself
 ```
 
-The lab has since grown into several independent YMM4 experiments covering plugin load, Timeline selection context, playhead placement, Character-relative Layer behavior and ItemTemplate identity/restart ambiguity.
+The lab has since grown into independent YMM4 experiments covering plugin load, Timeline selection context, playhead placement, Character-relative Layer behavior, ItemTemplate identity/restart ambiguity and preview playback-rate behavior.
 
 See [`experiments/ymm4/`](experiments/ymm4/) for the current list.
 
-These experiments later informed a larger downstream YMM4 Template Placer implementation. The product re-ran integrated native acceptance rather than treating lab PASS results as product acceptance. The lessons fed back into this repository are recorded in [`docs/DOWNSTREAM_FEEDBACK.md`](docs/DOWNSTREAM_FEEDBACK.md).
+### Canonical YMM4 behavior record
+
+From 2026-09-16 onward, this repository is also the canonical `ziro-lab` location for **version-pinned observations of YMM4 host behavior** that downstream plugins depend on.
+
+Static IL/reflection inspection, native automated observations and manual interactive observations must be labeled separately so that one kind of evidence does not silently widen another.
+
+See [`docs/YMM4_OBSERVATION_POLICY.md`](docs/YMM4_OBSERVATION_POLICY.md) and [`docs/YMM4_OBSERVATION_TEMPLATE.md`](docs/YMM4_OBSERVATION_TEMPLATE.md).
+
+Small plugin prototypes consume those observations in [`ziro-lab/ymm4-plugin-garage`](https://github.com/ziro-lab/ymm4-plugin-garage) rather than duplicating host-behavior research there.
+
+These experiments also informed a larger downstream YMM4 Template Placer implementation. The product re-ran integrated native acceptance rather than treating lab PASS results as product acceptance. The lessons fed back into this repository are recorded in [`docs/DOWNSTREAM_FEEDBACK.md`](docs/DOWNSTREAM_FEEDBACK.md).
 
 ## Repository layout
 
@@ -70,7 +80,7 @@ These experiments later informed a larger downstream YMM4 Template Placer implem
 .github/workflows/        experiment runners
 docs/                     lab-wide contracts and evidence rules
 experiments/               isolated target-specific experiments
-  ymm4/                    YMM4 experiments
+  ymm4/                    YMM4 experiments and version-pinned observations
 ```
 
 Shared helpers should only be introduced after the same mechanism has been repeated and proven across multiple experiments. The current YMM4 set is large enough to consider a small shared helper for repeated host download/hash/launch mechanics when a future experiment needs it, but experiment assertions should remain local.
@@ -93,4 +103,4 @@ Third-party applications, binaries, trademarks, screenshots, names and other thi
 
 ## Status
 
-**v0.2 / downstream-validated lab process** — experiment contract plus five independent YMM4 native-host experiments, with product-integration feedback incorporated into the evidence and experiment policies.
+**v0.3 / canonical YMM4 observation lab** — experiment contract plus six YMM4 experiment/observation tracks, downstream feedback, and a dedicated policy for recording version-sensitive YMM4 host behavior.
