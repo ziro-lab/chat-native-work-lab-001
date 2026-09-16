@@ -19,6 +19,16 @@ Keep this repository a small public experiment lab.
 - Treat runner/download/external-host failures before the assertion boundary as BLOCKED; a same-source retry is allowed when no source change is needed.
 - Downstream product adoption may be recorded as feedback, but it never widens an experiment's original PASS boundary by itself.
 
+## YMM4 host-observation rules
+
+- This repository is the canonical `ziro-lab` location for undocumented/version-sensitive YMM4 host behavior used by downstream plugins.
+- Keep YMM4 behavior discovery here rather than in product/Garage repositories; product-side tests may verify integration but should not become the only source of the host claim.
+- Label evidence as **static inspection**, **native automated observation**, or **manual live observation**. Do not substitute one for another.
+- Static IL/reflection evidence can establish inspected code structure but does not prove interactive rendering/audio stability.
+- Manual observations may establish perceptual/UI behavior but do not silently become automated PASS assertions.
+- State the exact YMM4 version for every undocumented host behavior. Revalidate when a newer version materially touches the subsystem.
+- Follow [`docs/YMM4_OBSERVATION_POLICY.md`](docs/YMM4_OBSERVATION_POLICY.md) for YMM4 records.
+
 ## Evidence minimum
 
 Record enough information to connect:
