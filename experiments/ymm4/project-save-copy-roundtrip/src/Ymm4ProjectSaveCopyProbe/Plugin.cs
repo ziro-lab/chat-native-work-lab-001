@@ -64,14 +64,14 @@ internal static class Probe
                 if (ticks >= 100)
                 {
                     timer.Stop();
-                    WriteResult("FAIL_TIMEOUT", false, false, false, false, "");
+                    WriteResult("FAIL_TIMEOUT", false, false, false, false, false, false, "");
                 }
             }
             catch (Exception ex)
             {
                 timer.Stop();
                 Append("ERROR " + ex);
-                WriteResult("FAIL_EXCEPTION", false, false, false, false, ex.GetBaseException().Message);
+                WriteResult("FAIL_EXCEPTION", false, false, false, false, false, false, ex.GetBaseException().Message);
             }
         };
         timer.Start();
@@ -85,13 +85,20 @@ internal static class Probe
 
         var rootType = root.GetType();
         var modelType = model.GetType();
-        var save = rootType.GetMethod("SaveProject", BindingFlags.Instance | BindingFlags.Public, [typeof(string)])
+        var save = rootType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(m => m.Name == "SaveProject" && m.GetParameters() is [{ ParameterType: var t }] && t == typeof(string))
             ?? throw new InvalidOperationException("MainViewModel.SaveProject(string) missing.");
         var keep = rootType.GetProperty("KeepProjectPath", BindingFlags.Instance | BindingFlags.Public)
             ?? throw new InvalidOperationException("MainViewModel.KeepProjectPath missing.");
         var modelPath = modelType.GetProperty("ProjectFilePath", BindingFlags.Instance | BindingFlags.Public)
             ?? throw new InvalidOperationException("MainModel.ProjectFilePath missing.");
-        var load = modelType.GetMethod("LoadProjectFile", BindingFlags.Instance | BindingFlags.Public, [typeof(string)])
+        var savedState = modelType.GetProperty("IsProjectFileSaved", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new InvalidOperationException("MainModel.IsProjectFileSaved missing.");
+        var changePath = modelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(m => m.Name == "ChangeProjectPath" && m.GetParameters() is [{ ParameterType: var t }] && t == typeof(string))
+            ?? throw new InvalidOperationException("MainModel.ChangeProjectPath(string) missing.");
+        var load = modelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(m => m.Name == "LoadProjectFile" && m.GetParameters() is [{ ParameterType: var t }] && t == typeof(string))
             ?? throw new InvalidOperationException("MainModel.LoadProjectFile(string) missing.");
 
         Append("CALL SaveProject(source)");
@@ -104,26 +111,39 @@ internal static class Probe
         Append("HASH sourceBefore=" + sourceHashBefore);
 
         var oldKeep = (bool)(keep.GetValue(root) ?? false);
-        keep.SetValue(root, true);
+        var keepPreservedSource = false;
         try
         {
+            keep.SetValue(root, true);
             Append("CALL KeepProjectPath=true; SaveProject(archive)");
             save.Invoke(root, [archive]);
+            Assert(File.Exists(archive), "archive project was created");
+            var activeAfterArchive = modelPath.GetValue(model) as string ?? "";
+            Append("PATH afterArchive=" + activeAfterArchive);
+            keepPreservedSource = SamePath(activeAfterArchive, source);
+            Append("OBSERVE KeepProjectPath preservedSource=" + keepPreservedSource);
         }
-        finally { keep.SetValue(root, oldKeep); }
+        finally
+        {
+            keep.SetValue(root, oldKeep);
+            Append("CALL ChangeProjectPath(source) in finally");
+            changePath.Invoke(model, [source]);
+        }
 
-        Assert(File.Exists(archive), "archive project was created");
-        var activeAfterArchive = modelPath.GetValue(model) as string ?? "";
-        Append("PATH afterArchive=" + activeAfterArchive);
-        var keptSourcePath = SamePath(activeAfterArchive, source);
-        Assert(keptSourcePath, "archive save kept the source project path active");
+        var activeAfterRestore = modelPath.GetValue(model) as string ?? "";
+        Append("PATH afterRestore=" + activeAfterRestore);
+        var restoredSourcePath = SamePath(activeAfterRestore, source);
+        Assert(restoredSourcePath, "explicit ChangeProjectPath restored the source project path");
+        var isSaved = (bool)(savedState.GetValue(model) ?? false);
+        Append("STATE IsProjectFileSaved=" + isSaved);
+        Assert(isSaved, "path restore leaves the active project in saved state");
 
         var sourceHashAfter = Hash(source);
         var archiveHash = Hash(archive);
         Append("HASH sourceAfter=" + sourceHashAfter);
         Append("HASH archive=" + archiveHash);
         var sourceUnchanged = string.Equals(sourceHashBefore, sourceHashAfter, StringComparison.OrdinalIgnoreCase);
-        Assert(sourceUnchanged, "archive save did not rewrite the source file");
+        Assert(sourceUnchanged, "archive save plus path restore did not rewrite the source file");
 
         Append("CALL LoadProjectFile(archive)");
         var task = load.Invoke(model, [archive]) as Task ?? throw new InvalidOperationException("LoadProjectFile did not return Task.");
@@ -134,7 +154,7 @@ internal static class Probe
         var markerFound = ContainsTimelineName(loadedProject!, "CNWL_ARCHIVE_ROUNDTRIP_MARKER");
         Assert(markerFound, "archive reload preserved the deterministic Timeline marker");
 
-        WriteResult("PASS_PROJECT_SAVE_COPY_ROUNDTRIP", true, keptSourcePath, sourceUnchanged, markerFound, archiveHash);
+        WriteResult("PASS_PROJECT_SAVE_COPY_RESTORE_ROUNDTRIP", true, keepPreservedSource, restoredSourcePath, sourceUnchanged, markerFound, isSaved, archiveHash);
     }
 
     private static bool ContainsTimelineName(object project, string expected)
@@ -189,15 +209,17 @@ internal static class Probe
         Append("ASSERT PASS: " + message);
     }
 
-    private static void WriteResult(string status, bool archiveExists, bool pathKept, bool sourceUnchanged, bool markerReloaded, string detail)
+    private static void WriteResult(string status, bool archiveExists, bool keepPreservedSource, bool pathRestored, bool sourceUnchanged, bool markerReloaded, bool savedState, string detail)
     {
         File.WriteAllLines(Path.Combine(output, "result.txt"),
         [
             "status=" + status,
             "archive_exists=" + archiveExists,
-            "active_path_kept_source=" + pathKept,
+            "keep_project_path_preserved_source=" + keepPreservedSource,
+            "active_path_restored_source=" + pathRestored,
             "source_byte_unchanged=" + sourceUnchanged,
             "archive_reload_marker=" + markerReloaded,
+            "active_saved_state=" + savedState,
             "detail=" + detail
         ], new UTF8Encoding(false));
     }
