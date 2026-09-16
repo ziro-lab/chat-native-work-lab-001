@@ -12,7 +12,7 @@ namespace Ymm4MediaLengthRateProbe;
 
 public sealed class PluginEntry : ILocalizePlugin
 {
-    public string Name => "Chat Native Work Lab — VideoItem Media Length Rate Mapping";
+    public string Name => "Chat Native Work Lab — VideoItem Media Length Rate Observation";
     public void SetCulture(CultureInfo cultureInfo) => Probe.Schedule();
 }
 
@@ -85,7 +85,7 @@ internal static class Probe
         Append("MEDIA " + media);
         Append("TIMELINE_FPS " + fps);
 
-        var cases = new List<Row>();
+        var rows = new List<Row>();
         var rates = new[] { 50d, 100d, 200d };
         var offsets = new[] { 0d, 5d };
         var layer = 10;
@@ -109,41 +109,22 @@ internal static class Probe
 
                 var original = item.OriginalContentLength.TotalSeconds;
                 var content = item.ContentLength.TotalSeconds;
-                var normalizedSource = content * rate / 100d;
-                var expectedRemaining = original - offset;
-                var row = new Row(rate, offset, original, content, normalizedSource, expectedRemaining);
-                cases.Add(row);
-                Append($"CASE rate={rate:R} offset={offset:R} original={original:R} content={content:R} normalizedSource={normalizedSource:R} expectedRemaining={expectedRemaining:R}");
-                Assert(original > 0, $"original media length is positive for rate={rate:0} offset={offset:0}");
-                Assert(content > 0, $"content length is positive for rate={rate:0} offset={offset:0}");
+                rows.Add(new Row(rate, offset, original, content));
+                Append($"CASE rate={rate:R} offset={offset:R} original={original:R} content={content:R}");
+                Assert(original > 0, $"OriginalContentLength is positive for rate={rate:0} offset={offset:0}");
+                Assert(content > 0, $"ContentLength is positive for rate={rate:0} offset={offset:0}");
             }
         }
 
-        var originalMin = cases.Min(x => x.Original);
-        var originalMax = cases.Max(x => x.Original);
-        Assert(originalMax - originalMin < 0.05, "OriginalContentLength is consistent across rate/offset fixtures");
+        var originalMin = rows.Min(x => x.Original);
+        var originalMax = rows.Max(x => x.Original);
+        var contentMin = rows.Min(x => x.Content);
+        var contentMax = rows.Max(x => x.Content);
+        Assert(originalMax - originalMin < 0.05, "OriginalContentLength is invariant across tested rate/offset fixtures");
+        Assert(contentMax - contentMin < 0.05, "ContentLength is invariant across tested rate/offset fixtures");
+        Assert(rows.All(x => Math.Abs(x.Content - x.Original) < 0.05), "ContentLength remains approximately equal to media duration in every tested case");
 
-        foreach (var offset in offsets)
-        {
-            var group = cases.Where(x => Math.Abs(x.Offset - offset) < 1e-9).OrderBy(x => x.Rate).ToArray();
-            Assert(group[0].Content > group[1].Content && group[1].Content > group[2].Content,
-                $"ContentLength decreases as rate increases at offset={offset:0}");
-        }
-        foreach (var rate in rates)
-        {
-            var zero = cases.Single(x => Math.Abs(x.Rate - rate) < 1e-9 && Math.Abs(x.Offset) < 1e-9);
-            var five = cases.Single(x => Math.Abs(x.Rate - rate) < 1e-9 && Math.Abs(x.Offset - 5) < 1e-9);
-            Assert(five.Content < zero.Content, $"5s ContentOffset shortens ContentLength at rate={rate:0}");
-        }
-
-        foreach (var row in cases)
-        {
-            var error = Math.Abs(row.NormalizedSource - row.ExpectedRemaining);
-            Append($"MAPPING rate={row.Rate:R} offset={row.Offset:R} errorSeconds={error:R}");
-            Assert(error <= 0.10, $"rate/100 duration relation holds within 100ms at rate={row.Rate:0} offset={row.Offset:0}");
-        }
-
-        WriteResult("PASS_MEDIA_LENGTH_RATE_MAPPING", $"cases={cases.Count}");
+        WriteResult("PASS_MEDIA_LENGTH_RATE_INVARIANCE", $"cases={rows.Count};duration={rows[0].Original:R}");
     }
 
     private static int GetTimelineFps(Timeline timeline)
@@ -170,5 +151,5 @@ internal static class Probe
 
     private static void Append(string line) => File.AppendAllText(Path.Combine(output, "mapping.txt"), line + Environment.NewLine, new UTF8Encoding(false));
 
-    private sealed record Row(double Rate, double Offset, double Original, double Content, double NormalizedSource, double ExpectedRemaining);
+    private sealed record Row(double Rate, double Offset, double Original, double Content);
 }
