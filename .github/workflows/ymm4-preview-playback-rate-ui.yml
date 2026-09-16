@@ -2,9 +2,15 @@ name: YMM4 preview playback-rate UI probe
 
 on:
   push:
-    branches: ['probe/ymm4-preview-speed-ui']
+    branches: [main]
     paths:
       - 'experiments/ymm4/preview-playback-rate/ui-probe/**'
+      - 'experiments/ymm4/preview-playback-rate/README.md'
+      - '.github/workflows/ymm4-preview-playback-rate-ui.yml'
+  pull_request:
+    paths:
+      - 'experiments/ymm4/preview-playback-rate/ui-probe/**'
+      - 'experiments/ymm4/preview-playback-rate/README.md'
       - '.github/workflows/ymm4-preview-playback-rate-ui.yml'
   workflow_dispatch:
 
