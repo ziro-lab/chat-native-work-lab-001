@@ -17,7 +17,7 @@ Real YMM4 Lite **4.56.1.0**, release SHA256 `49c0ed689f545737b7ce939971bfc625962
 
 All 16 independently required assertions passed; build warnings/errors were 0/0.
 
-- Actual Tool menu invocation delivered `ITimelineToolViewModel.SetTimelineToolInfo`.
+- The host-created Timeline Tool model received `ITimelineToolViewModel.SetTimelineToolInfo`. This establishes callback receipt, not successful menu invocation or visible Tool UI.
 - `TimelineToolInfo.Timeline` is public.
 - Public FPS path is **`Timeline.VideoInfo.FPS`**, observed value 60.
 - Public `Timeline.SelectedItems` yielded two separate `VideoItem` objects pointing at the same generated recording.
@@ -45,8 +45,15 @@ The ceiling choice is a **product rounding policy**, not a claim that the host r
 
 PASS establishes the named model/API assertions only on the pinned host. Session object-reference identity is not durable identity across project reloads. Consumers must invalidate/rebind targets when the Timeline/Project instance changes, and reject detached or changed Items.
 
+### Callback receipt is not Tool-window visibility
+
+A review during Navigator product integration found an overstatement in the original prose: `real_tool_callback` checks `Info != null`, but the probe never asserts that its `OpenTool` helper returned true. Therefore the previous wording, "Actual Tool menu invocation delivered the callback", was not supported by that assertion. It is corrected above without weakening or expanding the 16 tested claims.
+
+The downstream product startup trace in run `35124382029` separately showed that the attempted generic `Header`/`Command` traversal did not open the Tool: leaf entries were `ToolAreaViewModel`, not ordinary menu-item models. That product-side observation does not retroactively certify this Lab helper. Consumers must prove visible Tool creation/activation in their own product integration rather than infer it from a Timeline callback.
+
 ## NOT PROVEN
 
+- Tool menu activation or visible Tool-window creation;
 - physical keyboard/mouse operation or decoded preview-frame correspondence;
 - stable identity across restart, project reload, deletion/recreation or Undo/Redo;
 - animated, zero, reverse, negative or non-monotonic rates;
