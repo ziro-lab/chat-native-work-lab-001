@@ -1,24 +1,30 @@
-# VideoItem media-length / PlaybackRate2 mapping
+# VideoItem media-length / PlaybackRate2 observation
 
 ## Question
 
-For YMM4 v4.56.1.0 and a real deterministic media file, does `VideoItem.ContentLength` encode the same constant-rate source-time relationship expected by the recording archive planner?
+For YMM4 v4.56.1.0 and a real deterministic media file, can `VideoItem.ContentLength` be used to derive source-time usage after applying `PlaybackRate2` and `ContentOffset`?
 
 ## Fixture
 
 GitHub Actions generates a redistribution-safe 30-second, 60fps H.264 MP4. Inside the exact YMM4 host, the probe creates `VideoItem` fixtures for 50%, 100%, and 200% constant `PlaybackRate2`, each at source offsets 0s and 5s.
 
-For each case it records `OriginalContentLength` and `ContentLength` and checks:
+## Observed behavior
 
-- the original media length is positive and consistent;
-- slower rate yields longer timeline content length and faster rate yields shorter length;
-- a larger `ContentOffset` shortens remaining content length;
-- `ContentLengthSeconds * PlaybackRate2 / 100` approximately equals `OriginalContentLengthSeconds - ContentOffsetSeconds` within a small media/frame tolerance.
+The initial falsification run showed that both `OriginalContentLength` and `ContentLength` remained 30 seconds in all six cases:
+
+- 50 / 100 / 200% at offset 0s;
+- 50 / 100 / 200% at offset 5s.
+
+Therefore `ContentLength` does **not** encode the remaining source range or constant playback-rate scaling needed by the recording archive planner.
 
 ## PASS boundary
 
-A PASS supports the constant-rate source-duration relation used by the archive planner for this host version and fixture codec.
+A PASS proves, for the exact tested YMM4 v4.56.1.0 host and H.264 fixture, that:
+
+- `OriginalContentLength` exposes the media duration;
+- `ContentLength` is invariant across the tested `PlaybackRate2` and `ContentOffset` values;
+- archive source-time planning must not infer consumed source duration from `ContentLength`.
 
 ## NOT PROVEN
 
-This does not prove animated/variable rate, reverse playback, every codec, or exact rendered-frame identity. A clock-frame render test remains the strongest optional follow-up.
+This experiment does not establish the actual source-time mapping formula. That mapping must be obtained from the playback/source path or a rendered clock-frame test.
