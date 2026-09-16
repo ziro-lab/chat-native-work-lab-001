@@ -19,7 +19,7 @@ try{
   }
   if(-not(Test-Path $resultPath)){throw 'Media length rate probe did not produce result.txt.'}
   $result=Get-Content $resultPath
-  if($result -notcontains 'status=PASS_MEDIA_LENGTH_RATE_MAPPING'){throw "Media length rate mapping did not pass.`n$($result -join "`n")"}
+  if($result -notcontains 'status=PASS_MEDIA_LENGTH_RATE_INVARIANCE'){throw "Media length rate observation did not pass.`n$($result -join "`n")"}
 }finally{
   if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
   Remove-Item Env:CNWL_YMM4_MEDIA_LENGTH_RATE_DIR -ErrorAction SilentlyContinue
