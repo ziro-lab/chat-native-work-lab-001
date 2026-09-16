@@ -89,7 +89,7 @@ internal static class Probe
                 foreach (var itemSeconds in itemTimes)
                 {
                     var itemTime = TimeSpan.FromSeconds(itemSeconds);
-                    var expectedSource = TimeSpan.FromSeconds((itemSeconds + offset.TotalSeconds) * rate / 100d);
+                    var expectedSource = TimeSpan.FromSeconds(offset.TotalSeconds + itemSeconds * rate / 100d);
                     var actualSource = (TimeSpan)(getSourceTime!.Invoke(map, [itemTime, length, fps, offset, contentLength])
                         ?? throw new InvalidOperationException("GetSourceTime returned null."));
                     AssertNear(actualSource.TotalSeconds, expectedSource.TotalSeconds, $"{rate:0}% GetSourceTime item={itemSeconds:R}s");
@@ -109,7 +109,7 @@ internal static class Probe
                 "get_source_time_public=" + getSourceTime.IsPublic,
                 "find_first_time_public=" + findFirst.IsPublic,
                 "constant_rates_verified=50,100,200",
-                "content_offset_item_time_seconds=4"
+                "content_offset_source_time_seconds=4"
             ], new UTF8Encoding(false));
         }
         catch (Exception ex)
