@@ -44,6 +44,23 @@ jobs:
           $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
           if (-not $exe) { throw 'YMM4 exe missing.' }
           "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Download exact CharactorMotion 1.1.1 for compatibility probe
+        shell: pwsh
+        run: |
+          $url='https://github.com/benikazura/CharactorMotion/releases/download/ver1.1.1/CharactorMotion.ymme'
+          curl.exe -L --fail --retry 3 --silent --show-error -o CharactorMotion.ymme $url
+          if ($LASTEXITCODE -ne 0) { throw 'CharactorMotion download failed.' }
+          $hash=(Get-FileHash CharactorMotion.ymme -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'e8c123410be76b3df87ea7fa3bac0354e75788f295ada3a3f2102433f28110f2') { throw "CharactorMotion hash mismatch: $hash" }
+          Copy-Item CharactorMotion.ymme CharactorMotion.zip
+          $unpack=Join-Path $env:RUNNER_TEMP 'CharactorMotion-unpack'
+          Expand-Archive -LiteralPath CharactorMotion.zip -DestinationPath $unpack
+          $pluginRoot=Join-Path $env:YMM4_DIR 'user\plugin'
+          New-Item -ItemType Directory -Force $pluginRoot | Out-Null
+          Get-ChildItem $unpack | ForEach-Object { Copy-Item $_.FullName $pluginRoot -Recurse -Force }
+          $dll=Get-ChildItem $pluginRoot -Recurse -Filter CharactorMotion.dll | Select-Object -First 1
+          if (-not $dll) { throw 'CharactorMotion.dll missing after package extraction.' }
+          "CharactorMotion package sha256=$hash; dll=$($dll.FullName)" | Set-Content charactor-motion-package.txt -Encoding utf8
       - name: Build probe
         shell: pwsh
         run: |
@@ -64,6 +81,8 @@ jobs:
         shell: pwsh
         run: |
           if(Test-Path out/evidence/result.txt){Get-Content out/evidence/result.txt}
+          if(Test-Path out/evidence/template-create-result.txt){Get-Content out/evidence/template-create-result.txt}
+          if(Test-Path out/evidence/charactor-motion-result.txt){Get-Content out/evidence/charactor-motion-result.txt}
           if(Test-Path out/evidence/surface.txt){Select-String -Path out/evidence/surface.txt -Pattern '^TYPE |^CTOR |^PROPERTY |^CLONE |^CLONE_PROPERTY |^CLONE_COLLECTION |^REBIND |^METHOD_CANDIDATE |^METHOD_CANDIDATE_COUNT|^JSON_|^ASSERT PASS' | Select-Object -First 800 | ForEach-Object {$_.Line}}
       - name: Upload compact evidence
         if: always()
@@ -75,5 +94,6 @@ jobs:
             out/build.txt
             out/probe/Ymm4TemplateCloneProbe.dll
             dotnet-sdks.txt
+            charactor-motion-package.txt
           if-no-files-found: warn
           retention-days: 14
