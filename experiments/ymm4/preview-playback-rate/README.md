@@ -6,16 +6,17 @@ Is the apparent 8x preview-speed limit in YMM4 an actual playback-engine limit, 
 
 ## Status
 
-**Baseline observation recorded; public Lab-native reproduction still to be migrated.**
+**Baseline observation recorded; public-Lab native UI-structure proof PASS; full playback-path reproduction still pending.**
 
 - Date: 2026-09-16
 - YMM4 version inspected: **v4.56.1.0**
-- Evidence types available from the prior investigation: static inspection + manual live observation
-- Native automated evidence existed in the prior validation workspace, but it has not yet been reproduced from this public Lab repository. Therefore this record does not claim a public-Lab automated PASS yet.
+- Evidence types: static inspection + manual live observation + public-Lab real-host UI inspection
+- Public-Lab UI proof run: `35100142088`
+- UI proof artifact: `ymm4-preview-playback-rate-ui`, artifact ID `10447194016`, SHA256 `c5ad43cadd78648a3880a12e44c597b7bd0e0bce2ebc3961f520ac8ca7e46c0d`
 
 ## Host identity
 
-YMM4 Lite v4.56.1.0 was inspected using the exact official release asset in the prior investigation.
+YMM4 Lite v4.56.1.0 was inspected using the exact official release asset.
 
 - SHA256: `49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a`
 
@@ -37,6 +38,24 @@ Observed on YMM4 v4.56.1.0:
 5. The inspected audio PlaybackRate setters did not contain an 8x upper clamp.
 6. Provider construction for the native resampling/time-stretch playback path accepted rates above 8x in the prior probe. A synthetic standalone reset path had an unrelated missing-runtime-state failure at 8x, 16x and 32x alike, so that failure was not evidence of a >8x-specific limit.
 
+### Public-Lab native UI inspection
+
+A real YMM4 v4.56.1.0 Lite process was launched on `windows-latest`, and a temporary probe inspected the live WPF visual tree.
+
+The playback-rate selector was identified as:
+
+```text
+type=System.Windows.Controls.ComboBox
+data_context=YukkuriMovieMaker.ViewModels.PreviewViewModel
+item_count=32
+items_source=<null>
+selected_index_binding=PlaybackRate
+first=ComboBoxItem(content=x 0.25, visibility=Visible)
+last=ComboBoxItem(content=x 8.0, visibility=Visible)
+```
+
+This establishes that, in the inspected build, the visible speed selector is an inline 32-item ComboBox whose `SelectedIndex` maps directly to `PlaybackRate`. The visible x8 ceiling is therefore represented by the selector's item count, not by an `ItemsSource` collection or a separate selected-value conversion layer.
+
 ### Manual live observation
 
 In an interactive YMM4 session, continuing the normal playback-speed-up operation after the UI-visible 8x point made playback **clearly faster than 8x**, while audio continued to follow the accelerated preview.
@@ -47,15 +66,18 @@ The user also observed that the high-speed preview remained perceptually much sm
 
 For YMM4 v4.56.1.0, the available evidence indicates that **8x is not an upper clamp in the inspected playback-rate setting/command/audio propagation path**.
 
-The working model is that the apparent 8x ceiling is primarily an exposed UI/interaction boundary rather than a hard playback-engine boundary.
+The live UI proof also shows a concrete UI-side boundary: the standard selector contains exactly 32 inline items from x0.25 through x8.0 and binds its selected index directly to `PlaybackRate`.
 
 ## PASS boundary
 
-The current baseline supports these narrow claims for the inspected build:
+The current evidence supports these narrow claims for YMM4 v4.56.1.0:
 
 - the inspected PlaybackRate setting/command path is not statically clamped to 8x;
 - the inspected audio rate setters are not statically clamped to 8x;
-- a real interactive session can run clearly faster than 8x with audio still following.
+- a real interactive session can run clearly faster than 8x with audio still following;
+- the real-host standard speed selector is an inline 32-item ComboBox;
+- its `SelectedIndex` is bound directly to `PlaybackRate`;
+- its first/last visible entries are `x 0.25` and `x 8.0`.
 
 ## NOT PROVEN
 
@@ -64,24 +86,18 @@ This record does not yet prove:
 - that 16x or 32x is stable on every project, codec, effect stack or machine;
 - that every audio mode remains intelligible or artifact-free at 16x/32x;
 - that YMM4 guarantees this behavior as a supported public API;
-- that future YMM4 versions keep the same internals;
-- that the standard speed selector can be extended cleanly by a plugin without Reflection or UI integration work;
+- that future YMM4 versions keep the same internals or UI structure;
+- that a particular downstream plugin implementation remains compatible with every YMM4 layout/theme/version;
 - that 32x should be the final practical upper limit;
-- a public-Lab-native automated PASS, until the prior probes are migrated/re-run here.
+- a public-Lab automated runtime proof of the entire playback/audio path at 16x/32x, until the earlier playback probes are migrated here.
 
 ## Next public-Lab experiment
 
-Migrate a minimal playback-rate probe into this repository and run it against an exact official YMM4 release so that this public record contains:
-
-1. exact host download + SHA256 verification;
-2. static PlaybackRate/command/audio inspection;
-3. a native-host or closest-safe runtime assertion for 8x / 16x / 32x;
-4. preserved probe output as an Actions artifact;
-5. explicit separation between automated results and perceptual/manual smoothness checks.
+Migrate the remaining minimal playback-rate probes into this repository so the public record also contains automated evidence for the setting/command/audio path at 8x / 16x / 32x, separate from the already-completed live UI-structure proof.
 
 ## Downstream impact
 
-This observation is the basis for the initial Garage candidate:
+This observation is the basis for the Garage candidate:
 
 - [`YMM4 プレビュー再生速度拡張プラグイン`](https://github.com/ziro-lab/ymm4-plugin-garage/tree/main/plugins/preview-speed-extension)
 
