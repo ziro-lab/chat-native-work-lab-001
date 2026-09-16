@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -6,6 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Plugin.Effects;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.Settings;
@@ -41,7 +43,10 @@ internal static class Probe
             File.WriteAllText(Path.Combine(output, "surface.txt"), "", new UTF8Encoding(false));
             DumpType(typeof(TachieFaceItem));
             DumpType(typeof(ItemTemplate));
+            DumpDeclaredMethods(typeof(ItemTemplate), "ITEMTEMPLATE_METHOD");
+            DumpDeclaredMethods(typeof(MainModel), "MAINMODEL_METHOD", m => m.Name.Contains("Template", StringComparison.OrdinalIgnoreCase) || m.Name.Contains("Face", StringComparison.OrdinalIgnoreCase));
             DumpCloneBehavior();
+            DumpEffectCloneBehavior();
             DumpTemplatePlacementCandidates();
             DumpJsonCandidates();
             WriteResult("PASS_TEMPLATE_CLONE_FIDELITY_DISCOVERY");
@@ -72,6 +77,12 @@ internal static class Probe
         }
     }
 
+    private static void DumpDeclaredMethods(Type type, string prefix, Func<MethodInfo, bool>? filter = null)
+    {
+        foreach (var method in type.GetMethods(All | BindingFlags.DeclaredOnly).Where(m => filter == null || filter(m)).OrderBy(m => m.Name))
+            Append(prefix + " " + Describe(method));
+    }
+
     private static void DumpCloneBehavior()
     {
         var character = new Character { Name = "CNWL Template Character" };
@@ -100,6 +111,52 @@ internal static class Probe
         Append($"REBIND Character setter={(characterProperty?.SetMethod == null ? "none" : characterProperty.SetMethod.IsPublic ? "public" : "nonpublic")}");
         Append($"REBIND CharacterName setter={(characterNameProperty?.SetMethod == null ? "none" : characterNameProperty.SetMethod.IsPublic ? "public" : "nonpublic")}");
     }
+
+    private static void DumpEffectCloneBehavior()
+    {
+        var implementations = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true)
+            .SelectMany(SafeTypes)
+            .Where(t => typeof(IVideoEffect).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface && t.GetConstructor(Type.EmptyTypes) != null)
+            .OrderBy(t => t.FullName).ToArray();
+        foreach (var type in implementations.Take(100)) Append("EFFECT_IMPL " + type.AssemblyQualifiedName);
+        Append($"EFFECT_IMPL_COUNT {implementations.Length}");
+        if (implementations.Length == 0) { Append("EFFECT_CLONE no_parameterless_builtin_effect"); return; }
+
+        foreach (var type in implementations)
+        {
+            IVideoEffect? effect = null;
+            try { effect = Activator.CreateInstance(type) as IVideoEffect; } catch { }
+            if (effect == null) continue;
+            var property = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(p => p.CanRead && p.CanWrite && p.SetMethod?.IsPublic == true && TryDifferentValue(p.PropertyType, p.GetValue(effect), out _));
+            if (property == null) continue;
+            TryDifferentValue(property.PropertyType, property.GetValue(effect), out var changed);
+            property.SetValue(effect, changed);
+            var source = new TachieFaceItem(new Character { Name = "CNWL Effect Clone" }) { TachieFaceEffects = ImmutableList.Create(effect) };
+            var clone = (TachieFaceItem)source.GetClone();
+            var clonedEffect = clone.TachieFaceEffects.SingleOrDefault();
+            Append($"EFFECT_CLONE type={type.FullName} list_same={ReferenceEquals(source.TachieFaceEffects, clone.TachieFaceEffects)} effect_same={ReferenceEquals(effect,clonedEffect)} property={property.Name} source_value={Format(property.GetValue(effect))} clone_value={Format(clonedEffect == null ? null : property.GetValue(clonedEffect))}");
+            Assert(clonedEffect != null && Equals(property.GetValue(effect), property.GetValue(clonedEffect)), "GetClone preserves a non-default built-in effect property value");
+            return;
+        }
+        Append("EFFECT_CLONE no_mutable_builtin_effect_fixture");
+    }
+
+    private static bool TryDifferentValue(Type type, object? current, out object? changed)
+    {
+        if (type == typeof(bool)) { changed = !(current as bool? ?? false); return true; }
+        if (type == typeof(int)) { changed = (current is int i ? i : 0) + 7; return true; }
+        if (type == typeof(double)) { changed = (current is double d ? d : 0d) + 7.25d; return true; }
+        if (type == typeof(float)) { changed = (current is float f ? f : 0f) + 7.25f; return true; }
+        if (type.IsEnum)
+        {
+            var values = Enum.GetValues(type).Cast<object>().ToArray(); changed = values.FirstOrDefault(x => !Equals(x,current)); return changed != null;
+        }
+        changed = null; return false;
+    }
+
+    private static string Format(object? value) => value?.ToString() ?? "<null>";
 
     private static void DumpTemplatePlacementCandidates()
     {
@@ -146,8 +203,8 @@ internal static class Probe
 
     private static string Describe(MethodBase member) => member switch
     {
-        MethodInfo m => $"access={(m.IsPublic ? "public" : "nonpublic")} static={m.IsStatic} generic={m.IsGenericMethodDefinition} return={m.ReturnType.FullName} {m.DeclaringType?.FullName}::{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))})",
-        ConstructorInfo c => $"access={(c.IsPublic ? "public" : "nonpublic")} {c.DeclaringType?.FullName}({string.Join(",", c.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))})",
+        MethodInfo m => $"access={(m.IsPublic ? "public" : "nonpublic")} static={m.IsStatic} generic={m.IsGenericMethodDefinition} return={m.ReturnType.FullName ?? m.ReturnType.ToString()} {m.DeclaringType?.FullName}::{m.Name}({string.Join(",", m.GetParameters().Select(p => (p.ParameterType.FullName ?? p.ParameterType.ToString()) + " " + p.Name))})",
+        ConstructorInfo c => $"access={(c.IsPublic ? "public" : "nonpublic")} {c.DeclaringType?.FullName}({string.Join(",", c.GetParameters().Select(p => (p.ParameterType.FullName ?? p.ParameterType.ToString()) + " " + p.Name))})",
         _ => member.ToString() ?? member.Name
     };
 
