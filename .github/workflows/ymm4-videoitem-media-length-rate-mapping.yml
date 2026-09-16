@@ -44,15 +44,23 @@ jobs:
           $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
           if (-not $exe) { throw 'YMM4 exe missing.' }
           "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install fixture-generator FFmpeg 7.1.1
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=7.1.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned FFmpeg install failed.' }
+          $ffmpeg=Get-Command ffmpeg -ErrorAction Stop
+          $ffprobe=Get-Command ffprobe -ErrorAction Stop
+          "FFMPEG_EXE=$($ffmpeg.Source)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "FFPROBE_EXE=$($ffprobe.Source)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          & $ffmpeg.Source -version | Select-Object -First 6 | Set-Content ffmpeg-version.txt
       - name: Generate deterministic 30s 60fps media fixture
         shell: pwsh
         run: |
-          ffmpeg -version | Select-Object -First 6 | Set-Content ffmpeg-version.txt
-          if ($LASTEXITCODE -ne 0) { throw 'ffmpeg missing.' }
           New-Item -ItemType Directory -Force out/fixture | Out-Null
-          ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=60:duration=30" -an -c:v libx264 -preset ultrafast -g 300 -keyint_min 300 -sc_threshold 0 -pix_fmt yuv420p out/fixture/clock.mp4
+          & $env:FFMPEG_EXE -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=60:duration=30" -an -c:v libx264 -preset ultrafast -g 300 -keyint_min 300 -sc_threshold 0 -pix_fmt yuv420p out/fixture/clock.mp4
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path out/fixture/clock.mp4)) { throw 'fixture generation failed.' }
-          ffprobe -v error -show_entries format=duration -show_entries stream=codec_name,r_frame_rate,nb_frames -of default=noprint_wrappers=1 out/fixture/clock.mp4 | Set-Content fixture-probe.txt
+          & $env:FFPROBE_EXE -v error -show_entries format=duration -show_entries stream=codec_name,r_frame_rate,nb_frames -of default=noprint_wrappers=1 out/fixture/clock.mp4 | Set-Content fixture-probe.txt
       - name: Build probe
         shell: pwsh
         run: |
