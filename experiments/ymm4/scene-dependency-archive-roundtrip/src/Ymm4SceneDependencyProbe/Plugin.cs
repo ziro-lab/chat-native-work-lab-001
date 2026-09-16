@@ -55,7 +55,7 @@ internal static class Probe
                         break;
                     }
                     if (active == null) continue;
-                    var model = root.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(root) as MainModel;
+                    var model = root.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(root);
                     var timeline = active.GetType().GetField("timeline", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(active) as Timeline;
                     if (model == null || timeline == null) continue;
                     timer.Stop();
@@ -78,22 +78,37 @@ internal static class Probe
         timer.Start();
     }
 
-    private static async Task RunAsync(MainModel model, Timeline main)
+    private static async Task RunAsync(object model, Timeline main)
     {
+        var modelType = model.GetType();
+        var scenes = modelType.GetProperty("Scenes", BindingFlags.Instance | BindingFlags.Public)?.GetValue(model) as Scenes
+            ?? throw new InvalidOperationException("MainModel.Scenes public surface missing.");
+        var createNewScene = modelType.GetMethod("CreateNewScene", BindingFlags.Instance | BindingFlags.Public, Type.EmptyTypes)
+            ?? throw new InvalidOperationException("MainModel.CreateNewScene() public surface missing.");
+        var selectScene = modelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(m => m.Name == "SelectScene" && m.GetParameters() is [{ ParameterType: var t }] && t == typeof(Timeline))
+            ?? throw new InvalidOperationException("MainModel.SelectScene(Timeline) public surface missing.");
+        var saveProject = modelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(m => m.Name == "SaveProject" && m.GetParameters() is [{ ParameterType: var t }] && t == typeof(string))
+            ?? throw new InvalidOperationException("MainModel.SaveProject(string) public surface missing.");
+        var loadProject = modelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(m => m.Name == "LoadProjectFile" && m.GetParameters() is [{ ParameterType: var t }] && t == typeof(string))
+            ?? throw new InvalidOperationException("MainModel.LoadProjectFile(string) public surface missing.");
+
         main.Name = "Main";
-        var before = model.Scenes.Timelines;
+        var before = scenes.Timelines;
         Assert(before.Count == 1, "fixture starts with one Main timeline");
 
-        model.CreateNewScene();
+        createNewScene.Invoke(model, null);
         await Idle();
-        var afterUsed = model.Scenes.Timelines;
+        var afterUsed = scenes.Timelines;
         Assert(afterUsed.Count == 2, "second scene was created");
         var used = afterUsed.Single(x => !ReferenceEquals(x, main));
         used.Name = "UsedSub";
 
-        model.CreateNewScene();
+        createNewScene.Invoke(model, null);
         await Idle();
-        var all = model.Scenes.Timelines;
+        var all = scenes.Timelines;
         Assert(all.Count == 3, "third scene was created");
         var scratch = all.Single(x => !ReferenceEquals(x, main) && !ReferenceEquals(x, used));
         scratch.Name = "Scratch";
@@ -113,19 +128,21 @@ internal static class Probe
         Append("CLOSURE " + string.Join(",", closure));
         Assert(closure.SetEquals([mainId, usedId]), "dependency closure contains Main and UsedSub only");
 
-        model.SelectScene(main);
+        selectScene.Invoke(model, [main]);
         await Idle();
-        model.Scenes.Timelines = all.Where(x => closure.Contains(GetTimelineId(x))).ToImmutableList();
-        Assert(model.Scenes.Timelines.Count == 2, "Scratch was removed from archive fixture");
-        Assert(model.Scenes.Timelines.All(x => x.Name is "Main" or "UsedSub"), "only Main and UsedSub remain before save");
+        scenes.Timelines = all.Where(x => closure.Contains(GetTimelineId(x))).ToImmutableList();
+        Assert(scenes.Timelines.Count == 2, "Scratch was removed from archive fixture");
+        Assert(scenes.Timelines.All(x => x.Name is "Main" or "UsedSub"), "only Main and UsedSub remain before save");
 
         var archive = Path.Combine(output, "scene-archive.ymmp");
-        model.SaveProject(archive);
+        saveProject.Invoke(model, [archive]);
         Assert(File.Exists(archive), "archive project file was created");
 
-        var loadedProject = await model.LoadProjectFile(archive);
+        var task = loadProject.Invoke(model, [archive]) as Task ?? throw new InvalidOperationException("LoadProjectFile did not return Task.");
+        await task;
+        var loadedProject = task.GetType().GetProperty("Result")?.GetValue(task);
         Assert(loadedProject != null, "archive project reload returned a Project");
-        var loadedTimelines = CollectTimelines(loadedProject).Distinct(ReferenceEqualityComparer.Instance).ToList();
+        var loadedTimelines = CollectTimelines(loadedProject!).Distinct(ReferenceEqualityComparer.Instance).ToList();
         Append("RELOADED timelines=" + string.Join(",", loadedTimelines.Select(x => x.Name)));
         var named = loadedTimelines.Where(x => x.Name is "Main" or "UsedSub" or "Scratch").ToList();
         Assert(named.Count(x => x.Name == "Main") == 1, "reloaded archive contains Main");
