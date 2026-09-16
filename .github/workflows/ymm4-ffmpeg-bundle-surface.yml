@@ -1,0 +1,79 @@
+name: YMM4 FFmpeg bundle surface
+
+on:
+  push:
+    branches: [experiment/ymm4-ffmpeg-bundle-surface]
+    paths:
+      - '.github/workflows/ymm4-ffmpeg-bundle-surface.yml'
+      - 'experiments/ymm4/ffmpeg-bundle-surface/**'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Confirm .NET 10
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object dotnet-sdks.txt
+          if(-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')){ throw '.NET 10 missing' }
+      - name: Download and expand exact YMM4 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if($LASTEXITCODE -ne 0){ throw 'YMM4 download failed' }
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'){ throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if(-not $exe){ throw 'YMM4 exe missing' }
+          "YMM4_DIR=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Record FFmpeg and FFprobe files in distribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $root=$env:YMM4_DIR
+          $hits=Get-ChildItem $root -Recurse -Force | Where-Object { $_.Name -match '(?i)ffmpeg|ffprobe' } | Sort-Object FullName
+          $hits | ForEach-Object { $_.FullName.Substring($root.Length).TrimStart('\') } | Set-Content out/distribution-hits.txt -Encoding utf8
+          $ffmpeg=Get-ChildItem $root -Recurse -File -Filter ffmpeg.exe
+          $ffprobe=Get-ChildItem $root -Recurse -File -Filter ffprobe.exe
+          @(
+            'ymm4_version=4.56.1.0',
+            "ffmpeg_exe_count=$($ffmpeg.Count)",
+            "ffprobe_exe_count=$($ffprobe.Count)",
+            "ffmpeg_paths=$((@($ffmpeg | ForEach-Object {$_.FullName.Substring($root.Length).TrimStart('\')}) -join ';'))",
+            "ffprobe_paths=$((@($ffprobe | ForEach-Object {$_.FullName.Substring($root.Length).TrimStart('\')}) -join ';'))"
+          ) | Set-Content out/result.txt -Encoding utf8
+      - name: Reflect YMM4 FFmpeg surfaces
+        shell: pwsh
+        run: |
+          dotnet run --project experiments/ymm4/ffmpeg-bundle-surface/src/FfmpegSurfaceProbe/FfmpegSurfaceProbe.csproj -c Release -- "$env:YMM4_DIR" "$PWD/out/reflection.txt"
+      - name: Build and install in-host locator probe
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/ffmpeg-bundle-surface/src/FfmpegHostProbe/FfmpegHostProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/host-probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){ throw 'Host probe build failed' }
+          $dest=Join-Path $env:YMM4_DIR 'user\plugin\FfmpegHostProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/host-probe/FfmpegHostProbe.dll $dest
+      - name: Invoke locator inside real YMM4 host
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/ffmpeg-bundle-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/host')
+      - name: Print evidence
+        shell: pwsh
+        run: |
+          Write-Host '=== result ==='; Get-Content out/result.txt
+          Write-Host '=== distribution hits ==='; if(Test-Path out/distribution-hits.txt){ Get-Content out/distribution-hits.txt | Select-Object -First 200 }
+          Write-Host '=== reflection ==='; if(Test-Path out/reflection.txt){ Get-Content out/reflection.txt | Select-Object -First 400 }
+          Write-Host '=== host locator ==='; if(Test-Path out/host/host-locator.txt){ Get-Content out/host/host-locator.txt }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-ffmpeg-bundle-surface
+          path: |
+            out/
+            dotnet-sdks.txt
+          retention-days: 14
