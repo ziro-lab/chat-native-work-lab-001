@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -7,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
@@ -172,9 +173,6 @@ internal static class Probe
         var closure = ComputeClosure(GetTimelineId(detachedMain), detachedTimelines);
         Assert(closure.SetEquals([GetTimelineId(detachedMain), GetTimelineId(detachedUsed)]), "detached closure is Main + UsedSub");
         Assert(!closure.Contains(GetTimelineId(detachedScratch)), "detached closure excludes Scratch");
-        SetProjectTimelines(detached, detachedTimelines.Where(x => closure.Contains(GetTimelineId(x))).ToImmutableList());
-        SetSelectedTimelineIndex(detached, 0);
-        Assert(GetProjectTimelines(detached).Count() == 2, "detached archive project prunes Scratch only");
 
         var detachedMainVideo = detachedMain.Items.OfType<VideoItem>().Single(x => x.Remark == "CNWL_MAIN_VIDEO");
         var detachedSubVideo = detachedUsed.Items.OfType<VideoItem>().Single(x => x.Remark == "CNWL_SUB_VIDEO");
@@ -184,11 +182,16 @@ internal static class Probe
         detachedSubVideo.ContentOffset = TimeSpan.FromSeconds(40.5);
         detached.FilePath = archiveProject;
 
+        var archiveDetached = PruneProjectThroughYmmJson(detached, closure, archiveProject);
+        var prunedTimelines = GetProjectTimelines(archiveDetached).ToList();
+        Assert(prunedTimelines.Count == 2, "YMM Json roundtrip prunes Scratch only");
+        Assert(prunedTimelines.All(x => x.Name is "Main" or "UsedSub"), "YMM Json roundtrip preserves Main + UsedSub");
+
         Assert(mainVideo.FilePath == sourceA && mainVideo.ContentOffset == TimeSpan.FromSeconds(100.25), "detached Main relink does not mutate live Main VideoItem");
         Assert(subVideo.FilePath == sourceB && subVideo.ContentOffset == TimeSpan.FromSeconds(300.5), "detached subscene relink does not mutate live UsedSub VideoItem");
         Assert(scenes.Timelines.Count == 3, "detached scene pruning does not mutate live scene list");
 
-        YmmJson.Save(detached, archiveProject);
+        YmmJson.Save(archiveDetached, archiveProject);
         Assert(File.Exists(archiveProject), "detached Json.Save created archive.ymmp");
         var sourceHashAfter = Hash(sourceProject);
         var sourceUnchanged = sourceHashBefore == sourceHashAfter;
@@ -230,26 +233,33 @@ internal static class Probe
         WriteResult("PASS_RECORDING_ARCHIVE_INTEGRATED_SPINE", true, sourceUnchanged, liveUnchanged, true, true, Hash(archiveProject));
     }
 
+    private static YmmProject PruneProjectThroughYmmJson(YmmProject project, HashSet<Guid> keepIds, string archivePath)
+    {
+        var jsonText = YmmJson.GetJsonText(project);
+        var root = JObject.Parse(jsonText);
+        var timelines = root["Timelines"] as JArray ?? throw new InvalidOperationException("Serialized Project.Timelines JSON array missing.");
+        var before = timelines.Count;
+        foreach (var node in timelines.OfType<JObject>().ToList())
+        {
+            var idText = (node["ID"] ?? node["Id"] ?? node["SceneId"])?.ToString();
+            if (!Guid.TryParse(idText, out var id)) throw new InvalidOperationException("Serialized Timeline ID missing or invalid.");
+            if (!keepIds.Contains(id)) node.Remove();
+        }
+        Assert(before == 3 && timelines.Count == 2, "serialized Timeline filter removes exactly one non-dependent scene");
+        root["SelectedTimelineIndex"] = 0;
+        root["FilePath"] = archivePath;
+        var rebuilt = YmmJson.LoadFromText<YmmProject>(root.ToString(Formatting.None))
+            ?? throw new InvalidOperationException("YMM Json.LoadFromText<Project> returned null after scene pruning.");
+        rebuilt.FilePath = archivePath;
+        return rebuilt;
+    }
+
     private static IEnumerable<Timeline> GetProjectTimelines(YmmProject project)
     {
         var property = project.GetType().GetProperty("Timelines", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Project.Timelines missing.");
         return property.GetValue(project) as IEnumerable<Timeline>
             ?? throw new InvalidOperationException("Project.Timelines is not IEnumerable<Timeline>.");
-    }
-
-    private static void SetProjectTimelines(YmmProject project, ImmutableList<Timeline> timelines)
-    {
-        var property = project.GetType().GetProperty("Timelines", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Project.Timelines missing.");
-        property.SetValue(project, timelines);
-    }
-
-    private static void SetSelectedTimelineIndex(YmmProject project, int value)
-    {
-        var property = project.GetType().GetProperty("SelectedTimelineIndex", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Project.SelectedTimelineIndex missing.");
-        property.SetValue(project, value);
     }
 
     private static HashSet<Guid> ComputeClosure(Guid root, IEnumerable<Timeline> timelines)
