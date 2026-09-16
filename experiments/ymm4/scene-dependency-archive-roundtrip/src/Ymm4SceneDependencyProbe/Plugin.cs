@@ -142,7 +142,7 @@ internal static class Probe
         await task;
         var loadedProject = task.GetType().GetProperty("Result")?.GetValue(task);
         Assert(loadedProject != null, "archive project reload returned a Project");
-        var loadedTimelines = CollectTimelines(loadedProject!).Distinct(ReferenceEqualityComparer.Instance).ToList();
+        var loadedTimelines = CollectTimelines(loadedProject!).DistinctBy(GetTimelineId).ToList();
         Append("RELOADED timelines=" + string.Join(",", loadedTimelines.Select(x => x.Name)));
         var named = loadedTimelines.Where(x => x.Name is "Main" or "UsedSub" or "Scratch").ToList();
         Assert(named.Count(x => x.Name == "Main") == 1, "reloaded archive contains Main");
