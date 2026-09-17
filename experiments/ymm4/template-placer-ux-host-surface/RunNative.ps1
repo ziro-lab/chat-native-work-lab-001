@@ -4,8 +4,9 @@ New-Item -ItemType Directory -Force $OutputDir | Out-Null
 $result=Join-Path $OutputDir 'result.txt'
 $surface=Join-Path $OutputDir 'surface.txt'
 $behavior=Join-Path $OutputDir 'behavior.txt'
+$boundaries=Join-Path $OutputDir 'boundaries.txt'
 $hostLog=Join-Path $OutputDir 'host-windows.txt'
-Remove-Item $result,$surface,$behavior,$hostLog -Force -ErrorAction SilentlyContinue
+Remove-Item $result,$surface,$behavior,$boundaries,$hostLog -Force -ErrorAction SilentlyContinue
 Add-Type -TypeDefinition @'
 using System; using System.Text; using System.Runtime.InteropServices;
 public static class CnwlUxSurfaceWin32 {
@@ -34,7 +35,7 @@ function Get-CnwlWindows {
 $env:CNWL_YMM4_TP_UX_SURFACE_DIR=$OutputDir
 $p=Start-Process -FilePath (Join-Path $Ymm4Dir 'YukkuriMovieMaker.exe') -WorkingDirectory $Ymm4Dir -PassThru
 try {
-  for($i=0;$i -lt 180 -and (-not(Test-Path $result) -or -not(Test-Path $behavior)) -and -not $p.HasExited;$i++){
+  for($i=0;$i -lt 180 -and (-not(Test-Path $result) -or -not(Test-Path $behavior) -or -not(Test-Path $boundaries)) -and -not $p.HasExited;$i++){
     foreach($w in (Get-CnwlWindows)){
       "tick=$i handle=$($w.Handle) title=$($w.Title)" | Add-Content $hostLog
       if($w.Title -like '*Check for updates*' -or $w.Title -like '*About YukkuriMovieMaker*'){
@@ -48,11 +49,16 @@ try {
   }
   if(-not(Test-Path $result)){ throw 'UX host surface probe did not report a result.' }
   $rows=Get-Content $result
-  if($rows -notcontains 'status=PASS_TEMPLATE_PLACER_UX_HOST_SURFACE'){ throw "UX host surface probe failed.`n$($rows -join "`n")" }
+  if($rows -notcontains 'status=PASS_TEMPLATE_PLACER_UX_HOST_SURFACE' -or ($rows -match '^error=')){ throw "UX host surface probe failed.`n$($rows -join "`n")" }
   if(-not(Test-Path $surface)){ throw 'surface.txt missing.' }
   if(-not(Test-Path $behavior)){ throw 'behavior.txt missing.' }
   $behaviorRows=Get-Content $behavior
-  if($behaviorRows -notcontains 'status=PASS_TEMPLATE_PLACER_UX_BEHAVIOR'){ throw "UX host behavior probe failed.`n$($behaviorRows -join "`n")" }
+  if($behaviorRows -notcontains 'status=PASS_TEMPLATE_PLACER_UX_BEHAVIOR' -or ($behaviorRows -match '^error=')){ throw "UX host behavior probe failed.`n$($behaviorRows -join "`n")" }
+  if($behaviorRows -notcontains 'UNDO_TRIAL_SESSION_RESULT=ONE_RECORD_INITIAL_TO_FINAL'){throw 'P0 trial result missing.'}
+  if(-not(Test-Path $boundaries)){throw 'Trial boundary observation missing.'}
+  $boundaryRows=Get-Content $boundaries
+  if($boundaryRows -notcontains 'BOUNDARY_OBSERVATION=COMPLETE' -or ($boundaryRows -match '^error=')){throw "Boundary probe failed.`n$($boundaryRows -join "`n")"}
+  $boundaryRows | Write-Output
 } finally {
   if(-not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
   Remove-Item Env:CNWL_YMM4_TP_UX_SURFACE_DIR -ErrorAction SilentlyContinue
