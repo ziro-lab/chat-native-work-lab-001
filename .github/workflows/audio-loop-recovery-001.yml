@@ -2,6 +2,12 @@ name: audio-loop-recovery-001
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'experiments/audio/audio-loop-recovery-001/**'
+      - '.github/workflows/audio-loop-recovery-001.yml'
   pull_request:
     paths:
       - 'experiments/audio/audio-loop-recovery-001/**'
