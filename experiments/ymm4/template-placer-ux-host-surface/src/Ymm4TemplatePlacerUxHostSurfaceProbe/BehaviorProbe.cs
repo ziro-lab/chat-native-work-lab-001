@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -30,8 +31,7 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
             lines.Add("status=PASS_TEMPLATE_PLACER_UX_BEHAVIOR");
             ProbeToolGroups(lines);
             ProbeItemLabels(lines);
-            await ProbeUndoCollectorAsync(lines);
-            await ProbeTimelineCollectorAsync(lines);
+            await ProbePropertyCommandConnectionAsync(lines);
             File.WriteAllLines(Path.Combine(dir, "behavior.txt"), lines, new UTF8Encoding(false));
         }
         catch (Exception ex)
@@ -88,55 +88,48 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
         }
     }
 
-    private static async Task ProbeUndoCollectorAsync(ICollection<string> lines)
+    private static async Task ProbePropertyCommandConnectionAsync(ICollection<string> lines)
     {
-        lines.Add("SECTION UNDO_COLLECTOR_BEHAVIOR");
-        var parent = new UndoRedoManager();
-        var collector = new UndoRedoCommandCollector();
-        var state = new Box { Value = 2 };
-        collector.Add(new UndoRedoActionCommand(() => state.Value = 0, () => state.Value = 1));
-        collector.Add(new UndoRedoActionCommand(() => state.Value = 1, () => state.Value = 2));
-        lines.Add($"UNDO_COLLECTOR empty_after_two={collector.IsEmpty} parent_undoable_before={parent.IsUndoable}");
-        parent.AddCommand(collector);
-        lines.Add($"UNDO_PARENT undoable_after_add={parent.IsUndoable} redoable={parent.IsRedoable} state={state.Value}");
-        await parent.UndoAsync();
-        lines.Add($"UNDO_PARENT after_undo state={state.Value} undoable={parent.IsUndoable} redoable={parent.IsRedoable}");
-        Check(state.Value == 0, "two native trial commands collapse into one parent undo step", lines);
-        await parent.RedoAsync();
-        lines.Add($"UNDO_PARENT after_redo state={state.Value} undoable={parent.IsUndoable} redoable={parent.IsRedoable}");
-        Check(state.Value == 2, "one parent redo restores the final trial state", lines);
-    }
-
-    private static async Task ProbeTimelineCollectorAsync(ICollection<string> lines)
-    {
-        lines.Add("SECTION TIMELINE_COLLECTOR_BEHAVIOR");
+        lines.Add("SECTION UNDO_PUBLIC_CONNECTION_BEHAVIOR");
         var timeline = new Timeline();
-        var parent = new UndoRedoManager();
-        var collector = new UndoRedoCommandCollector();
+        var manager = new UndoRedoManager();
         var initial = timeline.Items;
         var a = new TextItem { Frame = 10, Length = 20, Layer = 2, Text = "A" };
         var b = new TextItem { Frame = 40, Length = 20, Layer = 3, Text = "B" };
         var stateA = initial.Add(a);
         var stateB = initial.Add(b);
 
-        void SetItems(System.Collections.Immutable.ImmutableList<IItem> value)
+        timeline.Items = stateA;
+        timeline.RefreshTimelineLengthAndMaxLayer();
+        manager.AddCommand(new UndoRedoPropertyChangedCommand<Timeline, ImmutableList<IItem>>(timeline, nameof(Timeline.Items), initial, stateA));
+        timeline.Items = stateB;
+        timeline.RefreshTimelineLengthAndMaxLayer();
+        manager.AddCommand(new UndoRedoPropertyChangedCommand<Timeline, ImmutableList<IItem>>(timeline, nameof(Timeline.Items), stateA, stateB));
+        lines.Add($"UNDO_CONNECT before undoable={manager.IsUndoable} current_count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
+
+        await manager.UndoAsync();
+        var connected = timeline.Items.SequenceEqual(initial);
+        var oneUndoState = connected ? "initial" : timeline.Items.SequenceEqual(stateA) ? "first_trial" : "other";
+        lines.Add($"UNDO_CONNECT after_one_undo state={oneUndoState} connected={connected} count={timeline.Items.Count}");
+
+        if (connected)
         {
-            timeline.Items = value;
-            timeline.RefreshTimelineLengthAndMaxLayer();
+            await manager.RedoAsync();
+            var oneRedoFinal = timeline.Items.SequenceEqual(stateB);
+            lines.Add($"UNDO_CONNECT after_one_redo final={oneRedoFinal} count={timeline.Items.Count}");
+            Check(oneRedoFinal, "connected public property commands redo directly to final trial state", lines);
+        }
+        else
+        {
+            Check(timeline.Items.SequenceEqual(stateA), "without connection one undo reaches the immediately previous trial state", lines);
+            await manager.UndoAsync();
+            Check(timeline.Items.SequenceEqual(initial), "without connection a second undo reaches the initial state", lines);
+            await manager.RedoAsync();
+            await manager.RedoAsync();
+            Check(timeline.Items.SequenceEqual(stateB), "unconnected public commands still restore the final state after two redo steps", lines);
         }
 
-        collector.Add(new UndoRedoActionCommand(() => SetItems(initial), () => SetItems(stateA)));
-        SetItems(stateA);
-        collector.Add(new UndoRedoActionCommand(() => SetItems(stateA), () => SetItems(stateB)));
-        SetItems(stateB);
-        lines.Add($"TIMELINE_COLLECTOR empty={collector.IsEmpty} count_now={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
-        parent.AddCommand(collector);
-        await parent.UndoAsync();
-        lines.Add($"TIMELINE_COLLECTOR after_undo count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
-        Check(timeline.Items.Count == 0, "native collector groups multiple trial Timeline states into one undo", lines);
-        await parent.RedoAsync();
-        lines.Add($"TIMELINE_COLLECTOR after_redo count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
-        Check(timeline.Items.Count == 1 && !timeline.Items.Contains(a) && timeline.Items.Contains(b), "one native redo restores only the final Timeline trial state", lines);
+        lines.Add("UNDO_CONNECT_RESULT=" + (connected ? "CONNECTED_ONE_STEP" : "NOT_CONNECTED"));
     }
 
     private static void Check(bool value, string message, ICollection<string> lines)
@@ -144,6 +137,4 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
         if (!value) throw new InvalidOperationException("ASSERT FAIL: " + message);
         lines.Add("ASSERT PASS: " + message);
     }
-
-    private sealed class Box { public int Value { get; set; } }
 }
