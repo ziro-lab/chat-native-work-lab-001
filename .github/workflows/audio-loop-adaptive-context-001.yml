@@ -1,0 +1,62 @@
+name: audio-loop-adaptive-context-001
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'experiments/audio/audio-loop-adaptive-context-001/**'
+      - 'experiments/audio/audio-loop-structural-ambiguity-001/**'
+      - 'experiments/audio/audio-loop-transform-robustness-001/**'
+      - '.github/workflows/audio-loop-adaptive-context-001.yml'
+  pull_request:
+    paths:
+      - 'experiments/audio/audio-loop-adaptive-context-001/**'
+      - 'experiments/audio/audio-loop-structural-ambiguity-001/**'
+      - 'experiments/audio/audio-loop-transform-robustness-001/**'
+      - '.github/workflows/audio-loop-adaptive-context-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  adaptive-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned CPU inference stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install beat-this==1.1.0 soundfile==0.13.1
+          python -m pip freeze > adaptive-context-pip-freeze.txt
+
+      - name: Run adaptive context benchmark
+        working-directory: experiments/audio/audio-loop-adaptive-context-001
+        run: python verify.py
+
+      - name: Show compact evidence
+        if: always()
+        working-directory: experiments/audio/audio-loop-adaptive-context-001
+        run: |
+          test -f out/evidence.json && cat out/evidence.json || true
+
+      - name: Upload adaptive context evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-loop-adaptive-context-001-evidence
+          path: |
+            adaptive-context-pip-freeze.txt
+            experiments/audio/audio-loop-adaptive-context-001/out/report.json
+            experiments/audio/audio-loop-adaptive-context-001/out/evidence.json
+          if-no-files-found: warn
+          retention-days: 14
