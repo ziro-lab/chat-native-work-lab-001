@@ -9,6 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "out"
+EXPECTED_SMALL0_SHA256 = "6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b"
+EXPECTED_SMALL0_SIZE = 8451101
 
 
 def run(*args: str) -> None:
@@ -32,9 +34,9 @@ def main() -> None:
     runtime = predictions["runtime"]
 
     assert runtime["beat_this"] == "1.1.0", runtime
-    assert runtime["checkpoint_name"], runtime
-    assert int(runtime["checkpoint_size"]) > 0, runtime
-    assert len(runtime["checkpoint_sha256"]) == 64, runtime
+    assert runtime["checkpoint_name"] == "beat_this-small0.ckpt", runtime
+    assert int(runtime["checkpoint_size"]) == EXPECTED_SMALL0_SIZE, runtime
+    assert runtime["checkpoint_sha256"] == EXPECTED_SMALL0_SHA256, runtime
     assert len(predictions["takes"]) == 3
 
     strong_beat_takes = sum(t["beat"]["f1"] >= 0.90 for t in per_take)
