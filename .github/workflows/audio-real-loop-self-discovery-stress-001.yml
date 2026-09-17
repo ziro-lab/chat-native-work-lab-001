@@ -54,6 +54,7 @@ jobs:
           path: |
             self-discovery-stress-pip-freeze.txt
             experiments/audio/audio-real-loop-self-discovery-stress-001/out/report.json
+            experiments/audio/audio-real-loop-self-discovery-stress-001/out/report-centered.json
             experiments/audio/audio-real-loop-self-discovery-stress-001/out/evidence.json
           if-no-files-found: warn
           retention-days: 14
