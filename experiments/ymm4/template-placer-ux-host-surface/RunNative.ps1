@@ -3,8 +3,9 @@ $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Force $OutputDir | Out-Null
 $result=Join-Path $OutputDir 'result.txt'
 $surface=Join-Path $OutputDir 'surface.txt'
+$behavior=Join-Path $OutputDir 'behavior.txt'
 $hostLog=Join-Path $OutputDir 'host-windows.txt'
-Remove-Item $result,$surface,$hostLog -Force -ErrorAction SilentlyContinue
+Remove-Item $result,$surface,$behavior,$hostLog -Force -ErrorAction SilentlyContinue
 Add-Type -TypeDefinition @'
 using System; using System.Text; using System.Runtime.InteropServices;
 public static class CnwlUxSurfaceWin32 {
@@ -33,7 +34,7 @@ function Get-CnwlWindows {
 $env:CNWL_YMM4_TP_UX_SURFACE_DIR=$OutputDir
 $p=Start-Process -FilePath (Join-Path $Ymm4Dir 'YukkuriMovieMaker.exe') -WorkingDirectory $Ymm4Dir -PassThru
 try {
-  for($i=0;$i -lt 180 -and -not(Test-Path $result) -and -not $p.HasExited;$i++){
+  for($i=0;$i -lt 180 -and (-not(Test-Path $result) -or -not(Test-Path $behavior)) -and -not $p.HasExited;$i++){
     foreach($w in (Get-CnwlWindows)){
       "tick=$i handle=$($w.Handle) title=$($w.Title)" | Add-Content $hostLog
       if($w.Title -like '*Check for updates*' -or $w.Title -like '*About YukkuriMovieMaker*'){
@@ -49,6 +50,9 @@ try {
   $rows=Get-Content $result
   if($rows -notcontains 'status=PASS_TEMPLATE_PLACER_UX_HOST_SURFACE'){ throw "UX host surface probe failed.`n$($rows -join "`n")" }
   if(-not(Test-Path $surface)){ throw 'surface.txt missing.' }
+  if(-not(Test-Path $behavior)){ throw 'behavior.txt missing.' }
+  $behaviorRows=Get-Content $behavior
+  if($behaviorRows -notcontains 'status=PASS_TEMPLATE_PLACER_UX_BEHAVIOR'){ throw "UX host behavior probe failed.`n$($behaviorRows -join "`n")" }
 } finally {
   if(-not $p.HasExited){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
   Remove-Item Env:CNWL_YMM4_TP_UX_SURFACE_DIR -ErrorAction SilentlyContinue
