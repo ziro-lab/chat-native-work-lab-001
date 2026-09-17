@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -31,7 +30,8 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
             lines.Add("status=PASS_TEMPLATE_PLACER_UX_BEHAVIOR");
             ProbeToolGroups(lines);
             ProbeItemLabels(lines);
-            await ProbePropertyCommandConnectionAsync(lines);
+            ProbeLocalizedResourceNames(lines);
+            await ProbeSingleRecordTrialSessionAsync(lines);
             File.WriteAllLines(Path.Combine(dir, "behavior.txt"), lines, new UTF8Encoding(false));
         }
         catch (Exception ex)
@@ -61,75 +61,77 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
     private static void ProbeItemLabels(ICollection<string> lines)
     {
         lines.Add("SECTION ITEM_LABEL_VALUES");
-        var oldCulture = CultureInfo.CurrentCulture;
-        var oldUi = CultureInfo.CurrentUICulture;
+        foreach (var type in new[] { typeof(TransitionItem), typeof(FrameBufferItem), typeof(VoiceItem), typeof(VideoItem), typeof(ImageItem), typeof(AudioItem), typeof(TextItem), typeof(TachieItem), typeof(ShapeItem) })
+        {
+            try
+            {
+                if (Activator.CreateInstance(type) is IItem item)
+                    lines.Add($"ITEM_LABEL type={type.FullName} label={item.Label}");
+                else lines.Add($"ITEM_LABEL_NO_INSTANCE type={type.FullName}");
+            }
+            catch (Exception ex) { lines.Add($"ITEM_LABEL_CREATE_FAIL type={type.FullName} error={ex.GetType().Name}"); }
+        }
+    }
+
+    private static void ProbeLocalizedResourceNames(ICollection<string> lines)
+    {
+        lines.Add("SECTION LOCALIZED_ITEM_RESOURCE_VALUES");
+        var texts = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(a => a.GetType("YukkuriMovieMaker.Resources.Localization.Texts", false))
+            .FirstOrDefault(t => t != null);
+        if (texts == null) { lines.Add("RESOURCE_TEXTS_MISSING"); return; }
+
+        var cultureProperty = texts.GetProperty("Culture", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        var oldCulture = cultureProperty?.CanRead == true ? cultureProperty.GetValue(null) : null;
         try
         {
-            foreach (var culture in new[] { oldUi, CultureInfo.GetCultureInfo("ja-JP") })
+            if (cultureProperty?.CanWrite == true) cultureProperty.SetValue(null, CultureInfo.GetCultureInfo("ja-JP"));
+            foreach (var name in new[] { "TransitionItemName", "FrameBufferItemName", "EffectItemName", "VoiceItemName", "VideoItemName", "ImageItemName", "AudioItemName", "TextItemName", "TachieItemName", "ShapeItemName" })
             {
-                CultureInfo.CurrentCulture = culture;
-                CultureInfo.CurrentUICulture = culture;
-                foreach (var type in new[] { typeof(TransitionItem), typeof(FrameBufferItem), typeof(VoiceItem), typeof(VideoItem), typeof(ImageItem), typeof(AudioItem), typeof(TextItem), typeof(TachieItem), typeof(ShapeItem) })
-                {
-                    try
-                    {
-                        if (Activator.CreateInstance(type) is IItem item)
-                            lines.Add($"ITEM_LABEL culture={culture.Name} type={type.FullName} label={item.Label}");
-                        else lines.Add($"ITEM_LABEL_NO_INSTANCE culture={culture.Name} type={type.FullName}");
-                    }
-                    catch (Exception ex) { lines.Add($"ITEM_LABEL_CREATE_FAIL culture={culture.Name} type={type.FullName} error={ex.GetType().Name}"); }
-                }
+                var p = texts.GetProperty(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                lines.Add($"RESOURCE_ITEM_NAME property={name} value={p?.GetValue(null) ?? "<missing>"}");
             }
         }
         finally
         {
-            CultureInfo.CurrentCulture = oldCulture;
-            CultureInfo.CurrentUICulture = oldUi;
+            if (cultureProperty?.CanWrite == true) cultureProperty.SetValue(null, oldCulture);
         }
     }
 
-    private static async Task ProbePropertyCommandConnectionAsync(ICollection<string> lines)
+    private static async Task ProbeSingleRecordTrialSessionAsync(ICollection<string> lines)
     {
-        lines.Add("SECTION UNDO_PUBLIC_CONNECTION_BEHAVIOR");
+        lines.Add("SECTION UNDO_SINGLE_RECORD_TRIAL_SESSION");
         var timeline = new Timeline();
         var manager = new UndoRedoManager();
-        var initial = timeline.Items;
-        var a = new TextItem { Frame = 10, Length = 20, Layer = 2, Text = "A" };
-        var b = new TextItem { Frame = 40, Length = 20, Layer = 3, Text = "B" };
-        var stateA = initial.Add(a);
-        var stateB = initial.Add(b);
-
-        timeline.Items = stateA;
-        timeline.RefreshTimelineLengthAndMaxLayer();
-        manager.AddCommand(new UndoRedoPropertyChangedCommand<Timeline, ImmutableList<IItem>>(timeline, nameof(Timeline.Items), initial, stateA));
-        timeline.Items = stateB;
-        timeline.RefreshTimelineLengthAndMaxLayer();
-        manager.AddCommand(new UndoRedoPropertyChangedCommand<Timeline, ImmutableList<IItem>>(timeline, nameof(Timeline.Items), stateA, stateB));
-        lines.Add($"UNDO_CONNECT before undoable={manager.IsUndoable} current_count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
-
-        await manager.UndoAsync();
-        var connected = timeline.Items.SequenceEqual(initial);
-        var oneUndoState = connected ? "initial" : timeline.Items.SequenceEqual(stateA) ? "first_trial" : "other";
-        lines.Add($"UNDO_CONNECT after_one_undo state={oneUndoState} connected={connected} count={timeline.Items.Count}");
-
-        if (connected)
+        EventHandler<UndoRedoEventArgs> handler = (_, e) => manager.AddCommand(e.Command);
+        timeline.UndoRedoCommandCreated += handler;
+        try
         {
-            await manager.RedoAsync();
-            var oneRedoFinal = timeline.Items.SequenceEqual(stateB);
-            lines.Add($"UNDO_CONNECT after_one_redo final={oneRedoFinal} count={timeline.Items.Count}");
-            Check(oneRedoFinal, "connected public property commands redo directly to final trial state", lines);
-        }
-        else
-        {
-            Check(timeline.Items.SequenceEqual(stateA), "without connection one undo reaches the immediately previous trial state", lines);
+            var initial = timeline.Items;
+            var a = new TextItem { Frame = 10, Length = 20, Layer = 2, Text = "A" };
+            var b = new TextItem { Frame = 40, Length = 20, Layer = 3, Text = "B" };
+
+            manager.Record();
+            timeline.Items = initial.Add(a);
+            timeline.RefreshTimelineLengthAndMaxLayer();
+            timeline.Items = initial.Add(b);
+            timeline.RefreshTimelineLengthAndMaxLayer();
+            manager.Record();
+
+            lines.Add($"TRIAL_RECORD after_close undoable={manager.IsUndoable} redoable={manager.IsRedoable} count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
+            Check(manager.IsUndoable, "closing one native Record session creates one undoable history entry", lines);
             await manager.UndoAsync();
-            Check(timeline.Items.SequenceEqual(initial), "without connection a second undo reaches the initial state", lines);
+            lines.Add($"TRIAL_RECORD after_undo count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)} redoable={manager.IsRedoable}");
+            Check(timeline.Items.SequenceEqual(initial), "one native Undo returns the whole trial session to its initial state", lines);
             await manager.RedoAsync();
-            await manager.RedoAsync();
-            Check(timeline.Items.SequenceEqual(stateB), "unconnected public commands still restore the final state after two redo steps", lines);
+            lines.Add($"TRIAL_RECORD after_redo count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)} undoable={manager.IsUndoable}");
+            Check(timeline.Items.Count == 1 && !timeline.Items.Contains(a) && timeline.Items.Contains(b), "one native Redo restores only the final trial state", lines);
+            lines.Add("UNDO_TRIAL_SESSION_RESULT=ONE_RECORD_INITIAL_TO_FINAL");
         }
-
-        lines.Add("UNDO_CONNECT_RESULT=" + (connected ? "CONNECTED_ONE_STEP" : "NOT_CONNECTED"));
+        finally
+        {
+            timeline.UndoRedoCommandCreated -= handler;
+        }
     }
 
     private static void Check(bool value, string message, ICollection<string> lines)
