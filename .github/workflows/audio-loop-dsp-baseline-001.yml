@@ -1,0 +1,54 @@
+name: audio-loop-dsp-baseline-001
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'experiments/audio/audio-loop-recovery-001/**'
+      - 'experiments/audio/audio-loop-dsp-baseline-001/**'
+      - '.github/workflows/audio-loop-dsp-baseline-001.yml'
+  pull_request:
+    paths:
+      - 'experiments/audio/audio-loop-recovery-001/**'
+      - 'experiments/audio/audio-loop-dsp-baseline-001/**'
+      - '.github/workflows/audio-loop-dsp-baseline-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dsp-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate fixture and compare DSP baselines
+        working-directory: experiments/audio/audio-loop-dsp-baseline-001
+        run: python verify.py
+
+      - name: Show compact evidence
+        if: always()
+        working-directory: experiments/audio/audio-loop-dsp-baseline-001
+        run: |
+          test -f out/evidence.json && cat out/evidence.json || true
+
+      - name: Upload DSP benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-loop-dsp-baseline-001-evidence
+          path: |
+            experiments/audio/audio-loop-dsp-baseline-001/out/manifest.json
+            experiments/audio/audio-loop-dsp-baseline-001/out/evidence.json
+            experiments/audio/audio-loop-dsp-baseline-001/out/report-*.json
+            experiments/audio/audio-loop-dsp-baseline-001/out/predictions-*.json
+          if-no-files-found: warn
+          retention-days: 14
