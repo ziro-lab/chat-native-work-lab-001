@@ -31,7 +31,7 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
             ProbeToolGroups(lines);
             ProbeItemLabels(lines);
             await ProbeUndoCollectorAsync(lines);
-            await ProbeTimelineRecordCollectorAsync(lines);
+            await ProbeTimelineCollectorAsync(lines);
             File.WriteAllLines(Path.Combine(dir, "behavior.txt"), lines, new UTF8Encoding(false));
         }
         catch (Exception ex)
@@ -45,8 +45,8 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
     {
         lines.Add("SECTION TOOL_GROUP_VALUES");
         foreach (var typeName in new[] {
-            "YukkuriMovieMaker.Plugin.Community.ExplorerToolPlugin",
-            "YukkuriMovieMaker.Plugin.Community.NotepadToolPlugin"
+            "YukkuriMovieMaker.Plugin.Community.Tool.Explorer.ExplorerToolPlugin",
+            "YukkuriMovieMaker.Plugin.Community.Tool.Notepad.NotepadToolPlugin"
         })
         {
             var type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(typeName, false)).FirstOrDefault(t => t != null);
@@ -54,7 +54,7 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
             object? instance = null;
             try { instance = Activator.CreateInstance(type); } catch (Exception ex) { lines.Add("TOOL_GROUP_CREATE_FAIL " + typeName + " " + ex.GetType().Name); }
             if (instance is IToolPlugin tool)
-                lines.Add($"TOOL_GROUP_VALUE type={type.FullName} name={tool.Name} group={tool.DefaultGroupName} group2={tool.DefaultGroupName2}");
+                lines.Add($"TOOL_GROUP_VALUE type={type.FullName} name={tool.Name} group={tool.DefaultGroupName} order={tool.DefaultOrder}");
         }
     }
 
@@ -93,49 +93,50 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
         lines.Add("SECTION UNDO_COLLECTOR_BEHAVIOR");
         var parent = new UndoRedoManager();
         var collector = new UndoRedoCommandCollector();
-        var child = new UndoRedoManager(collector);
-        var state = new Box();
-        state.Value = 2;
-        child.AddCommand(new BoxCommand(state, 0, 1));
-        child.AddCommand(new BoxCommand(state, 1, 2));
-        lines.Add($"UNDO_CHILD collector_empty_after_two={collector.IsEmpty} parent_undoable_before={parent.IsUndoable}");
+        var state = new Box { Value = 2 };
+        collector.Add(new UndoRedoActionCommand(() => state.Value = 0, () => state.Value = 1));
+        collector.Add(new UndoRedoActionCommand(() => state.Value = 1, () => state.Value = 2));
+        lines.Add($"UNDO_COLLECTOR empty_after_two={collector.IsEmpty} parent_undoable_before={parent.IsUndoable}");
         parent.AddCommand(collector);
         lines.Add($"UNDO_PARENT undoable_after_add={parent.IsUndoable} redoable={parent.IsRedoable} state={state.Value}");
         await parent.UndoAsync();
         lines.Add($"UNDO_PARENT after_undo state={state.Value} undoable={parent.IsUndoable} redoable={parent.IsRedoable}");
-        Check(state.Value == 0, "child manager commands collected into one parent undo step", lines);
+        Check(state.Value == 0, "two native trial commands collapse into one parent undo step", lines);
         await parent.RedoAsync();
         lines.Add($"UNDO_PARENT after_redo state={state.Value} undoable={parent.IsUndoable} redoable={parent.IsRedoable}");
-        Check(state.Value == 2, "one parent redo restores both collected commands", lines);
+        Check(state.Value == 2, "one parent redo restores the final trial state", lines);
     }
 
-    private static async Task ProbeTimelineRecordCollectorAsync(ICollection<string> lines)
+    private static async Task ProbeTimelineCollectorAsync(ICollection<string> lines)
     {
-        lines.Add("SECTION TIMELINE_RECORD_COLLECTOR");
+        lines.Add("SECTION TIMELINE_COLLECTOR_BEHAVIOR");
         var timeline = new Timeline();
-        var collector = new UndoRedoCommandCollector();
-        var child = new UndoRedoManager(collector);
         var parent = new UndoRedoManager();
-        child.Subscribe(timeline);
+        var collector = new UndoRedoCommandCollector();
+        var initial = timeline.Items;
         var a = new TextItem { Frame = 10, Length = 20, Layer = 2, Text = "A" };
         var b = new TextItem { Frame = 40, Length = 20, Layer = 3, Text = "B" };
-        child.Record();
-        timeline.Items = timeline.Items.Add(a);
-        timeline.RefreshTimelineLengthAndMaxLayer();
-        child.Record();
-        child.Record();
-        timeline.Items = timeline.Items.Remove(a).Add(b);
-        timeline.RefreshTimelineLengthAndMaxLayer();
-        child.Record();
+        var stateA = initial.Add(a);
+        var stateB = initial.Add(b);
+
+        void SetItems(System.Collections.Immutable.ImmutableList<IItem> value)
+        {
+            timeline.Items = value;
+            timeline.RefreshTimelineLengthAndMaxLayer();
+        }
+
+        collector.Add(new UndoRedoActionCommand(() => SetItems(initial), () => SetItems(stateA)));
+        SetItems(stateA);
+        collector.Add(new UndoRedoActionCommand(() => SetItems(stateA), () => SetItems(stateB)));
+        SetItems(stateB);
         lines.Add($"TIMELINE_COLLECTOR empty={collector.IsEmpty} count_now={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
         parent.AddCommand(collector);
         await parent.UndoAsync();
         lines.Add($"TIMELINE_COLLECTOR after_undo count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
-        Check(timeline.Items.Count == 0, "multiple native Record pairs collected into one parent undo step", lines);
+        Check(timeline.Items.Count == 0, "native collector groups multiple trial Timeline states into one undo", lines);
         await parent.RedoAsync();
         lines.Add($"TIMELINE_COLLECTOR after_redo count={timeline.Items.Count} hasA={timeline.Items.Contains(a)} hasB={timeline.Items.Contains(b)}");
-        Check(timeline.Items.Count == 1 && !timeline.Items.Contains(a) && timeline.Items.Contains(b), "one parent redo restores final Timeline trial state", lines);
-        child.Unsubscribe(timeline);
+        Check(timeline.Items.Count == 1 && !timeline.Items.Contains(a) && timeline.Items.Contains(b), "one native redo restores only the final Timeline trial state", lines);
     }
 
     private static void Check(bool value, string message, ICollection<string> lines)
@@ -145,9 +146,4 @@ public sealed class BehaviorProbeEntry : ILocalizePlugin
     }
 
     private sealed class Box { public int Value { get; set; } }
-    private sealed class BoxCommand(Box box, int before, int after) : IUndoRedoCommand
-    {
-        public ValueTask UndoAsync() { box.Value = before; return ValueTask.CompletedTask; }
-        public ValueTask RedoAsync() { box.Value = after; return ValueTask.CompletedTask; }
-    }
 }
