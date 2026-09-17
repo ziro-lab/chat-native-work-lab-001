@@ -1,0 +1,50 @@
+name: audio-real-loop-source-inventory-001
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'experiments/audio/audio-real-loop-source-inventory-001/**'
+      - '.github/workflows/audio-real-loop-source-inventory-001.yml'
+  pull_request:
+    paths:
+      - 'experiments/audio/audio-real-loop-source-inventory-001/**'
+      - '.github/workflows/audio-real-loop-source-inventory-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve and inventory real loop sources
+        working-directory: experiments/audio/audio-real-loop-source-inventory-001
+        run: python verify.py
+
+      - name: Show compact evidence
+        if: always()
+        working-directory: experiments/audio/audio-real-loop-source-inventory-001
+        run: |
+          test -f out/evidence.json && cat out/evidence.json || true
+
+      - name: Upload metadata evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-real-loop-source-inventory-001-evidence
+          path: |
+            experiments/audio/audio-real-loop-source-inventory-001/out/inventory.json
+            experiments/audio/audio-real-loop-source-inventory-001/out/evidence.json
+          if-no-files-found: warn
+          retention-days: 14
