@@ -1,0 +1,75 @@
+name: YMM4 Template Placer UX host surface
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/ymm4-template-placer-ux-host-surface]
+    paths:
+      - 'experiments/ymm4/template-placer-ux-host-surface/**'
+      - '.github/workflows/ymm4-template-placer-ux-host-surface.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-template-placer-ux-host-surface-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-surface:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK missing' }
+      - name: Download and verify exact YMM4 4.55.1.1 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 exe missing.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe | Out-Null
+          dotnet build experiments/ymm4/template-placer-ux-host-surface/src/Ymm4TemplatePlacerUxHostSurfaceProbe/Ymm4TemplatePlacerUxHostSurfaceProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'UX host surface probe build failed.' }
+      - name: Install probe
+        shell: pwsh
+        run: |
+          $dest=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4TemplatePlacerUxHostSurfaceProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/probe/Ymm4TemplatePlacerUxHostSurfaceProbe.dll $dest
+      - name: Run native surface probe
+        shell: pwsh
+        run: ./experiments/ymm4/template-placer-ux-host-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - name: Print focused evidence
+        if: always()
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence/result.txt){Get-Content out/evidence/result.txt}
+          if(Test-Path out/evidence/surface.txt){Select-String -Path out/evidence/surface.txt -Pattern '^(ITOOLPLUGIN_|TIMELINE_|UNDO_|TOOL_|ITEM_NAME_|ITEM_TYPE |SECTION )' | Select-Object -First 1200 | ForEach-Object {$_.Line}}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-template-placer-ux-host-surface
+          path: |
+            out/evidence/
+            out/build.txt
+            out/probe/Ymm4TemplatePlacerUxHostSurfaceProbe.dll
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14
