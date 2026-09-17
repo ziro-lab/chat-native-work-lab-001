@@ -1,0 +1,47 @@
+name: audio-loop-recovery-001
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/audio/audio-loop-recovery-001/**'
+      - '.github/workflows/audio-loop-recovery-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate and verify benchmark fixture
+        working-directory: experiments/audio/audio-loop-recovery-001
+        run: python verify.py
+
+      - name: Show compact evidence
+        if: always()
+        working-directory: experiments/audio/audio-loop-recovery-001
+        run: |
+          test -f out/evidence.json && cat out/evidence.json || true
+
+      - name: Upload generated benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-loop-recovery-001-evidence
+          path: |
+            experiments/audio/audio-loop-recovery-001/out/manifest.json
+            experiments/audio/audio-loop-recovery-001/out/evidence.json
+            experiments/audio/audio-loop-recovery-001/out/report-oracle.json
+            experiments/audio/audio-loop-recovery-001/out/report-random.json
+            experiments/audio/audio-loop-recovery-001/out/take-*.wav
+          if-no-files-found: warn
+          retention-days: 14
