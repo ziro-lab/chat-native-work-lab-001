@@ -73,9 +73,9 @@ public sealed class BoundaryProbeEntry : ILocalizePlugin
             await m.UndoAsync();
             var separate = t.Items.SequenceEqual(initial.Add(b)) && original.Text == "original";
             Trace("RESULT FIRST_UNDO_ONLY_EXTERNAL=" + separate);
-            await m.UndoAsync();
-            Trace("RESULT SECOND_UNDO_INITIAL=" + (t.Items.SequenceEqual(initial) && original.Text == "original"));
-            await m.RedoAsync(); await m.RedoAsync();
+            if (m.IsUndoable) await m.UndoAsync(); else Trace("SECOND_UNDO unavailable (negative result, not a probe crash)");
+            Trace("RESULT SECOND_UNDO_INITIAL=" + (separate && t.Items.SequenceEqual(initial) && original.Text == "original"));
+            if (m.IsRedoable) await m.RedoAsync(); if (m.IsRedoable) await m.RedoAsync();
             Trace("RESULT REDO_EXTERNAL=" + (kind == "TIMELINE" ? t.Items.Contains(other) : original.Text == "external"));
         }
         finally { t.UndoRedoCommandCreated -= route; t.PropertyChanging -= changing; original.PropertyChanging -= changing; }
@@ -98,9 +98,9 @@ public sealed class BoundaryProbeEntry : ILocalizePlugin
             m.Record(); open = true; t.Items = initial.Add(a); t.RefreshTimelineLengthAndMaxLayer();
             t.Items = initial.Add(b); t.RefreshTimelineLengthAndMaxLayer();
             lines.Add("OPEN BEFORE UndoAsync undoable=" + m.IsUndoable);
-            await m.UndoAsync();
+            try { await m.UndoAsync(); } catch (InvalidOperationException ex) { lines.Add("OPEN DIRECT_UNDO_REJECTED=" + ex.Message); }
             lines.Add("OPEN RESULT UNDO_INITIAL=" + t.Items.SequenceEqual(initial) + " open=" + open);
-            await m.RedoAsync();
+            if (m.IsRedoable) await m.RedoAsync();
             lines.Add("OPEN RESULT REDO_FINAL=" + t.Items.SequenceEqual(initial.Add(b)) + " open=" + open);
         }
         finally { t.UndoRedoCommandCreated -= route; }
