@@ -58,7 +58,7 @@ def run(out:Path, real=False):
                e.start>=h['body_start'] and e.end<=h['body_end']]
         source_rows.append({'id':ident,'source_sha256':a.source_sha256,'source_zip_sha256':source_digest,
             'license':license_id,'source_seconds':a.frames/a.sample_rate,'analysis_seconds':elapsed,
-            'edges':len(a.edges),'strict_known_pair_top1':bool(a.edges and a.edges[0] in valid),
+            'edges':len(a.edges),'analysis_warnings':a.warnings,'edge_kinds':sorted({e.kind for e in a.edges}),'strict_known_pair_top1':bool(a.edges and a.edges[0] in valid),
             'strict_known_pair_top3':any(e in valid for e in a.edges[:3]),
             'known_period_seconds':h['period']/h['sr'],
             'top_periods_seconds':[(e.end-e.start)/h['sr'] for e in a.edges[:3]]})

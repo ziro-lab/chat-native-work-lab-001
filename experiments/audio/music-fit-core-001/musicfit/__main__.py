@@ -10,6 +10,8 @@ from .render import fit
 
 
 def main():
+    for stream in (sys.stdin,sys.stdout,sys.stderr):
+        if hasattr(stream,'reconfigure'): stream.reconfigure(encoding='utf-8')
     cancelled=False
     def cancel(_sig,_frame):
         nonlocal cancelled

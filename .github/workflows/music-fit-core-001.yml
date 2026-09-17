@@ -41,6 +41,9 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: experiments/audio/music-fit-core-001
         run: python benchmark.py --real --output out-real
+      - name: Ten-minute synthetic streaming smoke
+        working-directory: experiments/audio/music-fit-core-001
+        run: python scale_check.py
       - name: Record source and actual checkout identity
         shell: bash
         run: |
@@ -56,6 +59,7 @@ jobs:
           path: |
             experiments/audio/music-fit-core-001/out-synthetic/report.json
             experiments/audio/music-fit-core-001/out-real/report.json
+            experiments/audio/music-fit-core-001/scale-report.json
             music-fit-pip-freeze.txt
             music-fit-checkout.txt
           if-no-files-found: error

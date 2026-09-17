@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 import numpy as np
@@ -43,7 +43,7 @@ class Config:
     min_similarity: float = 0.78
     max_edges: int = 24
     beam_width: int = 32
-    max_jumps: int = 48
+    max_jumps: int = 128
     min_run_seconds: float = 1.0
     keep_intro_seconds: float = 2.0
     keep_outro_seconds: float = 2.0
@@ -51,7 +51,7 @@ class Config:
     fade_out_seconds: float = 0.75
     def validate(self):
         for k, v in asdict(self).items():
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or (v == 0 and k not in ('keep_intro_seconds','keep_outro_seconds')):
                 raise FitError(f'invalid_config:{k}')
         for name in ('analysis_rate','max_feature_frames','max_decoded_bytes','max_edges','beam_width','max_jumps'):
             if type(getattr(self,name)) is not int: raise FitError(f'invalid_integer_config:{name}')
@@ -59,8 +59,10 @@ class Config:
             raise FitError('analysis_limits_exceeded')
         if not 0 < self.min_similarity < 1 or self.min_loop_seconds >= self.max_loop_seconds:
             raise FitError('invalid_similarity_or_loop_range')
-        if self.max_edges > 64 or self.beam_width > 128 or self.max_jumps > 128:
+        if self.max_edges > 64 or self.beam_width > 128 or self.max_jumps > 256:
             raise FitError('search_limits_exceeded')
+        if self.max_decoded_bytes > 512*1024*1024 or self.max_input_seconds > 1800 or self.max_loop_seconds > 300:
+            raise FitError('resource_limits_exceeded')
         if self.crossfade_seconds > 0.2 or self.max_output_seconds > 3600:
             raise FitError('render_limits_exceeded')
 
@@ -232,46 +234,55 @@ def analyze(path: Path, config: Config | None = None, budget: Budget | None = No
         a.warnings.append(f'analysis_channel_{channel};render_preserves_stereo')
     lo = max(2, math.ceil(c.min_loop_seconds / hop))
     hi = min(len(x) // 2 - 1, math.floor(c.max_loop_seconds / hop))
-    peaks = []
-    floor = max(1e-5, float(np.percentile(energy, 65)) * 0.15)
-    def lag_scores(lag):
-        left, right = x[:-lag], x[lag:]
-        den = np.sqrt(np.maximum(_window_sum(np.sum(left*left, axis=1), lag) *
-                                _window_sum(np.sum(right*right, axis=1), lag), 1e-12))
-        corrs = _window_sum(np.sum(left*right, axis=1), lag) / den
-        valid = (_window_sum(energy[:-lag], lag) / lag > floor) & (_window_sum(energy[lag:], lag) / lag > floor)
-        corrs[~valid] = -1
-        return corrs
-    for lag in range(lo, hi + 1):
-        if lag % 24 == 0: b.check()
-        corrs = lag_scores(lag)
-        if len(corrs): peaks.append((float(np.max(corrs)), lag))
-    peaks.sort(reverse=True)
-    used_lags, pairs = [], []
-    for recurrence, lag in peaks:
-        if recurrence < c.min_similarity: break
-        if any(abs(lag - other) * hop < 0.18 for other in used_lags): continue
-        used_lags.append(lag)
-        corrs = lag_scores(lag)
-        # A long recurrent phrase need not have its best local join at the start of that window.
-        # Check several actual endpoints; exclude weak seams instead of trusting recurrence alone.
-        indices = sorted(range(len(corrs)), key=lambda i: -corrs[i])
-        accepted_starts = []
-        examined = 0
-        for idx in indices:
-            if corrs[idx] < c.min_similarity or examined >= 40: break
-            if any(abs(idx-other)*hop < 0.24 for other in accepted_starts): continue
-            examined += 1
-            s, e = round(idx * hop * sr), round((idx + lag) * hop * sr)
-            if s < round(0.2 * sr) or e > len(samples) - round(0.2 * sr): continue
-            s, e = _refine_period(samples[:, channel], sr, s, e)
-            seam = transition_score(a, e, s)
-            if seam < c.min_similarity: continue
-            score = 0.75 * float(corrs[idx]) + 0.25 * seam
-            pairs.append(Edge(s, e, float(score), float(corrs[idx])))
-            accepted_starts.append(idx)
-            if len(accepted_starts) >= 3 or len(pairs) >= c.max_edges: break
-        if len(pairs) >= c.max_edges: break
+    pairs = []
+    # Complementary, model-free views only when the joint representation cannot find a safe edge.
+    # Thresholds are unchanged. Keep fallback provenance and do not call its score confidence.
+    for kind, view in [('joint', x), ('harmonic_fallback', x[:, :12]), ('texture_fallback', x[:, 12:25])]:
+        if pairs: break
+        view_analysis = replace(a, features=view)
+        x = view
+        peaks = []
+        floor = max(1e-5, float(np.percentile(energy, 65)) * 0.15)
+        def lag_scores(lag):
+            left, right = x[:-lag], x[lag:]
+            den = np.sqrt(np.maximum(_window_sum(np.sum(left*left, axis=1), lag) *
+                                    _window_sum(np.sum(right*right, axis=1), lag), 1e-12))
+            corrs = _window_sum(np.sum(left*right, axis=1), lag) / den
+            valid = (_window_sum(energy[:-lag], lag) / lag > floor) & (_window_sum(energy[lag:], lag) / lag > floor)
+            corrs[~valid] = -1
+            return corrs
+        for lag in range(lo, hi + 1):
+            if lag % 24 == 0: b.check()
+            corrs = lag_scores(lag)
+            if len(corrs): peaks.append((float(np.max(corrs)), lag))
+        peaks.sort(reverse=True)
+        used_lags, pairs = [], []
+        for recurrence, lag in peaks:
+            b.check()
+            if recurrence < c.min_similarity: break
+            if any(abs(lag - other) * hop < 0.18 for other in used_lags): continue
+            used_lags.append(lag)
+            corrs = lag_scores(lag)
+            # A long recurrent phrase need not have its best local join at the start of that window.
+            # Check several actual endpoints; exclude weak seams instead of trusting recurrence alone.
+            indices = sorted(range(len(corrs)), key=lambda i: -corrs[i])
+            accepted_starts = []
+            examined = 0
+            for idx in indices:
+                if corrs[idx] < c.min_similarity or examined >= 40: break
+                if any(abs(idx-other)*hop < 0.24 for other in accepted_starts): continue
+                examined += 1
+                s, e = round(idx * hop * sr), round((idx + lag) * hop * sr)
+                if s < round(0.2 * sr) or e > len(samples) - round(0.2 * sr): continue
+                s, e = _refine_period(samples[:, channel], sr, s, e, max_shift=min(.12,max(.04,hop*.55)))
+                seam = transition_score(view_analysis, e, s)
+                if seam < c.min_similarity: continue
+                score = 0.75 * float(corrs[idx]) + 0.25 * seam
+                pairs.append(Edge(s, e, float(score), float(corrs[idx]),kind))
+                accepted_starts.append(idx)
+                if len(accepted_starts) >= 3 or len(pairs) >= c.max_edges: break
+            if len(pairs) >= c.max_edges: break
+        if pairs and kind != 'joint': a.warnings.append(kind)
     pairs.sort(key=lambda edge: (-edge.score, edge.start, edge.end))
     a.edges = pairs
     if not pairs: a.warnings.append('no_strong_recurrence')
@@ -313,8 +324,10 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
     if phase not in (3, 4): raise FitError('phase_must_be_3_or_4')
     target = target_frames(seconds, a.sample_rate, c)
     sr, n = a.sample_rate, a.frames
-    intro = min(round(c.keep_intro_seconds * sr), n // 10, target // 4)
-    outro = min(round(c.keep_outro_seconds * sr), n // 10, target // 4)
+    intro = round(c.keep_intro_seconds * sr)
+    outro = round(c.keep_outro_seconds * sr)
+    if intro + outro > min(n, target):
+        raise FitError('protected_prefix_suffix_exceed_duration')
     minimum = min(round(c.min_run_seconds * sr), target // 4)
     eligible = [e for e in a.edges if e.start >= intro and e.end <= n - outro and e.end-e.start >= minimum]
     # Edge tuple: exit, entry, similarity, identity. Adjacent source playback costs no edit.
