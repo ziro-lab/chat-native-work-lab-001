@@ -161,7 +161,7 @@ def main():
                 try: sr,loop=decode(data)
                 except Exception: raise RuntimeError(f"selected_source_decode_failed:{item['id']}")
                 dur=len(loop)/sr
-                if not 2.05<=dur<=30: raise RuntimeError(f"selected_source_duration_outside_policy:{item['id']}:{dur}")
+                if not 2.0<=dur<=30: raise RuntimeError(f"selected_source_duration_outside_policy:{item['id']}:{dur}")
                 song,period=pseudo(loop,sr,item["id"])
                 path=td/f"{item['id']}.wav"; sf.write(path,song,sr,subtype="PCM_24")
                 rec={"split":split,**item,"source_seconds":dur,"thresholds":{}}
