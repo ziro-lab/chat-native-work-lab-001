@@ -1,10 +1,10 @@
 using System.Collections.Immutable;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -20,45 +20,90 @@ public sealed class Entry : ILocalizePlugin
 
 internal static class Probe
 {
+    private static bool scheduled;
+    private static string output = "";
+    private static readonly List<object> requirements = [];
+
+    internal static void Schedule()
+    {
+        string? value = Environment.GetEnvironmentVariable("CNWL_SPLIT_OUTPUT");
+        if (scheduled || string.IsNullOrWhiteSpace(value)) return;
+        scheduled = true;
+        output = Path.GetFullPath(value);
+        Directory.CreateDirectory(output);
+        Application.Current.Dispatcher.BeginInvoke(new Action(Start));
+    }
+
+    private static void Start()
+    {
+        bool created = false;
+        var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(300) };
+        timer.Tick += async (_, _) =>
+        {
+            try
+            {
+                var main = Application.Current.Windows.Cast<Window>().Select(w => w.DataContext)
+                    .FirstOrDefault(x => x?.GetType().FullName == "YukkuriMovieMaker.ViewModels.MainViewModel");
+                if (main == null) return;
+                var active = main.GetType().GetProperty("ActiveTimelineViewModel")?.GetValue(main);
+                if (active == null)
+                {
+                    if (!created)
+                    {
+                        created = true;
+                        main.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(main, null);
+                    }
+                    return;
+                }
+                timer.Stop();
+                await RunAsync(active);
+                Write("PASS_VIDEOITEM_SPLIT_LIFECYCLE", null);
+            }
+            catch (Exception ex)
+            {
+                timer.Stop();
+                Write("FAIL_VIDEOITEM_SPLIT_LIFECYCLE", ex.ToString());
+            }
+        };
+        timer.Start();
+    }
+
+    private static Timeline FindTimeline(object active)
+    {
+        foreach (var property in active.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (!typeof(Timeline).IsAssignableFrom(property.PropertyType) || property.GetIndexParameters().Length != 0) continue;
+            try
+            {
+                if (property.GetValue(active) is Timeline timeline) return timeline;
+            }
+            catch { }
+        }
+        foreach (var field in active.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            if (typeof(Timeline).IsAssignableFrom(field.FieldType) && field.GetValue(active) is Timeline timeline) return timeline;
+        throw new MissingMemberException("Timeline was not found on ActiveTimelineViewModel.");
+    }
+
     private static MethodInfo[] SplitMethods()
         => typeof(Timeline).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(m => m.Name == "SplitSelectedAndGroupedItems" || m.Name == "SplitItems" || m.Name == "SplitPositionItems")
+            .Where(m => m.Name.Contains("Split", StringComparison.OrdinalIgnoreCase))
             .OrderBy(m => m.Name).ThenBy(m => m.GetParameters().Length).ToArray();
 
-    private static void DumpSurface(object active)
-    {
-        var type = active.GetType();
-        var lines = new List<string> { "ACTIVE " + type.AssemblyQualifiedName };
-        foreach (var m in type.GetMembers(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                     .Where(m => m.Name.Contains("Split", StringComparison.OrdinalIgnoreCase)
-                              || m.Name.Contains("Divide", StringComparison.OrdinalIgnoreCase)
-                              || m.Name.Contains("Separate", StringComparison.OrdinalIgnoreCase)
-                              || m.Name.Contains("Cut", StringComparison.OrdinalIgnoreCase))
-                     .OrderBy(m => m.MemberType).ThenBy(m => m.Name))
-            lines.Add(m.MemberType + " " + m.Name + " :: " + m);
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true))
-        {
-            Type[] types;
-            try { types = assembly.GetTypes(); } catch (ReflectionTypeLoadException e) { types = e.Types.Where(t => t != null).Cast<Type>().ToArray(); }
-            foreach (var t in types)
-                foreach (var m in t.GetMembers(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                             .Where(m => m.Name.Contains("Split", StringComparison.OrdinalIgnoreCase)
-                                      || m.Name.Contains("Divide", StringComparison.OrdinalIgnoreCase)
-                                      || m.Name.Contains("Separate", StringComparison.OrdinalIgnoreCase))
-                             .Take(30))
-                    lines.Add("ASSEMBLY " + assembly.GetName().Name + " :: " + t.FullName + " :: " + m.MemberType + " " + m.Name);
-        }
-        File.WriteAllLines(Path.Combine(output, "surface.txt"), lines.Distinct());
-    }
+    private static string Describe(MethodInfo m)
+        => $"{m.Attributes} {m.ReturnType.FullName} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name + (p.HasDefaultValue ? "=" + (p.DefaultValue ?? "null") : "")))})";
 
     private static async Task RunAsync(object active)
     {
-        DumpSurface(active);
         var timeline = FindTimeline(active);
         int fps = timeline.VideoInfo.FPS;
         string media = Environment.GetEnvironmentVariable("CNWL_SPLIT_MEDIA") ?? throw new InvalidOperationException("Fixture path missing.");
         Check("fixture_exists", File.Exists(media));
         Check("fps_positive", fps > 0);
+
+        var methods = SplitMethods();
+        File.WriteAllLines(Path.Combine(output, "split-methods.txt"), methods.Select(Describe));
+        var candidates = methods.Where(m => m.Name == "SplitSelectedAndGroupedItems").ToArray();
+        Check("split_method_discovered", candidates.Length > 0);
 
         var item = new VideoItem
         {
@@ -81,13 +126,16 @@ internal static class Probe
         Check("selection_before_split", timeline.SelectedItems.Count == 1 && ReferenceEquals(timeline.SelectedItems[0], item));
         Check("playhead_inside_source", timeline.CurrentFrame == item.Frame + fps * 4);
 
-        var methods = SplitMethods();
-        File.WriteAllLines(Path.Combine(output, "split-methods.txt"), methods.Select(m => m.Name + " :: " + m + " :: " + string.Join(", ", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))));
-        var split = methods.FirstOrDefault(m => m.Name == "SplitSelectedAndGroupedItems" && CanMap(m.GetParameters()));
-        Check("split_method_discovered", split != null);
-        object?[] args = split!.GetParameters().Select(p => Map(p, timeline, item, fps)).ToArray();
+        MethodInfo? split = candidates.FirstOrDefault(m => TryArguments(m.GetParameters(), timeline, item, fps, out _));
+        if (split == null)
+        {
+            File.WriteAllText(Path.Combine(output, "unsupported-signature.txt"), string.Join(Environment.NewLine, candidates.Select(Describe)));
+            throw new NotSupportedException("SplitSelectedAndGroupedItems exists, but this probe does not yet map its parameters.");
+        }
+        _ = TryArguments(split.GetParameters(), timeline, item, fps, out object?[] args);
+        File.WriteAllText(Path.Combine(output, "invocation.txt"), Describe(split) + Environment.NewLine + string.Join(Environment.NewLine, split.GetParameters().Zip(args).Select(x => x.First.Name + " => " + (x.Second?.ToString() ?? "null"))));
         split.Invoke(timeline, args);
-        await Task.Delay(250);
+        await Task.Delay(300);
 
         var derived = timeline.Items.OfType<VideoItem>()
             .Where(v => v.FilePath != null
@@ -110,11 +158,16 @@ internal static class Probe
         }).ToArray();
         File.WriteAllText(Path.Combine(output, "split.json"), JsonSerializer.Serialize(new
         {
-            method = split!.ToString(),
-            parameters = split.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name).ToArray(),
+            method = Describe(split),
             before = new { frame = originalFrame, length = originalLength, offsetTicks = originalOffset, file = originalPath },
             after = snapshot,
-            selection = timeline.SelectedItems.OfType<VideoItem>().Select(v => new { sameReference = ReferenceEquals(v, item), v.Frame, v.Length, offsetSeconds = v.ContentOffset.TotalSeconds }).ToArray()
+            selection = timeline.SelectedItems.OfType<VideoItem>().Select(v => new
+            {
+                sameReference = ReferenceEquals(v, item),
+                v.Frame,
+                v.Length,
+                offsetSeconds = v.ContentOffset.TotalSeconds
+            }).ToArray()
         }, new JsonSerializerOptions { WriteIndented = true }));
 
         Check("split_created_two_pieces", derived.Length == 2);
@@ -130,31 +183,29 @@ internal static class Probe
         Check("one_piece_keeps_original_reference", derived.Count(v => ReferenceEquals(v, item)) == 1);
     }
 
-    private static bool CanMap(ParameterInfo[] parameters)
-        => parameters.All(p =>
-            p.HasDefaultValue
-            || p.ParameterType == typeof(int)
-            || p.ParameterType == typeof(long)
-            || p.ParameterType == typeof(IItem)
-            || p.ParameterType == typeof(VideoItem)
-            || typeof(IEnumerable<IItem>).IsAssignableFrom(p.ParameterType)
-            || p.ParameterType == typeof(ImmutableList<IItem>));
-
-    private static object? Map(ParameterInfo p, Timeline timeline, VideoItem item, int fps)
+    private static bool TryArguments(ParameterInfo[] parameters, Timeline timeline, VideoItem item, int fps, out object?[] args)
     {
-        if (p.HasDefaultValue) return p.DefaultValue;
-        string name = p.Name ?? "";
-        if (p.ParameterType == typeof(int))
+        args = new object?[parameters.Length];
+        for (int i = 0; i < parameters.Length; i++)
         {
-            if (name.Contains("fps", StringComparison.OrdinalIgnoreCase)) return fps;
-            if (name.Contains("layer", StringComparison.OrdinalIgnoreCase)) return item.Layer;
-            return timeline.CurrentFrame;
+            var p = parameters[i];
+            string name = p.Name ?? "";
+            if (p.HasDefaultValue) { args[i] = p.DefaultValue; continue; }
+            if (p.ParameterType == typeof(int))
+            {
+                args[i] = name.Contains("fps", StringComparison.OrdinalIgnoreCase) ? fps
+                    : name.Contains("layer", StringComparison.OrdinalIgnoreCase) ? item.Layer
+                    : timeline.CurrentFrame;
+                continue;
+            }
+            if (p.ParameterType == typeof(long)) { args[i] = (long)timeline.CurrentFrame; continue; }
+            if (p.ParameterType == typeof(IItem) || p.ParameterType == typeof(VideoItem)) { args[i] = item; continue; }
+            if (p.ParameterType == typeof(ImmutableList<IItem>)) { args[i] = timeline.SelectedItems; continue; }
+            if (p.ParameterType.IsAssignableFrom(timeline.SelectedItems.GetType())) { args[i] = timeline.SelectedItems; continue; }
+            args = [];
+            return false;
         }
-        if (p.ParameterType == typeof(long)) return (long)timeline.CurrentFrame;
-        if (p.ParameterType == typeof(IItem) || p.ParameterType == typeof(VideoItem)) return item;
-        if (p.ParameterType == typeof(ImmutableList<IItem>)) return timeline.SelectedItems;
-        if (typeof(IEnumerable<IItem>).IsAssignableFrom(p.ParameterType)) return timeline.SelectedItems;
-        throw new NotSupportedException("Unsupported split parameter: " + p.ParameterType.FullName + " " + p.Name);
+        return true;
     }
 
     private static void Check(string id, bool passed)
