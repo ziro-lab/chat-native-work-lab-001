@@ -144,12 +144,16 @@ def build_review(cases):
                 </label>
               </div>
             </article>""")
+        candidate_body = ''.join(rows) if rows else (
+            '<article class="candidate"><h3>自動候補なし</h3>'
+            '<p>このケースは候補生成に失敗しました。Top3成功率では未達として数えます。</p></article>'
+        )
         blocks.append(f"""
         <section class="case">
           <h2>{html.escape(case["display_name"])}</h2>
           <p>元音源（評価用に生成した単一トラック） {audio_tag(source_rel)}</p>
           <p>目標尺: {case["target_seconds"]:.3f} 秒</p>
-          {''.join(rows)}
+          {candidate_body}
         </section>""")
 
     return """<!doctype html><meta charset="utf-8">
@@ -234,8 +238,11 @@ def main():
     unblind = {"schema": "musicfit-human-listening-unblind/v1", "cases": []}
     config = Config()
 
+    # Freeze the evaluation sources BEFORE seeing whether Music Fit succeeds.
+    # This avoids optimistic sampling that would discard no-plan cases.
+    frozen = []
     for _, meta, raw, member in eligible:
-        if len(selected_sources) >= SOURCE_COUNT:
+        if len(frozen) >= SOURCE_COUNT:
             break
         sid = str(meta["id"])
         try:
@@ -246,45 +253,61 @@ def main():
         duration = len(loop) / sr
         if not (4.0 <= duration <= 12.0 and 8000 <= sr <= 96000):
             continue
+        frozen.append((meta, member, sr, loop))
 
+    if len(frozen) != SOURCE_COUNT:
+        raise RuntimeError(f"insufficient_fixed_sources:{len(frozen)}")
+
+    for source_index, (meta, member, sr, loop) in enumerate(frozen, start=1):
+        sid = str(meta["id"])
         song, hidden = BUILDER.build_pseudo_song(loop, sr, sid)
         source_seconds = len(song) / sr
-        source_dir = pack / f"source-{len(selected_sources)+1:02d}"
+        source_dir = pack / f"source-{source_index:02d}"
         source_dir.mkdir()
         source_path = source_dir / "reference.wav"
         sf.write(source_path, song, sr, subtype="PCM_24")
 
-        source_cases = []
-        ok = True
+        selected_sources.append({
+            "id": sid,
+            "creator": meta.get("creator"),
+            "license": "CC0-1.0",
+            "member": member,
+            "source_seconds": source_seconds,
+            "publisher_loop_seconds": hidden["period_seconds"],
+        })
+
         for idx, factor in enumerate(TARGET_FACTORS, start=1):
             target = round(source_seconds * factor + 0.137, 3)
             fit_dir = source_dir / f"case-{idx}"
-            try:
-                result = fit(source_path, target, fit_dir, config, Budget(90), phase=4)
-            except FitError:
-                ok = False
-                break
-            if len(result["candidates"]) != 3:
-                ok = False
-                break
-
-            case_id = f"s{len(selected_sources)+1:02d}-t{idx}"
-            order = candidate_letter_order(case_id, 3)
+            case_id = f"s{source_index:02d}-t{idx}"
             blind_rows = []
             mapping = []
+            status = "candidates"
+
+            try:
+                result = fit(
+                    source_path, target, fit_dir, config, Budget(90), phase=4
+                )
+                rows = result["candidates"]
+            except FitError as exc:
+                rows = []
+                status = f"no_candidate:{exc}"
+
+            order = candidate_letter_order(case_id, len(rows))
             for shown_index, rank_index in enumerate(order):
                 letter = "ABC"[shown_index]
-                row = result["candidates"][rank_index]
-                full_rel = str((fit_dir / row["render"]["path"]).relative_to(pack)).replace("\\","/")
+                row = rows[rank_index]
+                full_rel = str(
+                    (fit_dir / row["render"]["path"]).relative_to(pack)
+                ).replace("\\", "/")
                 previews = [
-                    {"name": p["name"], "path": p["path"].replace("\\","/")}
+                    {"name": p["name"], "path": p["path"].replace("\\", "/")}
                     for p in row["previews"]
                 ]
-                # fit() preview paths are relative to the case directory's parent layout.
                 for p in previews:
                     p["path"] = str(
                         (fit_dir / p["path"]).relative_to(pack)
-                    ).replace("\\","/")
+                    ).replace("\\", "/")
                 blind_rows.append({
                     "label": letter,
                     "audio": full_rel,
@@ -299,33 +322,25 @@ def main():
                     "transition_scores": row["plan"]["transition_scores"],
                 })
 
-            source_cases.append({
+            if not rows:
+                status = status if status.startswith("no_candidate:") else "no_candidate"
+
+            display_index = len(cases) + 1
+            cases.append({
                 "case_id": case_id,
-                "display_name": f"ケース {len(cases)+len(source_cases)+1:02d}",
+                "display_name": f"ケース {display_index:02d}",
                 "target_seconds": target,
-                "source_reference": str(source_path.relative_to(pack)).replace("\\","/"),
+                "source_reference": str(
+                    source_path.relative_to(pack)
+                ).replace("\\", "/"),
                 "blind_candidates": blind_rows,
-                "unblind": mapping,
+                "status": status,
             })
-
-        if not ok:
-            shutil.rmtree(source_dir)
-            continue
-
-        selected_sources.append({
-            "id": sid,
-            "creator": meta.get("creator"),
-            "license": "CC0-1.0",
-            "member": member,
-            "source_seconds": source_seconds,
-            "publisher_loop_seconds": hidden["period_seconds"],
-        })
-        for case in source_cases:
-            cases.append({k:v for k,v in case.items() if k != "unblind"})
             unblind["cases"].append({
-                "case_id": case["case_id"],
+                "case_id": case_id,
                 "source_id": sid,
-                "mapping": case["unblind"],
+                "status": status,
+                "mapping": mapping,
             })
 
         if rz.fetched_bytes > MAX_NETWORK_BYTES:
@@ -333,7 +348,7 @@ def main():
 
     if len(selected_sources) != SOURCE_COUNT or len(cases) != SOURCE_COUNT * 2:
         raise RuntimeError(
-            f"insufficient_review_pack:sources={len(selected_sources)}:cases={len(cases)}"
+            f"bad_review_pack_shape:sources={len(selected_sources)}:cases={len(cases)}"
         )
 
     (pack / "review.html").write_text(build_review(cases), encoding="utf-8")
@@ -341,7 +356,8 @@ def main():
         "schema": "musicfit-human-listening-pack/v1",
         "source_count": len(selected_sources),
         "case_count": len(cases),
-        "candidate_count": len(cases) * 3,
+        "candidate_count": sum(len(case["blind_candidates"]) for case in cases),
+        "no_candidate_case_count": sum(not case["blind_candidates"] for case in cases),
         "license_policy": "CC0-1.0 only",
         "source_overlap_with_holdout_or_tuning": 0,
         "sources": selected_sources,
