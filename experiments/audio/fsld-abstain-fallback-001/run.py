@@ -32,6 +32,7 @@ from filter_fsld_metadata import filter_metadata
 
 URL = "https://zenodo.org/records/3967852/files/FSL10K.zip?download=1"
 TRAIN_PER_BUCKET = 3
+CANDIDATES_PER_BUCKET = 10
 SIZE_SPLIT_BYTES = 1024 * 1024
 MAX_MEMBER_BYTES = 10 * 1024 * 1024
 MAX_NETWORK_BYTES = 768 * 1024 * 1024
@@ -444,28 +445,37 @@ def main():
             else "large"
         )
         key = (lic, size_class)
-        if key in buckets and len(buckets[key]) < TRAIN_PER_BUCKET:
+        if key in buckets and len(buckets[key]) < CANDIDATES_PER_BUCKET:
             buckets[key].append(row)
-        if all(len(v) >= TRAIN_PER_BUCKET for v in buckets.values()):
+        if all(len(v) >= CANDIDATES_PER_BUCKET for v in buckets.values()):
             break
-    if not all(len(v) == TRAIN_PER_BUCKET for v in buckets.values()):
+    if not all(len(v) >= TRAIN_PER_BUCKET for v in buckets.values()):
         raise RuntimeError(
             "insufficient_stratified_training_rows:"
             + repr({str(k): len(v) for k, v in buckets.items()})
         )
-    selected_rows = [row for key in sorted(buckets) for row in buckets[key]]
-
     train = []
+    selected_bucket_ids = {}
     holdout_tracks = []
     with tempfile.TemporaryDirectory(prefix="fsld-abstain-fallback-") as td:
         temp = Path(td)
-        for row in selected_rows:
-            prepared = prepare_track(rz, row, temp)
-            if prepared is None:
-                raise RuntimeError(f"training_prepare_failed:{row['id']}")
-            train.append(prepared)
-            if rz.fetched_bytes > MAX_NETWORK_BYTES:
-                raise RuntimeError("network_budget_exceeded_training")
+        for key in sorted(buckets):
+            chosen_ids = []
+            for row in buckets[key]:
+                if len(chosen_ids) >= TRAIN_PER_BUCKET:
+                    break
+                prepared = prepare_track(rz, row, temp)
+                if prepared is None:
+                    continue
+                train.append(prepared)
+                chosen_ids.append(str(row["id"]))
+                if rz.fetched_bytes > MAX_NETWORK_BYTES:
+                    raise RuntimeError("network_budget_exceeded_training")
+            if len(chosen_ids) != TRAIN_PER_BUCKET:
+                raise RuntimeError(
+                    f"insufficient_valid_training_bucket:{key}:{chosen_ids}"
+                )
+            selected_bucket_ids[f"{key[0]}-{key[1]}"] = chosen_ids
 
         train_metrics = {
             name: evaluate(train, name) for name in STRATEGIES
@@ -497,10 +507,8 @@ def main():
             "stratification": {
                 "per_bucket": TRAIN_PER_BUCKET,
                 "size_split_bytes": SIZE_SPLIT_BYTES,
-                "buckets": {
-                    f"{key[0]}-{key[1]}": [str(row["id"]) for row in rows]
-                    for key, rows in buckets.items()
-                },
+                "candidate_pool_per_bucket": CANDIDATES_PER_BUCKET,
+                "selected_ids": selected_bucket_ids,
             },
             "id_overlap_with_holdout": 0,
             "creator_overlap_with_holdout": 0,
