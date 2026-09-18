@@ -7,3 +7,5 @@ Evidence kind: native automated, detached synthetic Timeline and public UndoRedo
 NOT PROVEN: arbitrary nested plugin effect/animation changes, real input-route ordering, scene replacement, and production coordinator lifecycle. These require downstream acceptance or another narrowly scoped observation before relying on them. No host binaries, user projects, internal Undo collectors, custom history or history clearing are introduced.
 
 The runner now rejects error lines even if an earlier startup status line says PASS, and requires the original P0 final trial marker as well as the completed boundary trace. Record source commit/run/artifact/digest after the run before publishing a downstream conclusion.
+
+Run note: this boundary observation is the H4 product gate for the hands-on UX polish pass; use the resulting exact-host evidence before wiring production session boundaries.
