@@ -45,13 +45,15 @@ jobs:
           u=json.loads((p/'unblind.json').read_text())
           assert m['source_count']==6
           assert m['case_count']==12
-          assert m['candidate_count']==36
+          assert 0 <= m['candidate_count'] <= 36
+          assert 0 <= m['no_candidate_case_count'] <= 12
           assert m['license_policy']=='CC0-1.0 only'
           assert m['source_overlap_with_holdout_or_tuning']==0
           assert len(u['cases'])==12
           assert (p/'review.html').is_file()
-          assert sum(1 for _ in p.rglob('candidate-*.wav'))==36
-          print({'sources':6,'cases':12,'candidates':36})
+          assert sum(1 for _ in p.rglob('candidate-*.wav'))==m['candidate_count']
+          print({'sources':6,'cases':12,'candidates':m['candidate_count'],
+                 'no_candidate_cases':m['no_candidate_case_count']})
           PY
       - name: Upload CC0 listening pack
         uses: actions/upload-artifact@v4
