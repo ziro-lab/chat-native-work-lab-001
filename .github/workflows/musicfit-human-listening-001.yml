@@ -1,0 +1,67 @@
+name: musicfit-human-listening-001
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/audio/musicfit-human-listening-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - 'experiments/audio/audio-real-loop-self-discovery-001/**'
+      - '.github/workflows/musicfit-human-listening-001.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/audio/musicfit-human-listening-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - 'experiments/audio/audio-real-loop-self-discovery-001/**'
+      - '.github/workflows/musicfit-human-listening-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-listening-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Music Fit CPU dependencies
+        run: python -m pip install -r experiments/audio/music-fit-core-001/requirements.txt
+
+      - name: Build blind Phase 4 listening pack
+        working-directory: experiments/audio/musicfit-human-listening-001
+        run: python build_pack.py
+
+      - name: Verify pack and rating scorer
+        working-directory: experiments/audio/musicfit-human-listening-001
+        run: python verify.py
+
+      - name: Show compact evidence
+        working-directory: experiments/audio/musicfit-human-listening-001
+        run: cat out/evidence.json
+
+      - name: Upload listening pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: musicfit-human-listening-001-pack
+          path: experiments/audio/musicfit-human-listening-001/out/listening-pack
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload metadata evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: musicfit-human-listening-001-evidence
+          path: |
+            experiments/audio/musicfit-human-listening-001/out/evidence.json
+            experiments/audio/musicfit-human-listening-001/out/smoke-score.json
+          if-no-files-found: error
+          retention-days: 14
