@@ -20,93 +20,10 @@ public sealed class Entry : ILocalizePlugin
 
 internal static class Probe
 {
-    private sealed record CommandCandidate(string Name, ICommand Command);
-    private static bool scheduled;
-    private static string output = "";
-    private static readonly List<object> requirements = [];
-
-    internal static void Schedule()
-    {
-        string? value = Environment.GetEnvironmentVariable("CNWL_SPLIT_OUTPUT");
-        if (scheduled || string.IsNullOrWhiteSpace(value)) return;
-        scheduled = true;
-        output = Path.GetFullPath(value);
-        Directory.CreateDirectory(output);
-        Application.Current.Dispatcher.BeginInvoke(new Action(Start));
-    }
-
-    private static void Start()
-    {
-        bool created = false;
-        var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(300) };
-        timer.Tick += async (_, _) =>
-        {
-            try
-            {
-                var main = Application.Current.Windows.Cast<Window>().Select(w => w.DataContext)
-                    .FirstOrDefault(x => x?.GetType().FullName == "YukkuriMovieMaker.ViewModels.MainViewModel");
-                if (main == null) return;
-                var active = main.GetType().GetProperty("ActiveTimelineViewModel")?.GetValue(main);
-                if (active == null)
-                {
-                    if (!created)
-                    {
-                        created = true;
-                        main.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(main, null);
-                    }
-                    return;
-                }
-                timer.Stop();
-                await RunAsync(active);
-                Write("PASS_VIDEOITEM_SPLIT_LIFECYCLE", null);
-            }
-            catch (Exception ex)
-            {
-                timer.Stop();
-                Write("FAIL_VIDEOITEM_SPLIT_LIFECYCLE", ex.ToString());
-            }
-        };
-        timer.Start();
-    }
-
-    private static Timeline FindTimeline(object active)
-    {
-        foreach (var property in active.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            if (!typeof(Timeline).IsAssignableFrom(property.PropertyType) || property.GetIndexParameters().Length != 0) continue;
-            try { if (property.GetValue(active) is Timeline timeline) return timeline; } catch { }
-        }
-        foreach (var field in active.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-            if (typeof(Timeline).IsAssignableFrom(field.FieldType) && field.GetValue(active) is Timeline timeline) return timeline;
-        throw new MissingMemberException("Timeline was not found on ActiveTimelineViewModel.");
-    }
-
-    private static CommandCandidate[] SplitCommands(object active)
-    {
-        static bool Relevant(string name) =>
-            name.Contains("Split", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("Divide", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("Separate", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("Cut", StringComparison.OrdinalIgnoreCase);
-
-        var result = new List<CommandCandidate>();
-        var seen = new HashSet<ICommand>(ReferenceEqualityComparer.Instance);
-        foreach (var property in active.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            if (!Relevant(property.Name) || property.GetIndexParameters().Length != 0) continue;
-            ICommand? command = null;
-            try { command = property.GetValue(active) as ICommand; } catch { }
-            if (command != null && seen.Add(command)) result.Add(new("property:" + property.Name, command));
-        }
-        foreach (var field in active.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            if (!Relevant(field.Name)) continue;
-            ICommand? command = null;
-            try { command = field.GetValue(active) as ICommand; } catch { }
-            if (command != null && seen.Add(command)) result.Add(new("field:" + field.Name, command));
-        }
-        return result.ToArray();
-    }
+    private static MethodInfo[] SplitMethods()
+        => typeof(Timeline).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(m => m.Name == "SplitSelectedAndGroupedItems" || m.Name == "SplitItems" || m.Name == "SplitPositionItems")
+            .OrderBy(m => m.Name).ThenBy(m => m.GetParameters().Length).ToArray();
 
     private static void DumpSurface(object active)
     {
@@ -164,17 +81,12 @@ internal static class Probe
         Check("selection_before_split", timeline.SelectedItems.Count == 1 && ReferenceEquals(timeline.SelectedItems[0], item));
         Check("playhead_inside_source", timeline.CurrentFrame == item.Frame + fps * 4);
 
-        var commands = SplitCommands(active);
-        File.WriteAllLines(Path.Combine(output, "commands.txt"), commands.Select(c => c.Name + " can(null)=" + SafeCan(c.Command, null) + " can(item)=" + SafeCan(c.Command, item)));
-        CommandCandidate? executable = commands.FirstOrDefault(c => SafeCan(c.Command, null));
-        object? parameter = null;
-        if (executable == null)
-        {
-            executable = commands.FirstOrDefault(c => SafeCan(c.Command, item));
-            parameter = item;
-        }
-        Check("split_command_discovered", executable != null);
-        executable!.Command.Execute(parameter);
+        var methods = SplitMethods();
+        File.WriteAllLines(Path.Combine(output, "split-methods.txt"), methods.Select(m => m.Name + " :: " + m + " :: " + string.Join(", ", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name))));
+        var split = methods.FirstOrDefault(m => m.Name == "SplitSelectedAndGroupedItems" && CanMap(m.GetParameters()));
+        Check("split_method_discovered", split != null);
+        object?[] args = split!.GetParameters().Select(p => Map(p, timeline, item, fps)).ToArray();
+        split.Invoke(timeline, args);
         await Task.Delay(250);
 
         var derived = timeline.Items.OfType<VideoItem>()
@@ -198,8 +110,8 @@ internal static class Probe
         }).ToArray();
         File.WriteAllText(Path.Combine(output, "split.json"), JsonSerializer.Serialize(new
         {
-            command = executable.Name,
-            parameter = parameter == null ? "null" : "source-item",
+            method = split!.ToString(),
+            parameters = split.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name).ToArray(),
             before = new { frame = originalFrame, length = originalLength, offsetTicks = originalOffset, file = originalPath },
             after = snapshot,
             selection = timeline.SelectedItems.OfType<VideoItem>().Select(v => new { sameReference = ReferenceEquals(v, item), v.Frame, v.Length, offsetSeconds = v.ContentOffset.TotalSeconds }).ToArray()
@@ -218,9 +130,31 @@ internal static class Probe
         Check("one_piece_keeps_original_reference", derived.Count(v => ReferenceEquals(v, item)) == 1);
     }
 
-    private static bool SafeCan(ICommand command, object? parameter)
+    private static bool CanMap(ParameterInfo[] parameters)
+        => parameters.All(p =>
+            p.HasDefaultValue
+            || p.ParameterType == typeof(int)
+            || p.ParameterType == typeof(long)
+            || p.ParameterType == typeof(IItem)
+            || p.ParameterType == typeof(VideoItem)
+            || typeof(IEnumerable<IItem>).IsAssignableFrom(p.ParameterType)
+            || p.ParameterType == typeof(ImmutableList<IItem>));
+
+    private static object? Map(ParameterInfo p, Timeline timeline, VideoItem item, int fps)
     {
-        try { return command.CanExecute(parameter); } catch { return false; }
+        if (p.HasDefaultValue) return p.DefaultValue;
+        string name = p.Name ?? "";
+        if (p.ParameterType == typeof(int))
+        {
+            if (name.Contains("fps", StringComparison.OrdinalIgnoreCase)) return fps;
+            if (name.Contains("layer", StringComparison.OrdinalIgnoreCase)) return item.Layer;
+            return timeline.CurrentFrame;
+        }
+        if (p.ParameterType == typeof(long)) return (long)timeline.CurrentFrame;
+        if (p.ParameterType == typeof(IItem) || p.ParameterType == typeof(VideoItem)) return item;
+        if (p.ParameterType == typeof(ImmutableList<IItem>)) return timeline.SelectedItems;
+        if (typeof(IEnumerable<IItem>).IsAssignableFrom(p.ParameterType)) return timeline.SelectedItems;
+        throw new NotSupportedException("Unsupported split parameter: " + p.ParameterType.FullName + " " + p.Name);
     }
 
     private static void Check(string id, bool passed)
