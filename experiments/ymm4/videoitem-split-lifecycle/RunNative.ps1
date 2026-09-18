@@ -39,7 +39,11 @@ try {
  if(Test-Path (Join-Path $OutputDir 'split-methods.txt')){Get-Content (Join-Path $OutputDir 'split-methods.txt')}
  if(Test-Path (Join-Path $OutputDir 'split.json')){Get-Content (Join-Path $OutputDir 'split.json')}
  if($r.status -ne 'PASS_VIDEOITEM_SPLIT_LIFECYCLE'){throw 'Native split probe did not pass.'}
- $required=@('fixture_exists','fps_positive','insert_source','selection_before_split','playhead_inside_source','split_method_discovered','split_created_two_pieces','timeline_partition','file_path_preserved','rate_preserved','source_partition_100_percent','one_piece_keeps_original_reference')
+ $required=@('fixture_exists','fps_positive','split_surface_discovered',
+ 'split_50_two_pieces','split_50_original_replaced','split_50_timeline_partition','split_50_path_rate_preserved','split_50_source_partition',
+ 'split_100_two_pieces','split_100_original_replaced','split_100_timeline_partition','split_100_path_rate_preserved','split_100_source_partition',
+ 'split_200_two_pieces','split_200_original_replaced','split_200_timeline_partition','split_200_path_rate_preserved','split_200_source_partition',
+ 'second_split_can_execute','double_split_three_pieces','double_split_source_ranges','double_split_previous_left_survives','double_split_target_reference_replaced')
  if($r.schema -ne 'cnwl.videoitem-split-lifecycle.v1' -or $r.host -ne '4.56.1.0 Lite' -or $r.sourceHead -ne $env:GITHUB_SHA -or $r.error){throw 'Native result identity/status rejected.'}
  if($r.requirements.Count -ne $required.Count){throw 'Wrong requirement count.'}
  foreach($id in $required){$found=@($r.requirements|Where-Object id -eq $id); if($found.Count -ne 1 -or $found[0].passed -cne $true){throw "Missing/failed requirement: $id"}}
