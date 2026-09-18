@@ -10,7 +10,7 @@ from dataclasses import asdict
 from pathlib import Path
 import numpy as np
 import soundfile as sf
-from .core import Analysis, Budget, Config, FitError, Plan, SCHEMA, VERSION, analyze, digest, plans, validate_plan
+from .core import Analysis, Budget, Config, FitError, Plan, SCHEMA, VERSION, analyze, audition_edges, digest, plans, validate_plan
 
 BLOCK = 65536
 
@@ -160,9 +160,19 @@ def fit(source: Path, seconds: float, output_dir: Path, config: Config | None = 
             meta=render(source,a,p,rendered,c,b)
             clips=previews(rendered,meta,stage/'previews'/p.id,b)
             rows.append({'id':p.id,'plan':p.to_dict(),'render':meta,'previews':clips})
+        loop_hypotheses=[
+            {
+                'start_frame':e.start,'end_frame':e.end,
+                'start_seconds':e.start/a.sample_rate,'end_seconds':e.end/a.sample_rate,
+                'period_seconds':(e.end-e.start)/a.sample_rate,
+                'score':e.score,'period_score':e.period_score,'kind':e.kind,
+            }
+            for e in audition_edges(a)
+        ]
         report={'schema':SCHEMA,'version':VERSION,'status':'needs_listening_review',
                 'source_name':source.name,'analysis':a.summary(),'config':asdict(c),
-                'target_seconds':seconds,'phase':phase,'candidates':rows,
+                'target_seconds':seconds,'phase':phase,'loop_hypotheses':loop_hypotheses,
+                'candidates':rows,
                 'quality':{'human_acceptance_rate':None,'calibrated_confidence':False},
                 'elapsed_seconds':time_elapsed(b)}
         (stage/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False)+'\n',encoding='utf-8')
