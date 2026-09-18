@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -20,6 +19,9 @@ public sealed class Entry : ILocalizePlugin
 
 internal static class Probe
 {
+    private sealed record Piece(bool SameReference, int Frame, int Length, int Layer, double OffsetSeconds, double Rate, string FilePath, string Remark);
+    private sealed record SplitObservation(double Rate, int SplitFrames, Piece[] Pieces, int SelectionCount, bool OriginalStillPresent);
+
     private static bool scheduled;
     private static string output = "";
     private static readonly List<object> requirements = [];
@@ -73,24 +75,26 @@ internal static class Probe
         foreach (var property in active.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
         {
             if (!typeof(Timeline).IsAssignableFrom(property.PropertyType) || property.GetIndexParameters().Length != 0) continue;
-            try
-            {
-                if (property.GetValue(active) is Timeline timeline) return timeline;
-            }
-            catch { }
+            try { if (property.GetValue(active) is Timeline timeline) return timeline; } catch { }
         }
         foreach (var field in active.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             if (typeof(Timeline).IsAssignableFrom(field.FieldType) && field.GetValue(active) is Timeline timeline) return timeline;
         throw new MissingMemberException("Timeline was not found on ActiveTimelineViewModel.");
     }
 
-    private static MethodInfo[] SplitMethods()
-        => typeof(Timeline).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(m => m.Name.Contains("Split", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(m => m.Name).ThenBy(m => m.GetParameters().Length).ToArray();
+    private static MethodInfo RequireMethod(string name, params Type[] parameterTypes)
+        => typeof(Timeline).GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, parameterTypes, null)
+            ?? throw new MissingMethodException("Timeline." + name);
 
-    private static string Describe(MethodInfo m)
-        => $"{m.Attributes} {m.ReturnType.FullName} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name + (p.HasDefaultValue ? "=" + (p.DefaultValue ?? "null") : "")))})";
+    private static object FirstSplitSelectionMode(MethodInfo split)
+    {
+        Type enumType = split.GetParameters()[1].ParameterType;
+        if (!enumType.IsEnum) throw new InvalidDataException("Split selection mode is not an enum.");
+        Array values = Enum.GetValues(enumType);
+        if (values.Length == 0) throw new InvalidDataException("Split selection mode enum is empty.");
+        File.WriteAllText(Path.Combine(output, "selection-modes.txt"), string.Join(Environment.NewLine, Enum.GetNames(enumType)));
+        return values.GetValue(0)!;
+    }
 
     private static async Task RunAsync(object active)
     {
@@ -100,119 +104,99 @@ internal static class Probe
         Check("fixture_exists", File.Exists(media));
         Check("fps_positive", fps > 0);
 
-        var methods = SplitMethods();
-        File.WriteAllLines(Path.Combine(output, "split-methods.txt"), methods.Select(Describe));
-        var candidates = methods.Where(m => m.Name == "SplitSelectedAndGroupedItems").ToArray();
-        Check("split_method_discovered", candidates.Length > 0);
+        var canSplit = RequireMethod("CanSplitSelectedAndGroupedItems", typeof(int));
+        var splitMethods = typeof(Timeline).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(m => m.Name == "SplitSelectedAndGroupedItems").ToArray();
+        File.WriteAllLines(Path.Combine(output, "split-methods.txt"), splitMethods.Select(m => m.ToString() ?? m.Name));
+        var split = splitMethods.Single(m => m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(int) && m.GetParameters()[1].ParameterType.IsEnum);
+        object mode = FirstSplitSelectionMode(split);
+        Check("split_surface_discovered", canSplit.ReturnType == typeof(bool) && split.ReturnType == typeof(void));
 
+        var observations = new List<SplitObservation>();
+        foreach (double rate in new[] { 50d, 100d, 200d })
+        {
+            int layer = rate == 50 ? 2 : rate == 100 ? 3 : 4;
+            int startFrame = rate == 50 ? 300 : rate == 100 ? 1200 : 2100;
+            observations.Add(await SplitOnce(timeline, split, canSplit, mode, media, fps, startFrame, layer, rate, 4));
+        }
+
+        File.WriteAllText(Path.Combine(output, "split.json"), JsonSerializer.Serialize(observations, new JsonSerializerOptions { WriteIndented = true }));
+
+        foreach (var observation in observations)
+        {
+            string key = ((int)observation.Rate).ToString(CultureInfo.InvariantCulture);
+            Check("split_" + key + "_two_pieces", observation.Pieces.Length == 2);
+            Check("split_" + key + "_original_replaced", !observation.OriginalStillPresent && observation.Pieces.All(p => !p.SameReference));
+            Check("split_" + key + "_timeline_partition", observation.Pieces[0].Length == fps * 4 && observation.Pieces[1].Length == fps * 6
+                && observation.Pieces[0].Frame + observation.Pieces[0].Length == observation.Pieces[1].Frame);
+            Check("split_" + key + "_path_rate_preserved", observation.Pieces.All(p => p.FilePath == Path.GetFullPath(media) && Math.Abs(p.Rate - observation.Rate) < 1e-6));
+            double expectedRightOffset = 5 + 4 * observation.Rate / 100d;
+            Check("split_" + key + "_source_partition", Math.Abs(observation.Pieces[0].OffsetSeconds - 5) < 1e-6
+                && Math.Abs(observation.Pieces[1].OffsetSeconds - expectedRightOffset) < 1e-6);
+        }
+
+        // A realistic highlight isolation: split the right 100% piece once more two seconds later.
+        var middleCase = observations.Single(x => x.Rate == 100);
+        var right = timeline.Items.OfType<VideoItem>().Single(v => v.Layer == 3 && v.Frame == middleCase.Pieces[1].Frame);
+        int secondSplitFrame = right.Frame + fps * 2;
+        timeline.SelectedItems = ImmutableList.Create<IItem>(right);
+        Check("second_split_can_execute", (bool)(canSplit.Invoke(timeline, [secondSplitFrame]) ?? false));
+        split.Invoke(timeline, [secondSplitFrame, mode]);
+        await Task.Delay(250);
+        var finalPieces = timeline.Items.OfType<VideoItem>().Where(v => v.Layer == 3 && v.FilePath != null && Path.GetFullPath(v.FilePath) == Path.GetFullPath(media))
+            .OrderBy(v => v.Frame).ToArray();
+        Check("double_split_three_pieces", finalPieces.Length == 3);
+        Check("double_split_source_ranges", finalPieces[0].ContentOffset.TotalSeconds == 5
+            && finalPieces[1].ContentOffset.TotalSeconds == 9
+            && finalPieces[2].ContentOffset.TotalSeconds == 11
+            && finalPieces[0].Length == fps * 4 && finalPieces[1].Length == fps * 2 && finalPieces[2].Length == fps * 4);
+        Check("double_split_previous_left_survives", finalPieces[0].Frame == 1200 && finalPieces[0].Length == fps * 4);
+        Check("double_split_target_reference_replaced", !timeline.Items.Any(x => ReferenceEquals(x, right)));
+
+        File.WriteAllText(Path.Combine(output, "double-split.json"), JsonSerializer.Serialize(finalPieces.Select(v => new
+        {
+            v.Frame, v.Length, offsetSeconds = v.ContentOffset.TotalSeconds,
+            rate = v.PlaybackRate2.GetValue(0, v.Length, fps),
+            v.Layer, v.Remark
+        }), new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static async Task<SplitObservation> SplitOnce(Timeline timeline, MethodInfo split, MethodInfo canSplit, object mode,
+        string media, int fps, int startFrame, int layer, double rate, int splitSeconds)
+    {
         var item = new VideoItem
         {
             FilePath = media,
-            Frame = 300,
+            Frame = startFrame,
             Length = fps * 10,
-            Layer = 2,
+            Layer = layer,
             ContentOffset = TimeSpan.FromSeconds(5),
-            Remark = "CNWL_SPLIT_SOURCE"
+            Remark = "CNWL_SPLIT_" + rate.ToString("0", CultureInfo.InvariantCulture)
         };
-        item.PlaybackRate2.SetFirstValue(100);
+        item.PlaybackRate2.SetFirstValue(rate);
         item.PlaybackRate2.SetAnimationParameters(item.Length, fps);
-        Check("insert_source", timeline.TryAddItems([item], item.Frame, item.Layer));
+        if (!timeline.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture insertion failed.");
 
-        int originalFrame = item.Frame, originalLength = item.Length;
-        long originalOffset = item.ContentOffset.Ticks;
-        string originalPath = item.FilePath ?? throw new InvalidDataException("Inserted item lost its file path.");
+        int splitFrame = item.Frame + fps * splitSeconds;
         timeline.SelectedItems = ImmutableList.Create<IItem>(item);
-        timeline.CurrentFrame = item.Frame + fps * 4;
-        Check("selection_before_split", timeline.SelectedItems.Count == 1 && ReferenceEquals(timeline.SelectedItems[0], item));
-        Check("playhead_inside_source", timeline.CurrentFrame == item.Frame + fps * 4);
+        timeline.CurrentFrame = splitFrame;
+        if (!ReferenceEquals(timeline.SelectedItems.Single(), item)) throw new InvalidOperationException("Selection was not established.");
+        if (!(bool)(canSplit.Invoke(timeline, [splitFrame]) ?? false)) throw new InvalidOperationException("Host reports split unavailable.");
 
-        MethodInfo? split = candidates.FirstOrDefault(m => TryArguments(m.GetParameters(), timeline, item, fps, out _));
-        if (split == null)
-        {
-            File.WriteAllText(Path.Combine(output, "unsupported-signature.txt"), string.Join(Environment.NewLine, candidates.Select(Describe)));
-            throw new NotSupportedException("SplitSelectedAndGroupedItems exists, but this probe does not yet map its parameters.");
-        }
-        _ = TryArguments(split.GetParameters(), timeline, item, fps, out object?[] args);
-        File.WriteAllText(Path.Combine(output, "invocation.txt"), Describe(split) + Environment.NewLine + string.Join(Environment.NewLine, split.GetParameters().Zip(args).Select(x => x.First.Name + " => " + (x.Second?.ToString() ?? "null"))));
-        split.Invoke(timeline, args);
-        await Task.Delay(300);
+        split.Invoke(timeline, [splitFrame, mode]);
+        await Task.Delay(250);
 
-        var derived = timeline.Items.OfType<VideoItem>()
-            .Where(v => v.FilePath != null
-                     && string.Equals(Path.GetFullPath(v.FilePath), Path.GetFullPath(originalPath), StringComparison.OrdinalIgnoreCase)
-                     && v.Layer == item.Layer
-                     && v.Frame < originalFrame + originalLength
-                     && v.Frame + v.Length > originalFrame)
+        string full = Path.GetFullPath(media);
+        var pieces = timeline.Items.OfType<VideoItem>()
+            .Where(v => v.Layer == layer && v.FilePath != null && Path.GetFullPath(v.FilePath) == full
+                     && v.Frame < startFrame + fps * 10 && v.Frame + v.Length > startFrame)
             .OrderBy(v => v.Frame).ToArray();
 
-        var snapshot = derived.Select(v => new
-        {
-            sameReference = ReferenceEquals(v, item),
-            v.Frame,
-            v.Length,
-            v.Layer,
-            offsetSeconds = v.ContentOffset.TotalSeconds,
-            rate = v.PlaybackRate2.GetValue(0, v.Length, fps),
-            v.FilePath,
-            v.Remark
-        }).ToArray();
-        File.WriteAllText(Path.Combine(output, "split.json"), JsonSerializer.Serialize(new
-        {
-            method = Describe(split),
-            before = new { frame = originalFrame, length = originalLength, offsetTicks = originalOffset, file = originalPath },
-            after = snapshot,
-            selection = timeline.SelectedItems.OfType<VideoItem>().Select(v => new
-            {
-                sameReference = ReferenceEquals(v, item),
-                v.Frame,
-                v.Length,
-                offsetSeconds = v.ContentOffset.TotalSeconds
-            }).ToArray()
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        var snapshot = pieces.Select(v => new Piece(
+            ReferenceEquals(v, item), v.Frame, v.Length, v.Layer, v.ContentOffset.TotalSeconds,
+            v.PlaybackRate2.GetValue(0, v.Length, fps), Path.GetFullPath(v.FilePath!), v.Remark ?? "")).ToArray();
 
-        Check("split_created_two_pieces", derived.Length == 2);
-        Check("timeline_partition", derived[0].Frame == originalFrame
-            && derived[0].Frame + derived[0].Length == derived[1].Frame
-            && derived[1].Frame + derived[1].Length == originalFrame + originalLength);
-        Check("file_path_preserved", derived.All(v => v.FilePath != null && string.Equals(Path.GetFullPath(v.FilePath), Path.GetFullPath(originalPath), StringComparison.OrdinalIgnoreCase)));
-        Check("rate_preserved", derived.All(v => Math.Abs(v.PlaybackRate2.GetValue(0, v.Length, fps) - 100) < 0.000001));
-        Check("source_partition_100_percent", Math.Abs(derived[0].ContentOffset.TotalSeconds - 5) < 0.000001
-            && Math.Abs(derived[1].ContentOffset.TotalSeconds - 9) < 0.000001
-            && derived[0].Length == fps * 4
-            && derived[1].Length == fps * 6);
-        Check("one_piece_keeps_original_reference", derived.Count(v => ReferenceEquals(v, item)) == 1);
-    }
-
-    private static bool TryArguments(ParameterInfo[] parameters, Timeline timeline, VideoItem item, int fps, out object?[] args)
-    {
-        args = new object?[parameters.Length];
-        for (int i = 0; i < parameters.Length; i++)
-        {
-            var p = parameters[i];
-            string name = p.Name ?? "";
-            if (p.HasDefaultValue) { args[i] = p.DefaultValue; continue; }
-            if (p.ParameterType == typeof(int))
-            {
-                args[i] = name.Contains("fps", StringComparison.OrdinalIgnoreCase) ? fps
-                    : name.Contains("layer", StringComparison.OrdinalIgnoreCase) ? item.Layer
-                    : timeline.CurrentFrame;
-                continue;
-            }
-            if (p.ParameterType == typeof(long)) { args[i] = (long)timeline.CurrentFrame; continue; }
-            if (p.ParameterType.IsEnum)
-            {
-                Array values = Enum.GetValues(p.ParameterType);
-                if (values.Length == 0) { args = []; return false; }
-                args[i] = values.GetValue(0);
-                continue;
-            }
-            if (p.ParameterType == typeof(IItem) || p.ParameterType == typeof(VideoItem)) { args[i] = item; continue; }
-            if (p.ParameterType == typeof(ImmutableList<IItem>)) { args[i] = timeline.SelectedItems; continue; }
-            if (p.ParameterType.IsAssignableFrom(timeline.SelectedItems.GetType())) { args[i] = timeline.SelectedItems; continue; }
-            args = [];
-            return false;
-        }
-        return true;
+        return new(rate, fps * splitSeconds, snapshot, timeline.SelectedItems.Count, timeline.Items.Any(x => ReferenceEquals(x, item)));
     }
 
     private static void Check(string id, bool passed)
