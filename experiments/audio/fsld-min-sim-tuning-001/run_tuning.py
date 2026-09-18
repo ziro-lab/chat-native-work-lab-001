@@ -22,6 +22,8 @@ URL="https://zenodo.org/records/3967852/files/FSL10K.zip?download=1"
 THRESHOLDS=(0.66,0.70,0.74,0.78,0.82)
 TRAIN_PER_LICENSE=24
 VAL_PER_LICENSE=12
+TRAIN_CANDIDATES_PER_LICENSE=40
+VAL_CANDIDATES_PER_LICENSE=20
 MAX_MEMBER_BYTES=16*1024*1024
 MAX_NETWORK_BYTES=512*1024*1024
 SEED="musicfit-min-sim-tuning-v1"
@@ -138,9 +140,12 @@ def main():
             groups[lic].append((stable(SEED,lic,creator,sid),creator,sid,member,bpm))
     for lic in groups: groups[lic].sort()
 
+    # Reserve more creator-disjoint candidates than needed because FSLD metadata
+    # does not expose the converted WAV duration. Acceptance into train/validation
+    # is based only on decode/shape/duration policy, never benchmark performance.
     selected={"train":[],"validation":[]}; used=set(forbidden_creators)
     for lic,candidates in groups.items():
-        targets=(("train",TRAIN_PER_LICENSE),("validation",VAL_PER_LICENSE))
+        targets=(("train",TRAIN_CANDIDATES_PER_LICENSE),("validation",VAL_CANDIDATES_PER_LICENSE))
         cursor=0
         for split,count in targets:
             while len([x for x in selected[split] if x["license"]==lic])<count:
@@ -151,17 +156,23 @@ def main():
                 selected[split].append({"id":sid,"creator":creator,"license":lic,"member":member,"bpm":bpm})
 
     results={split:{str(t):[] for t in THRESHOLDS} for split in selected}
-    source_records=[]
+    source_records=[]; accepted={split:defaultdict(int) for split in selected}
     cfg=Config()
     with tempfile.TemporaryDirectory(prefix="musicfit-tune-") as td:
         td=Path(td)
         for split in ("train","validation"):
+            target_count=TRAIN_PER_LICENSE if split=="train" else VAL_PER_LICENSE
             for item in selected[split]:
-                data=rz.read(item["member"],max_uncompressed=MAX_MEMBER_BYTES)
-                try: sr,loop=decode(data)
-                except Exception: raise RuntimeError(f"selected_source_decode_failed:{item['id']}")
+                lic=item["license"]
+                if accepted[split][lic]>=target_count: continue
+                try:
+                    data=rz.read(item["member"],max_uncompressed=MAX_MEMBER_BYTES)
+                    sr,loop=decode(data)
+                except Exception:
+                    continue
                 dur=len(loop)/sr
-                if not 2.0<=dur<=30: raise RuntimeError(f"selected_source_duration_outside_policy:{item['id']}:{dur}")
+                if not 2.0<=dur<=30:
+                    continue
                 song,period=pseudo(loop,sr,item["id"])
                 path=td/f"{item['id']}.wav"; sf.write(path,song,sr,subtype="PCM_24")
                 rec={"split":split,**item,"source_seconds":dur,"thresholds":{}}
@@ -170,9 +181,12 @@ def main():
                     m=score_edges(a.edges,sr,period,item["bpm"])
                     results[split][str(threshold)].append(m)
                     rec["thresholds"][str(threshold)]={**m,"edge_count":len(a.edges)}
-                source_records.append(rec)
+                source_records.append(rec); accepted[split][lic]+=1
                 path.unlink(missing_ok=True)
                 if rz.fetched_bytes>MAX_NETWORK_BYTES: raise RuntimeError("network_budget_exceeded")
+            for lic in groups:
+                if accepted[split][lic] != target_count:
+                    raise RuntimeError(f"not_enough_valid_sources:{split}:{lic}:{accepted[split][lic]}<{target_count}")
 
     metrics={split:{t:aggregate(rows) for t,rows in vals.items()} for split,vals in results.items()}
     train=metrics["train"]
@@ -184,7 +198,7 @@ def main():
         "leakage_controls":{"holdout_used_for_selection":False,"holdout_creator_count":len(forbidden_creators),
             "one_source_per_creator":True,"train_validation_creator_overlap":False},
         "thresholds":list(THRESHOLDS),"chosen_on_train":chosen,"baseline_threshold":baseline,
-        "train_count":len(selected["train"]),"validation_count":len(selected["validation"]),
+        "train_count":sum(accepted["train"].values()),"validation_count":sum(accepted["validation"].values()),
         "metrics":metrics,
         "validation_delta_vs_baseline":{
             k:metrics["validation"][str(chosen)][k]-metrics["validation"][str(baseline)][k]
