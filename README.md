@@ -58,7 +58,7 @@ GitHub Actions Windows runner
 → preserve evidence without redistributing YMM4 itself
 ```
 
-The lab has since grown into independent YMM4 experiments covering plugin load, Timeline selection context, playhead placement, Character-relative Layer behavior, ItemTemplate identity/restart ambiguity and preview playback-rate behavior.
+The lab has since grown into independent YMM4 experiments covering plugin load, Timeline selection context, playhead placement, Character-relative Layer behavior, ItemTemplate identity/restart ambiguity, preview playback-rate behavior and VideoItem split lifecycle/source-range behavior.
 
 See [`experiments/ymm4/`](experiments/ymm4/) for the current list.
 
@@ -103,4 +103,4 @@ Third-party applications, binaries, trademarks, screenshots, names and other thi
 
 ## Status
 
-**v0.3 / canonical YMM4 observation lab** — experiment contract plus six YMM4 experiment/observation tracks, downstream feedback, and a dedicated policy for recording version-sensitive YMM4 host behavior.
+**v0.3 / canonical YMM4 observation lab** — experiment contract plus version-pinned YMM4 experiment/observation tracks, downstream feedback, and a dedicated policy for recording version-sensitive YMM4 host behavior.
