@@ -50,7 +50,7 @@ jobs:
       - name: Upload listening pack
         uses: actions/upload-artifact@v4
         with:
-          name: musicfit-human-listening-001-pack
+          name: musicfit-human-listening-002-pack
           path: experiments/audio/musicfit-human-listening-001/out/listening-pack
           if-no-files-found: error
           retention-days: 14
@@ -59,9 +59,10 @@ jobs:
       - name: Upload metadata evidence
         uses: actions/upload-artifact@v4
         with:
-          name: musicfit-human-listening-001-evidence
+          name: musicfit-human-listening-002-evidence
           path: |
             experiments/audio/musicfit-human-listening-001/out/evidence.json
-            experiments/audio/musicfit-human-listening-001/out/smoke-score.json
+            experiments/audio/musicfit-human-listening-001/out/smoke-score-v2.json
+            experiments/audio/musicfit-human-listening-001/out/smoke-score-v1.json
           if-no-files-found: error
           retention-days: 14
