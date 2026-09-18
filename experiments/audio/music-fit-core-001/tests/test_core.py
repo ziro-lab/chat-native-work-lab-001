@@ -22,6 +22,25 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(a.edges)
         h=self.hidden
         self.assertTrue(any(abs((e.end-e.start)-h['period'])<=.07*16000 for e in a.edges[:3]))
+    def test_audition_edges_prefer_distinct_periods(self):
+        a=analyze(self.path)
+        sr=a.sample_rate
+        a.edges=[
+            Edge(2*sr,10*sr,.99,.99),
+            Edge(3*sr,11*sr+round(.05*sr),.98,.98),
+            Edge(4*sr,8*sr,.97,.97),
+            Edge(5*sr,11*sr,.96,.96),
+        ]
+        selected=audition_edges(a)
+        self.assertEqual(selected[0],a.edges[0])
+        self.assertEqual(
+            [round((e.end-e.start)/sr,2) for e in selected],
+            [8.0,4.0,6.0],
+        )
+        self.assertEqual(a.edges[1].score,.98)  # selector never mutates analysis edges
+        with self.assertRaises(FitError):
+            audition_edges(a,count=0)
+
     def test_exact_short_and_long(self):
         a=analyze(self.path)
         for phase in [3,4]:
@@ -116,6 +135,10 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(r['status'],'needs_listening_review')
         self.assertIsNone(r['quality']['human_acceptance_rate'])
         self.assertTrue((self.root/'fit'/'review.html').is_file())
+        self.assertIn('loop_hypotheses',r)
+        self.assertLessEqual(len(r['loop_hypotheses']),3)
+        for edge in r['loop_hypotheses']:
+            self.assertGreater(edge['period_seconds'],0)
         for row in r['candidates']:
             self.assertTrue((self.root/'fit'/row['render']['path']).is_file())
             for clip in row['previews']:
