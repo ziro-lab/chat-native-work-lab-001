@@ -10,7 +10,7 @@ import numpy as np
 import soundfile as sf
 from scipy import signal
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 SCHEMA = 'musicfit/v1'
 
 class FitError(ValueError):
@@ -188,6 +188,111 @@ def transition_score(a: Analysis, exit_frame: int, entry_frame: int, window_seco
     return float(np.clip((corr + 1) / 2 - min(db / 80, 0.3), 0, 1))
 
 
+def audition_edges(a: Analysis, count: int = 3, min_period_separation_seconds: float = 0.18) -> list[Edge]:
+    """Return score-ordered loop hypotheses, preferring distinct period lengths.
+
+    This is an audition/UI selector only. Analysis.edges remains untouched so
+    the Phase 3/4 planner can still use all safe recurrence phases.
+    """
+    if type(count) is not int or count < 1 or count > 16:
+        raise FitError('invalid_audition_edge_count')
+    if (
+        isinstance(min_period_separation_seconds, bool)
+        or not isinstance(min_period_separation_seconds, (int, float))
+        or not math.isfinite(min_period_separation_seconds)
+        or min_period_separation_seconds < 0
+    ):
+        raise FitError('invalid_audition_period_separation')
+    if not a.edges:
+        return []
+
+    selected: list[Edge] = []
+    deferred: list[Edge] = []
+    for edge in a.edges:
+        period = (edge.end - edge.start) / a.sample_rate
+        distinct = all(
+            abs(period - (other.end - other.start) / a.sample_rate)
+            > min_period_separation_seconds
+            for other in selected
+        )
+        if distinct and len(selected) < count:
+            selected.append(edge)
+        else:
+            deferred.append(edge)
+    if len(selected) < count:
+        for edge in deferred:
+            if edge not in selected:
+                selected.append(edge)
+                if len(selected) == count:
+                    break
+    return selected[:count]
+
+
+def _ending_entries(a: Analysis, c: Config) -> list[int]:
+    """Model-free hypotheses for entering the original source ending.
+
+    Novelty peaks only expand the old protected-outro / 4 s / 8 s candidates;
+    the old candidates are always retained.
+    """
+    sr, n = a.sample_rate, a.frames
+    duration = n / sr
+    h = a.hop_seconds
+    if len(a.features) < 5:
+        return []
+
+    x = a.features.astype(np.float64, copy=False)
+    feature_delta = np.linalg.norm(np.diff(x, axis=0, prepend=x[:1]), axis=1)
+    energy = np.maximum(a.energy.astype(np.float64), 1e-9)
+    energy_delta = np.abs(np.diff(np.log(energy), prepend=np.log(energy[:1])))
+
+    def robust(v):
+        lo, hi = np.percentile(v, [20, 95])
+        return np.clip((v - lo) / max(1e-9, hi - lo), 0.0, 1.0)
+
+    novelty = 0.82 * robust(feature_delta) + 0.18 * robust(energy_delta)
+    width = max(1, round(0.20 / h))
+    if width > 1:
+        novelty = np.convolve(
+            novelty, np.ones(width, dtype=np.float64) / width, mode='same'
+        )
+
+    min_tail = max(4.0, c.keep_outro_seconds)
+    max_tail = min(36.0, max(min_tail + 1.0, duration * 0.45))
+    ranked = []
+    if duration > min_tail + 1.0:
+        lo_i = max(1, round((duration - max_tail) / h))
+        hi_i = min(len(novelty) - 2, round((duration - min_tail) / h))
+        for i in range(lo_i, hi_i + 1):
+            if novelty[i] < novelty[i - 1] or novelty[i] < novelty[i + 1]:
+                continue
+            entry_seconds = i * h
+            tail_seconds = duration - entry_seconds
+            prior = math.exp(-0.5 * ((tail_seconds - 18.0) / 10.0) ** 2)
+            rank_score = 0.82 * float(novelty[i]) + 0.18 * prior
+            entry = round(entry_seconds * sr)
+            if 0 < entry < n:
+                ranked.append((rank_score, entry))
+
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    selected: list[int] = []
+    separation = round(1.25 * sr)
+    for _, entry in ranked:
+        if any(abs(entry - other) < separation for other in selected):
+            continue
+        selected.append(entry)
+        if len(selected) >= 12:
+            break
+
+    # Preserve the original fixed ending-tail hypotheses exactly.
+    for tail_seconds in (c.keep_outro_seconds, 4.0, 8.0):
+        entry = n - round(tail_seconds * sr)
+        if 0 < entry < n and not any(
+            abs(entry - other) < round(0.08 * sr) for other in selected
+        ):
+            selected.append(entry)
+    return selected
+
+
 def _refine_period(mono, sr, start, end, max_shift=0.04):
     """Small waveform registration only; no key/tempo change or phase-vocoder dependency."""
     radius = round(max_shift * sr)
@@ -350,10 +455,11 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
                 route = _merged([*spans, tail])
                 key = tuple((s.start, s.end) for s in route)
                 terminals[key] = (cost + penalty, route, mode, 'loop_fit' if phase==3 else 'graph_fit')
-                # Exact-length ending bridge: preserve the actual original ending; compare both contexts.
+                # Exact-length ending bridge: preserve the actual source ending.
+                # Novelty-derived entries expand, but never replace, the old fixed 2/4/8 s hypotheses.
                 if phase == 4 and remaining >= minimum + outro and n - cursor - remaining > round(0.12*sr):
-                    for tail_len in (outro, min(n//5, round(4*sr)), min(n//4, round(8*sr))):
-                        entry = n - tail_len
+                    for entry in _ending_entries(a, c):
+                        tail_len = n - entry
                         exit = cursor + remaining - tail_len
                         if exit < cursor + minimum or exit < intro or exit >= entry or exit >= n-outro: continue
                         score = transition_score(a, exit, entry)
