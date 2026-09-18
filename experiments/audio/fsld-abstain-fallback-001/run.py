@@ -425,6 +425,8 @@ def main():
             continue
         safe_rows.append({**row, "raw": raw, "member": member})
 
+    by_id = {str(row["id"]): row for row in safe_rows}
+
     train_pool = [
         row for row in safe_rows
         if str(row["id"]) not in holdout_ids
