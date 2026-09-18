@@ -31,8 +31,8 @@ from remote_zip import RemoteZip
 from filter_fsld_metadata import filter_metadata
 
 URL = "https://zenodo.org/records/3967852/files/FSL10K.zip?download=1"
-TRAIN_ABSTAINS = 8
-MAX_SCANNED = 300
+TRAIN_PER_BUCKET = 3
+SIZE_SPLIT_BYTES = 1024 * 1024
 MAX_MEMBER_BYTES = 10 * 1024 * 1024
 MAX_NETWORK_BYTES = 768 * 1024 * 1024
 TRAIN_SEED = "musicfit-abstain-fallback-train-v1"
