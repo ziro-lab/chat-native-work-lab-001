@@ -283,9 +283,15 @@ def _ending_entries(a: Analysis, c: Config) -> list[int]:
         if len(selected) >= 12:
             break
 
-    # Preserve the original fixed ending-tail hypotheses exactly.
-    for tail_seconds in (c.keep_outro_seconds, 4.0, 8.0):
-        entry = n - round(tail_seconds * sr)
+    # Preserve the original planner's fixed hypotheses exactly, including
+    # its short-track clamps for the 4 s / 8 s tails.
+    fixed_tail_frames = (
+        round(c.keep_outro_seconds * sr),
+        min(n // 5, round(4 * sr)),
+        min(n // 4, round(8 * sr)),
+    )
+    for tail_frames in fixed_tail_frames:
+        entry = n - tail_frames
         if 0 < entry < n and not any(
             abs(entry - other) < round(0.08 * sr) for other in selected
         ):
@@ -440,6 +446,7 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
     if phase == 4:
         edges += [(e.start, e.end, e.score, f'f{i}') for i,e in enumerate(eligible)]
     terminals = {}
+    ending_entries = _ending_entries(a, c) if phase == 4 else []
     # State = output frames, source cursor, completed spans, cumulative cost, used edge IDs.
     beam = [(0, 0, (), 0.0, ())]
     for depth in range(c.max_jumps + 1):
@@ -458,7 +465,7 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
                 # Exact-length ending bridge: preserve the actual source ending.
                 # Novelty-derived entries expand, but never replace, the old fixed 2/4/8 s hypotheses.
                 if phase == 4 and remaining >= minimum + outro and n - cursor - remaining > round(0.12*sr):
-                    for entry in _ending_entries(a, c):
+                    for entry in ending_entries
                         tail_len = n - entry
                         exit = cursor + remaining - tail_len
                         if exit < cursor + minimum or exit < intro or exit >= entry or exit >= n-outro: continue
