@@ -11,6 +11,10 @@ jobs:
   native:
     runs-on: windows-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        culture: [en-US, ja-JP]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { persist-credentials: false, fetch-depth: 1 }
@@ -21,6 +25,11 @@ jobs:
           Expand-Archive ymm4.zip ymm4
           $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
           "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Set runner culture
+        shell: pwsh
+        run: |
+          Set-Culture '${{ matrix.culture }}'
+          Write-Host "PowerShell culture after Set-Culture: $((Get-Culture).Name)"
       - shell: pwsh
         run: |
           dotnet build experiments/ymm4/tool-group-resolution/src/Ymm4ToolGroupProbe/Ymm4ToolGroupProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
@@ -34,4 +43,4 @@ jobs:
           if(Test-Path out/evidence/menu-tree.txt){Get-Content out/evidence/menu-tree.txt | Select-String 'CNWL Group|ユーティリティ|Utilities|IToolPlugin|STATIC_STRING'}
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with: { name: ymm4-tool-group-resolution, path: 'out/evidence/', retention-days: 14 }
+        with: { name: 'ymm4-tool-group-resolution-${{ matrix.culture }}', path: 'out/evidence/', retention-days: 14 }
