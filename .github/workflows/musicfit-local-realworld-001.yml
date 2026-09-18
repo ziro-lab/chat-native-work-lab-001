@@ -33,6 +33,19 @@ jobs:
       - name: Install local runner dependencies
         run: python -m pip install -r experiments/audio/musicfit-local-realworld-001/requirements.txt
 
+      - name: Verify setup script rejects unsupported default fallback
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("experiments/audio/musicfit-local-realworld-001/setup_windows.bat")
+          text = p.read_text(encoding="utf-8")
+          assert 'py -m venv .venv' not in text
+          assert 'py -3.12' in text
+          assert 'py -3.11' in text
+          assert 'py -3.13' in text
+          assert 'unsupported Python version' in text
+          print("PASS_SETUP_PYTHON_VERSION_GUARD")
+
       - name: Build synthetic repeating BGM fixture
         shell: python
         run: |
@@ -143,7 +156,7 @@ jobs:
         run: |
           $src = "experiments/audio/musicfit-local-realworld-001"
           $core = "experiments/audio/music-fit-core-001"
-          $dst = "package/MusicFit_Local_RealWorld_Test_v0.1.0"
+          $dst = "package/MusicFit_Local_RealWorld_Test_v0.1.1"
           New-Item -ItemType Directory -Force -Path $dst | Out-Null
           New-Item -ItemType Directory -Force -Path "$dst/input" | Out-Null
           Copy-Item "$src/README_JA.md" $dst
@@ -159,7 +172,7 @@ jobs:
       - name: Upload Windows local test package
         uses: actions/upload-artifact@v4
         with:
-          name: MusicFit-Local-RealWorld-Test-v0.1.0
-          path: package/MusicFit_Local_RealWorld_Test_v0.1.0
+          name: MusicFit-Local-RealWorld-Test-v0.1.1
+          path: package/MusicFit_Local_RealWorld_Test_v0.1.1
           if-no-files-found: error
           retention-days: 14
