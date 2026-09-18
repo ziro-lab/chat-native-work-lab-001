@@ -92,17 +92,17 @@ def build_pseudo_song(loop: np.ndarray, sr: int, source_id: str):
 
 
 def audio_entries(rz: RemoteZip) -> dict[str, str]:
-    # Official FSLD docs say audio files are named <freesound_sound_id>.wav.
-    # Do not bind the benchmark to a particular ZIP directory prefix: the
-    # canonical identity is the numeric basename.
+    # The published description says <freesound_sound_id>.wav, while the
+    # archived converted WAVs keep extra original-file information, e.g.
+    # 100269_1676089.wav.wav. The leading numeric token is the Freesound ID.
     result: dict[str, str] = {}
     for name in rz.entries:
         basename = name.rsplit("/", 1)[-1]
         if not basename.lower().endswith(".wav"):
             continue
-        token = basename[:-4]
-        if token.isdigit():
-            result[token] = name
+        head = basename.split("_", 1)[0].split(".", 1)[0]
+        if head.isdigit():
+            result[head] = name
     return result
 
 
