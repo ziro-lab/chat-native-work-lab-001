@@ -127,7 +127,7 @@ def candidate_html(task_id, candidate):
       <audio class="full" controls preload="none" src="{full}"></audio>
       <details><summary>継ぎ目・Endingの短い試聴</summary>{previews}</details>
       <div class="rating">
-        <label>聴感評価
+        <label>絶対評価（この候補を実際に使うか）
           <select class="overall">
             <option value="">未評価</option>
             <option value="good">◎ そのまま使える</option>
@@ -136,7 +136,16 @@ def candidate_html(task_id, candidate):
             <option value="reject">× 使わない</option>
           </select>
         </label>
-        <div class="issues"><span>気になる点:</span>{issue_boxes}</div>
+        <label>元曲との差（Music Fitで悪くなったか）
+          <select class="edit-impact">
+            <option value="">未評価</option>
+            <option value="same_or_better">元曲と同等 / 改善（新しい違和感なし）</option>
+            <option value="minor_added">加工由来の違和感は少しあるが許容</option>
+            <option value="major_added">加工で明確に悪化した</option>
+            <option value="unclear_source">元曲由来か加工由来か判別しにくい</option>
+          </select>
+        </label>
+        <div class="issues"><span>Music Fitで新たに増えた / 悪化した点:</span>{issue_boxes}</div>
         <label class="best"><input type="radio" name="best-{html.escape(task_id)}" value="{bid}"> このケースで一番よい</label>
       </div>
     </article>
@@ -152,7 +161,11 @@ def review_html(manifest):
         <section class="task" data-task="{html.escape(task['id'])}">
           <h2>{html.escape(task['source_id'])} — {html.escape(task['target_kind'])}</h2>
           <p>元 {task['source_seconds']:.2f}s → 目標 {task['target_seconds']:.2f}s。候補順位は伏せています。</p>
-          <details><summary>元音源を確認</summary><audio controls preload="none" src="{source_audio}"></audio></details>
+          <div class="source-ref">
+            <b>元曲参照</b>
+            <details><summary>元音源 全体</summary><audio controls preload="none" src="{source_audio}"></audio></details>
+            <div>元曲 Ending 5秒 <audio controls preload="none" src="{html.escape(task['source_ending_audio'], quote=True)}"></audio></div>
+          </div>
           <div class="candidates">{cards}</div>
           <label class="none"><input type="radio" name="best-{html.escape(task['id'])}" value=""> 3候補とも選ばない</label>
         </section>
@@ -185,7 +198,7 @@ button,input[type=file],input[type=text]{font-size:1rem;margin:.25rem;padding:.4
   <button id="save">評価JSONを保存</button>
   <label>途中結果を読込 <input id="load" type="file" accept="application/json"></label>
 </header>
-<p>◎/○を実用可として集計します。まず完成音源を聴き、必要なら継ぎ目プレビューで原因を確認してください。候補A/B/Cはアルゴリズム順位とは無関係です。</p>
+<p><b>評価は2種類です。</b>「絶対評価」はその候補を実際に使うか。「元曲との差」はMusic Fitの加工で新しい違和感が増えたかを見ます。元曲自体にブチ音・微妙なEndingなどがある場合、絶対評価が×でも、加工で悪化していなければ「元曲と同等 / 改善」で構いません。候補A/B/Cはアルゴリズム順位とは無関係です。</p>
 """ + "".join(sections) + """
 <script>
 const spec=""" + spec_json + """;
@@ -204,6 +217,7 @@ function collect(){
           return {
             blind_id:c.dataset.blind,
             overall:c.querySelector('.overall').value,
+            edit_impact:c.querySelector('.edit-impact').value,
             issues:Array.from(c.querySelectorAll('[data-issue]:checked')).map(function(x){return x.dataset.issue;})
           };
         })
@@ -214,7 +228,9 @@ function collect(){
 function update(){
   let done=0;
   document.querySelectorAll('.task').forEach(function(task){
-    const complete=Array.from(task.querySelectorAll('.overall')).every(function(x){return x.value;});
+    const absoluteDone=Array.from(task.querySelectorAll('.overall')).every(function(x){return x.value;});
+    const relativeDone=Array.from(task.querySelectorAll('.edit-impact')).every(function(x){return x.value;});
+    const complete=absoluteDone&&relativeDone;
     task.classList.toggle('done',complete);
     if(complete)done++;
   });
@@ -241,6 +257,7 @@ document.getElementById('load').onchange=async function(e){
       const c=candidates.find(function(x){return x.dataset.blind===rc.blind_id;});
       if(!c)return;
       c.querySelector('.overall').value=rc.overall||'';
+      c.querySelector('.edit-impact').value=rc.edit_impact||'';
       c.querySelectorAll('[data-issue]').forEach(function(box){
         box.checked=(rc.issues||[]).indexOf(box.dataset.issue)>=0;
       });
@@ -281,6 +298,14 @@ def main():
             sf.write(str(source_wav), song, source_pack["sr"], subtype="PCM_24")
             source_flac = pack_dir / "sources" / f"{source['id']}.flac"
             convert_flac(source_wav, source_flac)
+            source_ending_rel = Path("sources") / f"{source['id']}-ending.flac"
+            clip_flac(
+                source_wav,
+                pack_dir / source_ending_rel,
+                None,
+                seconds=5.0,
+                ending=True,
+            )
 
             analysis = analyze(source_wav, config, Budget(180))
             hypotheses = [
@@ -393,6 +418,7 @@ def main():
                     "id": task_id,
                     "source_id": source["id"],
                     "source_audio": f"sources/{source['id']}.flac",
+                    "source_ending_audio": source_ending_rel.as_posix(),
                     "source_seconds": source_seconds,
                     "target_kind": target_kind,
                     "target_factor": factor,
@@ -402,10 +428,15 @@ def main():
             source_wav.unlink(missing_ok=True)
 
     manifest = {
-        "schema": "musicfit-human-listening-benchmark/v1",
+        "schema": "musicfit-human-listening-benchmark/v2",
         "core_version": VERSION,
         "blind_order": "deterministic SHA256; algorithm rank hidden in UI",
         "acceptable_definition": ["good", "acceptable"],
+        "relative_edit_quality_definition": {
+            "pass": ["same_or_better", "minor_added"],
+            "clean": ["same_or_better"],
+            "excluded_as_source_confounded": ["unclear_source"],
+        },
         "source_count": len(source_manifest),
         "task_count": len(tasks),
         "candidate_count": total_candidates,
@@ -429,7 +460,7 @@ def main():
     )
 
     evidence = {
-        "status": "PASS_MUSICFIT_HUMAN_LISTENING_PACK_V1",
+        "status": "PASS_MUSICFIT_HUMAN_LISTENING_PACK_V2",
         "core_version": VERSION,
         "source_count": len(source_manifest),
         "task_count": len(tasks),
