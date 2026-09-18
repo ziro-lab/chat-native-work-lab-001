@@ -25,9 +25,9 @@ The normal analyzer compares up to a whole candidate period. Capping the proposa
 
 ## Data separation
 
-A fallback strategy is chosen using **8 disjoint abstain tracks** found by scanning commercial-safe FSLD items.
+A fallback strategy is chosen using a **fixed 12-track disjoint tuning cohort** from commercial-safe FSLD. It is stratified by license (CC0 / CC BY) and archive-member size (small / large), three tracks per bucket. These tracks do not need to be normal-path abstains; they teach which fallback view best recovers known musical periods without an expensive abstain-mining scan.
 
-The fixed 48-source holdout is not used for strategy selection. Holdout IDs and creators are excluded from the training scan. Only after selection is frozen is the strategy evaluated on the four frozen holdout abstains.
+The fixed 48-source holdout is not used for strategy selection. Holdout IDs and creators are excluded from the tuning cohort. Only after selection is frozen is the strategy evaluated on the four frozen holdout abstains.
 
 ## Labels
 
@@ -42,7 +42,7 @@ These are not human-naturalness labels.
 
 PASS means:
 
-- eight disjoint training abstains are found;
+- twelve disjoint stratified tuning tracks are evaluated;
 - the chosen fallback is selected without holdout leakage;
 - the four frozen holdout abstains remain normal-path abstains;
 - fallback results are reported with final seam gate fixed at 0.78;
