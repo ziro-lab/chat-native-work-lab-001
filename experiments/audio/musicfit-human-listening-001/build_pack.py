@@ -204,7 +204,7 @@ button,input[type=file],input[type=text]{font-size:1rem;margin:.25rem;padding:.4
 const spec=""" + spec_json + """;
 function collect(){
   return {
-    schema:'musicfit-human-listening-ratings/v1',
+    schema:'musicfit-human-listening-ratings/v2',
     benchmark_schema:spec.schema,
     core_version:spec.core_version,
     rater:document.getElementById('rater').value.trim(),
