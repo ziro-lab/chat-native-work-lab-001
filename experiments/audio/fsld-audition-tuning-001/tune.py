@@ -152,7 +152,7 @@ def select_diverse(edges, sr, rel, count=3):
     return selected[:count]
 
 
-def evaluate_tracks(tracks, rel, fallback):
+def evaluate_tracks(tracks, rel, fallback, *, raw_order=False):
     top1_strict = top3_strict = 0
     top1_audition = top3_audition = 0
     no_candidates = 0
@@ -166,7 +166,9 @@ def evaluate_tracks(tracks, rel, fallback):
             edges = row["fallback_edges"].get(str(fallback), [])
             source = f"fallback_{fallback}"
             fallback_used += bool(edges)
-        chosen = select_diverse(edges, row["sample_rate"], rel)
+        chosen = list(edges[:3]) if raw_order else select_diverse(
+            edges, row["sample_rate"], rel
+        )
         labels = [
             edge_labels(e, row["sample_rate"], row["publisher_period"], row["bpm"])
             for e in chosen
@@ -380,12 +382,19 @@ def main():
     if {x["creator"] for x in tune_tracks} & holdout_creators:
         raise RuntimeError("creator_leakage")
 
+    # Raw baseline means the analyzer's original score order, exactly edges[:3].
+    # It must not silently include the 180 ms diversity floor.
+    raw_holdout = evaluate_tracks(
+        holdout_tracks, 0.0, None, raw_order=True
+    )
+    period_diverse_holdout = evaluate_tracks(
+        holdout_tracks, 0.0, None
+    )
     holdout_metrics = evaluate_tracks(
         holdout_tracks,
         chosen_strategy["diversity_rel"],
         chosen_strategy["fallback_threshold"],
     )
-    baseline_holdout = evaluate_tracks(holdout_tracks, 0.0, None)
 
     report = {
         "schema": "fsld-audition-tuning/v1",
@@ -399,10 +408,11 @@ def main():
             "holdout_ids": [x["id"] for x in holdout_tracks],
         },
         "tuning_metrics": tuning_metrics,
-        "holdout_baseline_recomputed": baseline_holdout,
+        "holdout_raw_baseline": raw_holdout,
+        "holdout_period_diverse_180ms": period_diverse_holdout,
         "holdout_selected_strategy": holdout_metrics,
-        "holdout_delta": {
-            key: holdout_metrics[key] - baseline_holdout[key]
+        "holdout_delta_vs_raw": {
+            key: holdout_metrics[key] - raw_holdout[key]
             for key in (
                 "strict_top1",
                 "strict_top3",
@@ -438,9 +448,10 @@ def main():
     print(json.dumps({
         "chosen_strategy": chosen_strategy,
         "tuning": {k: v for k, v in tuning_metrics.items() if k != "per_track"},
-        "holdout_baseline": {k: v for k, v in baseline_holdout.items() if k != "per_track"},
+        "holdout_raw_baseline": {k: v for k, v in raw_holdout.items() if k != "per_track"},
+        "holdout_period_diverse_180ms": {k: v for k, v in period_diverse_holdout.items() if k != "per_track"},
         "holdout_selected": {k: v for k, v in holdout_metrics.items() if k != "per_track"},
-        "holdout_delta": report["holdout_delta"],
+        "holdout_delta_vs_raw": report["holdout_delta_vs_raw"],
         "network_bytes": RZ.fetched_bytes,
         "elapsed_seconds": report["elapsed_seconds"],
     }, indent=2))
