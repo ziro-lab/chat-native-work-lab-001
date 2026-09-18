@@ -4,7 +4,6 @@ import hashlib
 import io
 import json
 import math
-import re
 import shutil
 import sys
 import tempfile
@@ -59,8 +58,12 @@ def render_variants(loop: np.ndarray, source_id: str) -> list[np.ndarray]:
     b += rng.normal(0.0, 1.2e-4, size=b.shape).astype(np.float32)
     b = normalize(b, 0.79)
 
-    c = signal.lfilter(np.array([1.0, -0.035], dtype=np.float32),
-                       np.array([1.0], dtype=np.float32), loop, axis=0).astype(np.float32)
+    c = signal.lfilter(
+        np.array([1.0, -0.035], dtype=np.float32),
+        np.array([1.0], dtype=np.float32),
+        loop,
+        axis=0,
+    ).astype(np.float32)
     if c.ndim == 1:
         c = c[:, None]
     gains = np.linspace(0.96, 1.04, c.shape[1], dtype=np.float32)
@@ -89,12 +92,17 @@ def build_pseudo_song(loop: np.ndarray, sr: int, source_id: str):
 
 
 def audio_entries(rz: RemoteZip) -> dict[str, str]:
-    result = {}
-    rx = re.compile(r"(?:^|/)audio/(\d+)\.wav$", re.IGNORECASE)
+    # Official FSLD docs say audio files are named <freesound_sound_id>.wav.
+    # Do not bind the benchmark to a particular ZIP directory prefix: the
+    # canonical identity is the numeric basename.
+    result: dict[str, str] = {}
     for name in rz.entries:
-        m = rx.search(name)
-        if m:
-            result[m.group(1)] = name
+        basename = name.rsplit("/", 1)[-1]
+        if not basename.lower().endswith(".wav"):
+            continue
+        token = basename[:-4]
+        if token.isdigit():
+            result[token] = name
     return result
 
 
@@ -123,9 +131,16 @@ def main() -> None:
         n for n in rz.entries
         if n.lower().endswith("/metadata.json") or n.lower() == "metadata.json"
     )
-    payload = json.loads(rz.read(metadata_name, max_uncompressed=48 * 1024 * 1024).decode("utf-8"))
+    payload = json.loads(
+        rz.read(metadata_name, max_uncompressed=48 * 1024 * 1024).decode("utf-8")
+    )
     filtered = filter_metadata(payload)
     amap = audio_entries(rz)
+    if len(amap) < 9000:
+        wav_sample = [n for n in rz.entries if n.lower().endswith(".wav")][:20]
+        raise RuntimeError(
+            f"unexpected_numeric_wav_mapping:{len(amap)}:sample={wav_sample}"
+        )
 
     groups = {
         "CC0-1.0": [],
@@ -144,6 +159,10 @@ def main() -> None:
             groups[lic].append((stable_key(source_id), row, member))
     for lic in groups:
         groups[lic].sort(key=lambda x: x[0])
+        if len(groups[lic]) < PER_LICENSE:
+            raise RuntimeError(
+                f"not_enough_mapped_sources:{lic}:{len(groups[lic])}:audio_map={len(amap)}"
+            )
 
     rows = []
     picked = Counter()
@@ -183,7 +202,8 @@ def main() -> None:
 
                 tol_frames = round(0.070 * sr)
                 valid = [
-                    edge for edge in analysis.edges
+                    edge
+                    for edge in analysis.edges
                     if abs((edge.end - edge.start) - hidden["period_frames"]) <= tol_frames
                     and edge.start >= hidden["body_start_frame"]
                     and edge.end <= hidden["body_end_frame"]
@@ -201,7 +221,9 @@ def main() -> None:
                     "edge_count": len(analysis.edges),
                     "warnings": analysis.warnings,
                     "edge_kinds": sorted({e.kind for e in analysis.edges}),
-                    "strict_known_pair_top1": bool(analysis.edges and analysis.edges[0] in valid),
+                    "strict_known_pair_top1": bool(
+                        analysis.edges and analysis.edges[0] in valid
+                    ),
                     "strict_known_pair_top3": any(e in valid for e in analysis.edges[:3]),
                     "pair_valid": bool(valid),
                     "top_periods_seconds": [
@@ -248,6 +270,7 @@ def main() -> None:
             "max_member_bytes": MAX_MEMBER_BYTES,
         },
         "source_count": total,
+        "numeric_wav_member_count": len(amap),
         "strict_known_pair_top1": top1 / total,
         "strict_known_pair_top3": top3 / total,
         "pair_valid_rate": valid_pairs / total,
@@ -278,6 +301,7 @@ def main() -> None:
     )
     print(json.dumps({
         "source_count": total,
+        "numeric_wav_member_count": len(amap),
         "strict_known_pair_top1": report["strict_known_pair_top1"],
         "strict_known_pair_top3": report["strict_known_pair_top3"],
         "pair_valid_rate": report["pair_valid_rate"],
