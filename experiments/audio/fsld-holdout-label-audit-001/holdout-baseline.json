@@ -1,0 +1,613 @@
+{
+  "schema": "fsld-holdout-baseline/v1",
+  "run_id": 35310322059,
+  "artifact_sha256": "e545f2e042a18a8d6a0168d5b6086da30965775c8479d0acc94a0b368996175b",
+  "tracks": [
+    {
+      "id": "431192",
+      "license": "CC0-1.0",
+      "creator": "chiptraxxx",
+      "loop": 13.913061224,
+      "top": [
+        3.478253968,
+        3.478253968,
+        3.478276644
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "59209",
+      "license": "CC-BY-3.0",
+      "creator": "suonho",
+      "loop": 8.205124717,
+      "top": [
+        8.205124717,
+        8.205124717,
+        8.205124717
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "75159",
+      "license": "CC0-1.0",
+      "creator": "Djeuphoria",
+      "loop": 29.540861678,
+      "top": [
+        29.540861678,
+        29.540861678,
+        29.540861678
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "69611",
+      "license": "CC0-1.0",
+      "creator": "deleted_user_984625",
+      "loop": 11.162789116,
+      "top": [
+        11.162789116,
+        11.162789116,
+        11.162789116
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "40003",
+      "license": "CC-BY-3.0",
+      "creator": "Jovica",
+      "loop": 14.768027211,
+      "top": [
+        14.768027211,
+        14.768027211,
+        14.768027211
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "2618",
+      "license": "CC-BY-3.0",
+      "creator": "Jovica",
+      "loop": 14.436122449,
+      "top": [
+        14.436122449,
+        14.436122449,
+        14.436122449
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "122304",
+      "license": "CC0-1.0",
+      "creator": "StanGenda",
+      "loop": 29.538480726,
+      "top": [],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "107959",
+      "license": "CC0-1.0",
+      "creator": "colano100dio",
+      "loop": 7.68,
+      "top": [
+        7.68,
+        7.68,
+        7.68
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "222414",
+      "license": "CC-BY-3.0",
+      "creator": "Jovica",
+      "loop": 4,
+      "top": [
+        4,
+        4,
+        4
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "431203",
+      "license": "CC0-1.0",
+      "creator": "chiptraxxx",
+      "loop": 7.619047619,
+      "top": [
+        3.80952381,
+        3.80952381,
+        3.80952381
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "6969",
+      "license": "CC-BY-3.0",
+      "creator": "Jovica",
+      "loop": 2.181836735,
+      "top": [
+        2.181836735,
+        2.181836735,
+        2.181836735
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "473670",
+      "license": "CC0-1.0",
+      "creator": "flombles",
+      "loop": 20,
+      "top": [],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "414257",
+      "license": "CC-BY-3.0",
+      "creator": "SSS_Samples",
+      "loop": 4,
+      "top": [
+        4,
+        4,
+        4
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "490711",
+      "license": "CC0-1.0",
+      "creator": "chiptraxxx",
+      "loop": 7.218049887,
+      "top": [
+        3.609002268,
+        3.609002268,
+        3.609002268
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "132050",
+      "license": "CC-BY-3.0",
+      "creator": "keplar",
+      "loop": 6.472199546,
+      "top": [
+        6.472199546,
+        6.472199546,
+        6.472199546
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "120101",
+      "license": "CC-BY-3.0",
+      "creator": "Ongitak",
+      "loop": 5.147324263,
+      "top": [],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "474472",
+      "license": "CC0-1.0",
+      "creator": "kendallbear",
+      "loop": 9.171519274,
+      "top": [
+        9.171519274,
+        9.171519274,
+        9.171519274
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "388365",
+      "license": "CC0-1.0",
+      "creator": "GioMilko",
+      "loop": 4.752494331,
+      "top": [
+        4.752494331,
+        4.752494331,
+        4.752494331
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "348384",
+      "license": "CC-BY-3.0",
+      "creator": "REVEREND.BLACK",
+      "loop": 10.21,
+      "top": [
+        10.21,
+        10.21,
+        10.21
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "122307",
+      "license": "CC0-1.0",
+      "creator": "StanGenda",
+      "loop": 14.769251701,
+      "top": [
+        14.769251701,
+        14.769251701,
+        14.769251701
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "200839",
+      "license": "CC-BY-3.0",
+      "creator": "LoopPacks",
+      "loop": 3.433038549,
+      "top": [
+        3.433038549,
+        3.433038549,
+        3.433038549
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "86706",
+      "license": "CC-BY-3.0",
+      "creator": "Jovica",
+      "loop": 24,
+      "top": [
+        24,
+        24,
+        24
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "345004",
+      "license": "CC0-1.0",
+      "creator": "Stereo Surgeon",
+      "loop": 21.818185941,
+      "top": [
+        8.728185941
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "77717",
+      "license": "CC-BY-3.0",
+      "creator": "sorohanro",
+      "loop": 10.666689342,
+      "top": [
+        10.666689342,
+        10.666689342,
+        10.666689342
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "43209",
+      "license": "CC-BY-3.0",
+      "creator": "NoiseCollector",
+      "loop": 2.636371882,
+      "top": [
+        2.636371882,
+        2.636371882,
+        2.636371882
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "466685",
+      "license": "CC0-1.0",
+      "creator": "fons",
+      "loop": 15.483877551,
+      "top": [
+        15.483877551,
+        15.483877551,
+        15.483877551
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "40020",
+      "license": "CC-BY-3.0",
+      "creator": "Jovica",
+      "loop": 14.76877551,
+      "top": [
+        14.76877551,
+        14.76877551,
+        14.76877551
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "416277",
+      "license": "CC0-1.0",
+      "creator": "gusgus26",
+      "loop": 16,
+      "top": [
+        4,
+        4,
+        4
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "59260",
+      "license": "CC-BY-3.0",
+      "creator": "suonho",
+      "loop": 8.648662132,
+      "top": [
+        8.648662132,
+        8.648662132,
+        8.648662132
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "377897",
+      "license": "CC0-1.0",
+      "creator": "deleted_user_2195044",
+      "loop": 8.25,
+      "top": [
+        4,
+        4,
+        4
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "102353",
+      "license": "CC-BY-3.0",
+      "creator": "sandyrb",
+      "loop": 3.692312925,
+      "top": [
+        3.692312925,
+        3.692312925,
+        3.692312925
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "413064",
+      "license": "CC0-1.0",
+      "creator": "stixthule",
+      "loop": 4.444444444,
+      "top": [
+        4.444444444,
+        4.444444444,
+        4.444444444
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "199207",
+      "license": "CC-BY-3.0",
+      "creator": "aikighost",
+      "loop": 3.84,
+      "top": [
+        3.84,
+        3.84,
+        3.84
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "349464",
+      "license": "CC0-1.0",
+      "creator": "T_Beau",
+      "loop": 3.75,
+      "top": [
+        3.75,
+        3.75,
+        3.75
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "348849",
+      "license": "CC0-1.0",
+      "creator": "newagesoup",
+      "loop": 5.441337868,
+      "top": [],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "200862",
+      "license": "CC-BY-3.0",
+      "creator": "LoopPacks",
+      "loop": 20.87185941,
+      "top": [
+        20.87185941,
+        20.87185941,
+        20.87185941
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "214485",
+      "license": "CC0-1.0",
+      "creator": "SpankMyFilth",
+      "loop": 5.413333333,
+      "top": [
+        2.186303855,
+        2.163628118,
+        2.17893424
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "421860",
+      "license": "CC-BY-3.0",
+      "creator": "tailorvj",
+      "loop": 7.111111111,
+      "top": [
+        7.111111111,
+        7.111111111,
+        7.111111111
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "214728",
+      "license": "CC0-1.0",
+      "creator": "SpankMyFilth",
+      "loop": 5.274671202,
+      "top": [
+        2.048662132,
+        2.048730159,
+        2.006439909
+      ],
+      "s1": false,
+      "s3": false
+    },
+    {
+      "id": "364223",
+      "license": "CC0-1.0",
+      "creator": "T_Beau",
+      "loop": 19.568208617,
+      "top": [
+        19.568208617,
+        19.568208617,
+        19.568208617
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "474400",
+      "license": "CC-BY-3.0",
+      "creator": "Erokia",
+      "loop": 17.454557823,
+      "top": [
+        17.454557823,
+        17.454557823,
+        17.454557823
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "429052",
+      "license": "CC-BY-3.0",
+      "creator": "CarlosCarty",
+      "loop": 23,
+      "top": [
+        23,
+        23,
+        23
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "429865",
+      "license": "CC-BY-3.0",
+      "creator": "CarlosCarty",
+      "loop": 3.916666667,
+      "top": [
+        3.916666667,
+        3.916666667,
+        3.916666667
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "72154",
+      "license": "CC-BY-3.0",
+      "creator": "zilverton",
+      "loop": 7.741950113,
+      "top": [
+        4.838503401,
+        4.838480726,
+        7.741950113
+      ],
+      "s1": false,
+      "s3": true
+    },
+    {
+      "id": "439989",
+      "license": "CC0-1.0",
+      "creator": "DirtyArchives",
+      "loop": 4.8,
+      "top": [
+        4.8,
+        4.8,
+        4.8
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "43260",
+      "license": "CC-BY-3.0",
+      "creator": "NoiseCollector",
+      "loop": 2.636371882,
+      "top": [
+        2.636371882,
+        2.636371882,
+        2.636371882
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "432144",
+      "license": "CC0-1.0",
+      "creator": "ADnova",
+      "loop": 14.769229025,
+      "top": [
+        14.769229025,
+        14.769229025,
+        14.769229025
+      ],
+      "s1": true,
+      "s3": true
+    },
+    {
+      "id": "214718",
+      "license": "CC0-1.0",
+      "creator": "SpankMyFilth",
+      "loop": 5.488004535,
+      "top": [
+        2.048684807,
+        2.323968254,
+        2.319886621
+      ],
+      "s1": false,
+      "s3": false
+    }
+  ]
+}
