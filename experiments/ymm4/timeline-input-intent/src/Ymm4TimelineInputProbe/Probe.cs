@@ -42,7 +42,7 @@ public sealed class ProbeVm : ITimelineToolViewModel, IToolViewModel
 
 internal static class Bootstrap
 {
-    static bool scheduled, created, opened;
+    static bool scheduled, created, started;
     public static void Schedule()
     {
         if(scheduled || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CNWL_YMM4_INPUT_DIR"))) return;
@@ -52,38 +52,46 @@ internal static class Bootstrap
             var ticks=0;
             timer.Tick+=(_,_)=>{
                 ticks++;
-                foreach(Window w in Application.Current.Windows)
+                try
                 {
-                    var main=w.DataContext;
-                    if(main?.GetType().FullName!="YukkuriMovieMaker.ViewModels.MainViewModel") continue;
-                    var active=main.GetType().GetProperty("ActiveTimelineViewModel")?.GetValue(main);
-                    if(active==null&&!created){created=true;main.GetType().GetMethod("CreateProject",Type.EmptyTypes)?.Invoke(main,null);return;}
-                    if(active!=null&&!opened) opened=OpenTool(main);
-                    if(opened){timer.Stop();return;}
+                    foreach(Window w in Application.Current.Windows)
+                    {
+                        var main=w.DataContext;
+                        if(main?.GetType().FullName!="YukkuriMovieMaker.ViewModels.MainViewModel") continue;
+                        var active=main.GetType().GetProperty("ActiveTimelineViewModel",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(main);
+                        if(active==null&&!created)
+                        {
+                            created=true;
+                            main.GetType().GetMethod("CreateProject",Type.EmptyTypes)?.Invoke(main,null);
+                            return;
+                        }
+                        if(active==null||started) continue;
+                        var timeline=active.GetType().GetProperty("Timeline",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(active) as Timeline;
+                        if(timeline==null) continue;
+                        started=true;
+                        timer.Stop();
+                        InputProbe.Start(timeline);
+                        return;
+                    }
+                    if(ticks>100)
+                    {
+                        timer.Stop();
+                        var dir=Path.GetFullPath(Environment.GetEnvironmentVariable("CNWL_YMM4_INPUT_DIR")!);
+                        Directory.CreateDirectory(dir);
+                        File.WriteAllText(Path.Combine(dir,"result.txt"),"status=FAIL_BOOTSTRAP_TIMELINE\n",new UTF8Encoding(false));
+                    }
                 }
-                if(ticks>80) timer.Stop();
+                catch(Exception ex)
+                {
+                    timer.Stop();
+                    var dir=Path.GetFullPath(Environment.GetEnvironmentVariable("CNWL_YMM4_INPUT_DIR")!);
+                    Directory.CreateDirectory(dir);
+                    File.WriteAllText(Path.Combine(dir,"error.txt"),ex.ToString(),new UTF8Encoding(false));
+                    File.WriteAllText(Path.Combine(dir,"result.txt"),"status=FAIL_BOOTSTRAP_EXCEPTION\n",new UTF8Encoding(false));
+                }
             };
             timer.Start();
         }));
-    }
-    static bool OpenTool(object main)
-    {
-        if(main.GetType().GetProperty("ToolMenuItems")?.GetValue(main) is not IEnumerable items)return false;
-        bool Visit(object x,int d)
-        {
-            if(d>8)return false;var t=x.GetType();
-            var label=t.GetProperty("Header")?.GetValue(x)?.ToString()??t.GetProperty("Title")?.GetValue(x)?.ToString()??t.GetProperty("Name")?.GetValue(x)?.ToString()??"";
-            if(label.Contains("CNWL Timeline Input Probe",StringComparison.Ordinal))
-            {
-                if(t.GetProperty("Command")?.GetValue(x) is ICommand c){var p=t.GetProperty("CommandParameter")?.GetValue(x);if(c.CanExecute(p)){c.Execute(p);return true;}}
-                foreach(var n in new[]{"IsVisible","IsSelected","IsActive"})try{t.GetProperty(n)?.SetValue(x,true);}catch{}
-                return true;
-            }
-            var ch=(t.GetProperty("Children")?.GetValue(x)??t.GetProperty("Items")?.GetValue(x)) as IEnumerable;
-            if(ch!=null)foreach(var y in ch)if(y!=null&&Visit(y,d+1))return true;
-            return false;
-        }
-        foreach(var x in items)if(x!=null&&Visit(x,0))return true;return false;
     }
 }
 
@@ -131,7 +139,6 @@ internal static class InputProbe
             main.WindowState=WindowState.Maximized;
             main.Activate();
             Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
-            HideOwnTool(main.DataContext);
             await Task.Delay(900);
 
             var character=new Character{Name="CNWL_InputA"};
@@ -191,7 +198,10 @@ internal static class InputProbe
             {
                 await Click("item-click-retry",itemPoint); Snapshot("after item-click-retry");
             }
+            var beforeReclickSelected=t.SelectedItem;
+            var beforeReclickCount=t.SelectedItems.Count;
             await Click("item-reclick",itemPoint); Snapshot("after item-reclick");
+            var reclickSelectionValueSame=ReferenceEquals(beforeReclickSelected,t.SelectedItem) && beforeReclickCount==t.SelectedItems.Count;
             await Click("blank-click",blankPoint); Snapshot("after blank-click");
             await Click("ruler-click",rulerPoint); Snapshot("after ruler-click");
 
@@ -219,7 +229,8 @@ internal static class InputProbe
                 "item_source_is_timeline_item="+itemSource,
                 "item_reclick_pointer_route_observed="+Has("item-reclick","ROUTED PreviewMouseDown"),
                 "item_reclick_source_is_timeline_item="+Has("item-reclick","TimelineItemView"),
-                "item_reclick_selection_changed="+Has("item-reclick","TIMELINE PropertyChanged SelectedItems"),
+                "item_reclick_selection_changed_event="+Has("item-reclick","TIMELINE PropertyChanged SelectedItems"),
+                "item_reclick_selection_value_same="+reclickSelectionValueSame,
                 "blank_pointer_route_observed="+Has("blank-click","ROUTED PreviewMouseDown"),
                 "blank_currentframe_changed="+Has("blank-click","TIMELINE PropertyChanged CurrentFrame"),
                 "blank_source_is_timeline_item="+Has("blank-click","TimelineItemView"),
@@ -287,25 +298,6 @@ internal static class InputProbe
             try{d=VisualTreeHelper.GetParent(d);}catch{break;}
         }
         return string.Join("<-",parts);
-    }
-
-    static void HideOwnTool(object? main)
-    {
-        if(main==null)return;
-        if(main.GetType().GetProperty("ToolMenuItems")?.GetValue(main) is not IEnumerable items)return;
-        void Visit(object x,int depth)
-        {
-            if(depth>8)return;
-            var t=x.GetType();
-            var label=t.GetProperty("Header")?.GetValue(x)?.ToString()??t.GetProperty("Title")?.GetValue(x)?.ToString()??t.GetProperty("Name")?.GetValue(x)?.ToString()??"";
-            if(label.Contains("CNWL Timeline Input Probe",StringComparison.Ordinal))
-            {
-                foreach(var n in new[]{"IsActive","IsSelected","IsVisible"}) try{t.GetProperty(n)?.SetValue(x,false);}catch{}
-            }
-            var children=(t.GetProperty("Children")?.GetValue(x)??t.GetProperty("Items")?.GetValue(x)) as IEnumerable;
-            if(children!=null)foreach(var child in children)if(child!=null)Visit(child,depth+1);
-        }
-        foreach(var x in items)if(x!=null)Visit(x,0);
     }
 
     static System.Windows.Point? FindHitPoint(Window main,ScreenBox box,string include,string? exclude=null)
