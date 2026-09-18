@@ -133,30 +133,36 @@ internal static class InputProbe
             Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
 
             var character=new Character{Name="CNWL_InputA"};
-            voice=new VoiceItem(character){Frame=30,Length=90,Layer=6,Serif="input probe",Remark="CNWL_INPUT_FIXTURE"};
+            voice=new VoiceItem(character){Frame=10,Length=60,Layer=1,Serif="input probe",Remark="CNWL_INPUT_FIXTURE"};
             if(!t.Items.Any(x=>x.Remark=="CNWL_INPUT_FIXTURE"))
                 if(!t.TryAddItems([voice],voice.Frame,voice.Layer))throw new InvalidOperationException("Could not insert VoiceItem fixture");
             else voice=(VoiceItem)t.Items.First(x=>x.Remark=="CNWL_INPUT_FIXTURE");
-            t.SelectedItems=ImmutableList<IItem>.Empty;
             t.CurrentFrame=0;
-            await Task.Delay(1200);
+            var active=main.DataContext?.GetType().GetProperty("ActiveTimelineViewModel",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(main.DataContext);
+            var scrollToItem=active?.GetType().GetMethods(BindingFlags.Instance|BindingFlags.Public)
+                .FirstOrDefault(m=>m.Name=="ScrollToItem" && m.GetParameters().Length==1 && m.GetParameters()[0].ParameterType.IsAssignableFrom(voice.GetType()));
+            scrollToItem?.Invoke(active,[voice]);
+            t.SelectedItems=ImmutableList.Create<IItem>(voice);
+            await Task.Delay(1400);
 
-            Attach(main,t);
-            DumpVisualTree(main);
-
-            var itemElement=FindItemElement(main,voice)??throw new InvalidOperationException("Rendered Timeline item element not found");
-            var timelineElement=FindLargest(main,fe=>fe.DataContext?.GetType().FullName=="YukkuriMovieMaker.ViewModels.TimelineViewModel"||fe.GetType().Name.Contains("TimelineView",StringComparison.OrdinalIgnoreCase))
+            var timelineElement=FindLargest(main,fe=>fe.DataContext?.GetType().FullName=="YukkuriMovieMaker.ViewModels.TimelineViewModel"||fe.GetType().Name.Equals("TimelineView",StringComparison.OrdinalIgnoreCase))
                 ??throw new InvalidOperationException("Timeline visual not found");
-            var rulerElement=FindLargest(main,fe=>(fe.DataContext?.GetType().FullName?.Contains("TimelineScaleViewModel",StringComparison.Ordinal)??false)||fe.GetType().Name.Contains("TimelineScale",StringComparison.OrdinalIgnoreCase))
+            var rulerElement=FindLargest(main,fe=>(fe.DataContext?.GetType().FullName?.Contains("TimelineScaleViewModel",StringComparison.Ordinal)??false)||fe.GetType().Name.Contains("TimelineScaleView",StringComparison.OrdinalIgnoreCase))
                 ??throw new InvalidOperationException("Timeline ruler visual not found");
+            DumpVisualTree(timelineElement,voice);
+
+            var itemElement=FindItemElement(timelineElement,voice)??throw new InvalidOperationException("Rendered Timeline item element not found; see item-candidates.txt");
+            t.SelectedItems=ImmutableList<IItem>.Empty;
+            await Task.Delay(300);
+            Attach(main,t);
 
             var ib=Box(itemElement);var tb=Box(timelineElement);var rb=Box(rulerElement);
             if(!ib.Valid||!tb.Valid||!rb.Valid)throw new InvalidOperationException("Invalid target geometry");
             var itemPoint=ib.Center;
-            var blankX=ib.Right+Math.Max(80,ib.Width);
-            if(blankX>tb.Right-25)blankX=ib.Left-Math.Max(80,ib.Width);
-            if(blankX<tb.Left+25)blankX=tb.Right-40;
-            var blankPoint=new System.Windows.Point(blankX,Math.Clamp(itemPoint.Y,tb.Top+20,tb.Bottom-20));
+            var blankX=rb.Right-30;
+            if(blankX>=ib.Left-5 && blankX<=ib.Right+5) blankX=rb.Left+30;
+            if(blankX>=ib.Left-5 && blankX<=ib.Right+5) blankX=Math.Clamp(ib.Right+40,rb.Left+20,rb.Right-20);
+            var blankPoint=new System.Windows.Point(blankX,Math.Clamp(itemPoint.Y,rb.Bottom+8,tb.Bottom-15));
             var rulerPoint=new System.Windows.Point(Math.Clamp(itemPoint.X+120,rb.Left+20,rb.Right-20),rb.Top+Math.Min(rb.Height/2,20));
 
             File.WriteAllLines(Path.Combine(OutDir,"targets.txt"),
@@ -264,17 +270,45 @@ internal static class InputProbe
 
     static FrameworkElement? FindItemElement(DependencyObject root,IItem item)
     {
-        FrameworkElement? fallback=null;
-        foreach(var fe in Elements(root))
+        var matches=new List<FrameworkElement>();
+        var candidates=new List<string>();
+        foreach(var fe in Elements(root).Where(x=>x.IsVisible))
         {
-            var dc=fe.DataContext;if(dc==null||!dc.GetType().Name.Contains("TimelineItemViewModel",StringComparison.Ordinal))continue;
-            fallback??=fe;
-            foreach(var n in new[]{"Item","Source","Model"})
-            {
-                try{if(ReferenceEquals(dc.GetType().GetProperty(n,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(dc),item))return fe;}catch{}
-            }
+            var b=Box(fe);
+            var dc=fe.DataContext;
+            var relation=ReferencesItem(dc,item,out var via);
+            if(relation) matches.Add(fe);
+            if(dc!=null && (relation || dc.GetType().Name.Contains("Item",StringComparison.OrdinalIgnoreCase)))
+                candidates.Add($"{(relation?"MATCH":"CANDIDATE")} via={via??"-"} fe={fe.GetType().FullName} dc={dc.GetType().FullName} box={b.Left:F1},{b.Top:F1},{b.Width:F1},{b.Height:F1}");
         }
-        return fallback;
+        File.WriteAllLines(Path.Combine(OutDir,"item-candidates.txt"),candidates,new UTF8Encoding(false));
+        return matches.Where(fe=>Box(fe).Valid).OrderByDescending(fe=>fe.ActualWidth*fe.ActualHeight).FirstOrDefault();
+    }
+
+    static bool ReferencesItem(object? dc,IItem item,out string? via)
+    {
+        via=null;
+        if(dc==null)return false;
+        if(ReferenceEquals(dc,item)){via="DataContext";return true;}
+        var type=dc.GetType();
+        var props=type.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)
+            .Where(p=>p.GetIndexParameters().Length==0 && p.CanRead
+                && (typeof(IItem).IsAssignableFrom(p.PropertyType)
+                    || p.Name.Contains("Item",StringComparison.OrdinalIgnoreCase)
+                    || p.Name is "Model" or "Source" or "Value"))
+            .Take(40);
+        foreach(var p in props)
+        {
+            try
+            {
+                var value=p.GetValue(dc);
+                if(ReferenceEquals(value,item)){via=p.Name;return true;}
+                if(value is IEnumerable e && value is not string)
+                    foreach(var x in e){if(ReferenceEquals(x,item)){via=p.Name+"[]";return true;}}
+            }
+            catch{}
+        }
+        return false;
     }
     static FrameworkElement? FindLargest(DependencyObject root,Func<FrameworkElement,bool> pred)=>Elements(root).Where(fe=>fe.IsVisible&&fe.ActualWidth>5&&fe.ActualHeight>5&&pred(fe)).OrderByDescending(fe=>fe.ActualWidth*fe.ActualHeight).FirstOrDefault();
     static IEnumerable<FrameworkElement> Elements(DependencyObject root)
@@ -287,12 +321,15 @@ internal static class InputProbe
     {
         try{var p=fe.PointToScreen(new System.Windows.Point(0,0));return new(p.X,p.Y,fe.ActualWidth,fe.ActualHeight);}catch{return default;}
     }
-    static void DumpVisualTree(Window main)
+    static void DumpVisualTree(FrameworkElement timelineRoot,IItem item)
     {
         var lines=new List<string>();
-        foreach(var fe in Elements(main).Where(fe=>fe.IsVisible&&(fe.GetType().Name.Contains("Timeline",StringComparison.OrdinalIgnoreCase)||(fe.DataContext?.GetType().Name.Contains("Timeline",StringComparison.OrdinalIgnoreCase)??false))).Take(500))
+        foreach(var fe in Elements(timelineRoot).Where(fe=>fe.IsVisible).Take(1600))
         {
-            var b=Box(fe);lines.Add($"{fe.GetType().FullName} dc={fe.DataContext?.GetType().FullName??"<null>"} box={b.Left:F1},{b.Top:F1},{b.Width:F1},{b.Height:F1}");
+            var b=Box(fe);
+            var dc=fe.DataContext;
+            var match=ReferencesItem(dc,item,out var via);
+            lines.Add($"{(match?"ITEM_MATCH ":"")}{fe.GetType().FullName} dc={dc?.GetType().FullName??"<null>"} via={via??"-"} box={b.Left:F1},{b.Top:F1},{b.Width:F1},{b.Height:F1}");
         }
         File.WriteAllLines(Path.Combine(OutDir,"visual-tree.txt"),lines,new UTF8Encoding(false));
     }
