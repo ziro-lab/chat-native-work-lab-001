@@ -1,6 +1,4 @@
-using System.Collections;
 using System.Collections.Immutable;
-using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -22,6 +20,7 @@ public sealed class Entry : ILocalizePlugin
 
 internal static class Probe
 {
+    private sealed record CommandCandidate(string Name, ICommand Command);
     private static bool scheduled;
     private static string output = "";
     private static readonly List<object> requirements = [];
@@ -38,14 +37,12 @@ internal static class Probe
 
     private static void Start()
     {
-        int ticks = 0;
         bool created = false;
         var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(300) };
         timer.Tick += async (_, _) =>
         {
             try
             {
-                ticks++;
                 var main = Application.Current.Windows.Cast<Window>().Select(w => w.DataContext)
                     .FirstOrDefault(x => x?.GetType().FullName == "YukkuriMovieMaker.ViewModels.MainViewModel");
                 if (main == null) return;
@@ -84,7 +81,7 @@ internal static class Probe
         throw new MissingMemberException("Timeline was not found on ActiveTimelineViewModel.");
     }
 
-    private static IEnumerable<(string Name, ICommand Command)> SplitCommands(object active)
+    private static CommandCandidate[] SplitCommands(object active)
     {
         static bool Relevant(string name) =>
             name.Contains("Split", StringComparison.OrdinalIgnoreCase)
@@ -92,27 +89,23 @@ internal static class Probe
             || name.Contains("Separate", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Cut", StringComparison.OrdinalIgnoreCase);
 
+        var result = new List<CommandCandidate>();
         var seen = new HashSet<ICommand>(ReferenceEqualityComparer.Instance);
         foreach (var property in active.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
         {
             if (!Relevant(property.Name) || property.GetIndexParameters().Length != 0) continue;
-            try
-            {
-                if (property.GetValue(active) is ICommand command && seen.Add(command))
-                    yield return ("property:" + property.Name, command);
-            }
-            catch { }
+            ICommand? command = null;
+            try { command = property.GetValue(active) as ICommand; } catch { }
+            if (command != null && seen.Add(command)) result.Add(new("property:" + property.Name, command));
         }
         foreach (var field in active.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
         {
             if (!Relevant(field.Name)) continue;
-            try
-            {
-                if (field.GetValue(active) is ICommand command && seen.Add(command))
-                    yield return ("field:" + field.Name, command);
-            }
-            catch { }
+            ICommand? command = null;
+            try { command = field.GetValue(active) as ICommand; } catch { }
+            if (command != null && seen.Add(command)) result.Add(new("field:" + field.Name, command));
         }
+        return result.ToArray();
     }
 
     private static void DumpSurface(object active)
@@ -165,27 +158,28 @@ internal static class Probe
 
         int originalFrame = item.Frame, originalLength = item.Length;
         long originalOffset = item.ContentOffset.Ticks;
-        string originalPath = item.FilePath;
+        string originalPath = item.FilePath ?? throw new InvalidDataException("Inserted item lost its file path.");
         timeline.SelectedItems = ImmutableList.Create<IItem>(item);
         timeline.CurrentFrame = item.Frame + fps * 4;
         Check("selection_before_split", timeline.SelectedItems.Count == 1 && ReferenceEquals(timeline.SelectedItems[0], item));
         Check("playhead_inside_source", timeline.CurrentFrame == item.Frame + fps * 4);
 
-        var commands = SplitCommands(active).ToArray();
+        var commands = SplitCommands(active);
         File.WriteAllLines(Path.Combine(output, "commands.txt"), commands.Select(c => c.Name + " can(null)=" + SafeCan(c.Command, null) + " can(item)=" + SafeCan(c.Command, item)));
-        var executable = commands.FirstOrDefault(c => SafeCan(c.Command, null));
+        CommandCandidate? executable = commands.FirstOrDefault(c => SafeCan(c.Command, null));
         object? parameter = null;
-        if (executable.Command == null)
+        if (executable == null)
         {
             executable = commands.FirstOrDefault(c => SafeCan(c.Command, item));
             parameter = item;
         }
-        Check("split_command_discovered", executable.Command != null);
-        executable.Command.Execute(parameter);
+        Check("split_command_discovered", executable != null);
+        executable!.Command.Execute(parameter);
         await Task.Delay(250);
 
         var derived = timeline.Items.OfType<VideoItem>()
-            .Where(v => string.Equals(Path.GetFullPath(v.FilePath), Path.GetFullPath(originalPath), StringComparison.OrdinalIgnoreCase)
+            .Where(v => v.FilePath != null
+                     && string.Equals(Path.GetFullPath(v.FilePath), Path.GetFullPath(originalPath), StringComparison.OrdinalIgnoreCase)
                      && v.Layer == item.Layer
                      && v.Frame < originalFrame + originalLength
                      && v.Frame + v.Length > originalFrame)
@@ -198,7 +192,7 @@ internal static class Probe
             v.Length,
             v.Layer,
             offsetSeconds = v.ContentOffset.TotalSeconds,
-            rate = v.PlaybackRate2.GetValue(0),
+            rate = v.PlaybackRate2.GetValue(0, v.Length, fps),
             v.FilePath,
             v.Remark
         }).ToArray();
@@ -215,8 +209,8 @@ internal static class Probe
         Check("timeline_partition", derived[0].Frame == originalFrame
             && derived[0].Frame + derived[0].Length == derived[1].Frame
             && derived[1].Frame + derived[1].Length == originalFrame + originalLength);
-        Check("file_path_preserved", derived.All(v => string.Equals(Path.GetFullPath(v.FilePath), Path.GetFullPath(originalPath), StringComparison.OrdinalIgnoreCase)));
-        Check("rate_preserved", derived.All(v => Math.Abs(v.PlaybackRate2.GetValue(0) - 100) < 0.000001));
+        Check("file_path_preserved", derived.All(v => v.FilePath != null && string.Equals(Path.GetFullPath(v.FilePath), Path.GetFullPath(originalPath), StringComparison.OrdinalIgnoreCase)));
+        Check("rate_preserved", derived.All(v => Math.Abs(v.PlaybackRate2.GetValue(0, v.Length, fps) - 100) < 0.000001));
         Check("source_partition_100_percent", Math.Abs(derived[0].ContentOffset.TotalSeconds - 5) < 0.000001
             && Math.Abs(derived[1].ContentOffset.TotalSeconds - 9) < 0.000001
             && derived[0].Length == fps * 4
