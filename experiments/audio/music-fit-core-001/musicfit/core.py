@@ -465,7 +465,7 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
                 # Exact-length ending bridge: preserve the actual source ending.
                 # Novelty-derived entries expand, but never replace, the old fixed 2/4/8 s hypotheses.
                 if phase == 4 and remaining >= minimum + outro and n - cursor - remaining > round(0.12*sr):
-                    for entry in ending_entries
+                    for entry in ending_entries:
                         tail_len = n - entry
                         exit = cursor + remaining - tail_len
                         if exit < cursor + minimum or exit < intro or exit >= entry or exit >= n-outro: continue
