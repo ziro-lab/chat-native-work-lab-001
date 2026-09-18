@@ -100,7 +100,7 @@ def attribution_text():
         "",
         "Third-party audio remains under its source license.",
     ]
-    return "\\n".join(rows) + "\\n"
+    return "\n".join(rows) + "\n"
 
 
 def candidate_html(task_id, candidate):
@@ -418,7 +418,7 @@ def main():
         ],
     }
     (pack_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False) + "\\n",
+        json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
         encoding="utf-8",
     )
     (pack_dir / "ATTRIBUTION.md").write_text(
@@ -451,7 +451,7 @@ def main():
     if not exact_outputs:
         raise RuntimeError("non_exact_output")
     (out / "evidence.json").write_text(
-        json.dumps(evidence, indent=2, ensure_ascii=False) + "\\n",
+        json.dumps(evidence, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     print(json.dumps(evidence, indent=2, ensure_ascii=False))
