@@ -7,6 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -103,8 +104,10 @@ internal static class PreviewProbe
             var surface=new List<string>();
             Dump("TimelineToolInfo",info.GetType(),surface);
             Dump("Timeline",timeline.GetType(),surface);
-            var pluginCandidates=RelevantPublic(info.GetType()).Concat(RelevantPublic(timeline.GetType())).ToArray();
-            surface.Add("PLUGIN_REFRESH_CANDIDATE_COUNT="+pluginCandidates.Count(IsRefreshLike));
+            var pluginMembers=RelevantPublic(info.GetType()).Concat(RelevantPublic(timeline.GetType())).ToArray();
+            var pluginPreviewRefreshCandidates=pluginMembers.Where(IsDedicatedPreviewRefreshLike).ToArray();
+            surface.Add("PLUGIN_DEDICATED_PREVIEW_REFRESH_CANDIDATE_COUNT="+pluginPreviewRefreshCandidates.Length);
+            foreach(var m in pluginPreviewRefreshCandidates) surface.Add("PLUGIN_PREVIEW_REFRESH_CANDIDATE "+FormatMember(m));
 
             object? main=null, preview=null, active=null;
             foreach(Window w in Application.Current.Windows)
@@ -117,10 +120,12 @@ internal static class PreviewProbe
                     try{var v=p.GetValue(main);surface.Add($"MAIN_PUBLIC_PREVIEW_PROPERTY {p.Name}:{p.PropertyType.FullName} value={v?.GetType().FullName??"<null>"}"); if(v!=null)preview??=v;}catch{}
                 }
                 active=main.GetType().GetProperty("ActiveTimelineViewModel",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(main);
-                if(preview!=null)Dump("Live PreviewViewModel",preview.GetType(),surface);
+                preview ??= FindPreviewDataContext();
+                if(preview!=null)Dump("Live PreviewViewModel/DataContext",preview.GetType(),surface);
                 if(active!=null)Dump("Live TimelineViewModel",active.GetType(),surface);
             }
             File.WriteAllLines(Path.Combine(OutDir,"surface.txt"),surface,new UTF8Encoding(false));
+            DumpAssemblyPublicSurface();
 
             var events=new List<string>(); int seq=0; string phase="baseline";
             void Log(string s)=>events.Add($"{++seq:D4} phase={phase} frame={timeline.CurrentFrame} {s}");
@@ -132,10 +137,12 @@ internal static class PreviewProbe
 
             var scroll=active?.GetType().GetMethod("ScrollFrame",BindingFlags.Instance|BindingFlags.Public,null,[typeof(int)],null);
             var scrollAvailable=scroll!=null;
+            var beforeScrollFrame=timeline.CurrentFrame;
             if(scroll!=null)
             {
                 phase="timelinevm-scrollframe-33"; scroll.Invoke(active,[33]); Log("ACTION TimelineViewModel.ScrollFrame(33)"); await Task.Delay(350);
             }
+            var afterScrollFrame=timeline.CurrentFrame;
 
             var previewEventCount=events.Count(x=>x.Contains("PREVIEW PropertyChanged",StringComparison.Ordinal));
             var directPreviewEvents=events.Count(x=>x.Contains("PREVIEW PropertyChanged",StringComparison.Ordinal)&&(x.Contains("phase=direct-currentframe-11")||x.Contains("phase=direct-currentframe-22")));
@@ -143,9 +150,12 @@ internal static class PreviewProbe
             File.WriteAllLines(Path.Combine(OutDir,"result.txt"),
             [
                 "status=PASS_PREVIEW_REFRESH_OBSERVATION",
-                "plugin_dedicated_refresh_candidate_count="+pluginCandidates.Count(IsRefreshLike),
+                "plugin_dedicated_preview_refresh_candidate_count="+pluginPreviewRefreshCandidates.Length,
                 "preview_vm_found="+(preview!=null),
                 "timeline_vm_scrollframe_public="+scrollAvailable,
+                "timeline_vm_scrollframe_moves_currentframe="+(afterScrollFrame!=beforeScrollFrame),
+                "scrollframe_before_currentframe="+beforeScrollFrame,
+                "scrollframe_after_currentframe="+afterScrollFrame,
                 "preview_property_changed_total="+previewEventCount,
                 "preview_property_changed_during_direct_currentframe="+directPreviewEvents,
                 "final_current_frame="+timeline.CurrentFrame
@@ -159,7 +169,76 @@ internal static class PreviewProbe
     }
 
     static IEnumerable<MemberInfo> RelevantPublic(Type t)=>t.GetMembers(BindingFlags.Instance|BindingFlags.Public).Where(m=>Keys.Any(k=>m.Name.Contains(k,StringComparison.OrdinalIgnoreCase)));
-    static bool IsRefreshLike(MemberInfo m)=>new[]{"refresh","render","redraw","invalidate","update","seek","preview"}.Any(k=>m.Name.Contains(k,StringComparison.OrdinalIgnoreCase));
+    static bool IsDedicatedPreviewRefreshLike(MemberInfo m)
+    {
+        var n=m.Name;
+        if(n.Equals("RefreshTimelineLengthAndMaxLayer",StringComparison.OrdinalIgnoreCase)) return false;
+        return new[]{"preview","render","redraw","invalidate","seek"}.Any(k=>n.Contains(k,StringComparison.OrdinalIgnoreCase))
+            || (n.Contains("refresh",StringComparison.OrdinalIgnoreCase) && !n.Contains("TimelineLength",StringComparison.OrdinalIgnoreCase));
+    }
+    static string FormatMember(MemberInfo m)=>m switch
+    {
+        PropertyInfo p=>$"PROPERTY {p.DeclaringType?.FullName}.{p.Name}:{p.PropertyType.FullName}",
+        MethodInfo mi=>$"METHOD {mi.DeclaringType?.FullName}.{mi.Name}({string.Join(",",mi.GetParameters().Select(p=>p.ParameterType.FullName))}):{mi.ReturnType.FullName}",
+        EventInfo e=>$"EVENT {e.DeclaringType?.FullName}.{e.Name}:{e.EventHandlerType?.FullName}",
+        _=>$"{m.MemberType} {m.DeclaringType?.FullName}.{m.Name}"
+    };
+
+    static object? FindPreviewDataContext()
+    {
+        var seen=new HashSet<object>(ReferenceEqualityComparer.Instance);
+        foreach(Window w in Application.Current.Windows)
+        {
+            foreach(var fe in Elements(w))
+            {
+                var dc=fe.DataContext;
+                if(dc==null || !seen.Add(dc)) continue;
+                var name=dc.GetType().FullName??"";
+                if(name.Contains("Preview",StringComparison.OrdinalIgnoreCase)) return dc;
+            }
+        }
+        return null;
+    }
+
+    static IEnumerable<FrameworkElement> Elements(DependencyObject root)
+    {
+        if(root is FrameworkElement fe) yield return fe;
+        int count=0; try{count=VisualTreeHelper.GetChildrenCount(root);}catch{}
+        for(int i=0;i<count;i++) foreach(var child in Elements(VisualTreeHelper.GetChild(root,i))) yield return child;
+    }
+
+    static void DumpAssemblyPublicSurface()
+    {
+        var lines=new List<string>();
+        foreach(var asm in AppDomain.CurrentDomain.GetAssemblies().Where(a=>(a.GetName().Name??"").StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)).OrderBy(a=>a.GetName().Name))
+        {
+            foreach(var t in SafeTypes(asm).Where(t=>t.IsPublic || t.IsNestedPublic).OrderBy(t=>t.FullName))
+            {
+                var typeName=t.FullName??t.Name;
+                foreach(var m in t.GetMembers(BindingFlags.Instance|BindingFlags.Static|BindingFlags.Public))
+                {
+                    var combined=typeName+"."+m.Name;
+                    var semantic=combined.Contains("Preview",StringComparison.OrdinalIgnoreCase)
+                        || combined.Contains("Render",StringComparison.OrdinalIgnoreCase)
+                        || combined.Contains("Redraw",StringComparison.OrdinalIgnoreCase)
+                        || combined.Contains("Invalidate",StringComparison.OrdinalIgnoreCase)
+                        || combined.Contains("Seek",StringComparison.OrdinalIgnoreCase)
+                        || combined.Contains("Refresh",StringComparison.OrdinalIgnoreCase)
+                        || ((typeName.Contains("Player",StringComparison.OrdinalIgnoreCase)||typeName.Contains("Video",StringComparison.OrdinalIgnoreCase)) && m.Name.Contains("Update",StringComparison.OrdinalIgnoreCase));
+                    if(!semantic) continue;
+                    lines.Add($"{asm.GetName().Name} | {FormatMember(m)}");
+                }
+            }
+        }
+        File.WriteAllLines(Path.Combine(OutDir,"assembly-public-surface.txt"),lines.Distinct().OrderBy(x=>x),new UTF8Encoding(false));
+    }
+
+    static Type[] SafeTypes(Assembly a)
+    {
+        try{return a.GetTypes();}
+        catch(ReflectionTypeLoadException ex){return ex.Types.Where(x=>x!=null).Cast<Type>().ToArray();}
+    }
+
     static void Dump(string title,Type t,List<string> lines)
     {
         lines.Add("=== "+title+" :: "+t.FullName+" ===");
