@@ -1,0 +1,43 @@
+name: musicfit-ending-boundary-001
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/audio/musicfit-ending-boundary-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - '.github/workflows/musicfit-ending-boundary-001.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/audio/musicfit-ending-boundary-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - '.github/workflows/musicfit-ending-boundary-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Music Fit CPU dependencies
+        run: python -m pip install -r experiments/audio/music-fit-core-001/requirements.txt
+      - name: Compare fixed-tail and novelty-boundary ending search
+        working-directory: experiments/audio/musicfit-ending-boundary-001
+        run: python compare.py
+      - name: Upload metadata report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: musicfit-ending-boundary-001-evidence
+          path: experiments/audio/musicfit-ending-boundary-001/out/report.json
+          if-no-files-found: error
+          retention-days: 14
