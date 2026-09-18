@@ -1,0 +1,42 @@
+name: fsld-commercial-safe-index-001
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/audio/fsld-commercial-safe-index-001/**'
+      - 'experiments/audio/commercial-safe-corpus-001/**'
+      - '.github/workflows/fsld-commercial-safe-index-001.yml'
+  pull_request:
+    paths:
+      - 'experiments/audio/fsld-commercial-safe-index-001/**'
+      - 'experiments/audio/commercial-safe-corpus-001/**'
+      - '.github/workflows/fsld-commercial-safe-index-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build commercial-safe FSLD index without full archive download
+        working-directory: experiments/audio/fsld-commercial-safe-index-001
+        run: python index_fsld.py
+
+      - name: Upload metadata index/evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsld-commercial-safe-index-001-evidence
+          path: |
+            experiments/audio/fsld-commercial-safe-index-001/out/evidence.json
+            experiments/audio/fsld-commercial-safe-index-001/out/accepted-index.json
+          if-no-files-found: error
+          retention-days: 14
