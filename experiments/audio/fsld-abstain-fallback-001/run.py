@@ -154,13 +154,15 @@ def proposal_edges(a, samples, view, context_seconds, kind):
     h = a.hop_seconds
     sr = a.sample_rate
     lo = max(2, math.ceil(Config().min_loop_seconds / h))
-    hi = min(len(view) // 2 - 1, math.floor(Config().max_loop_seconds / h))
+    # Abstain-only rescue stays bounded for the eventual YMM4 worker.
+    # 80 ms coarse lag search is refined at waveform level by _refine_period().
+    hi = min(len(view) // 2 - 1, math.floor(min(32.0, Config().max_loop_seconds) / h))
     cap = max(2, round(context_seconds / h))
     if hi <= lo:
         return []
 
     peaks = []
-    for lag in range(lo, hi + 1):
+    for lag in range(lo, hi + 1, 2):
         width = min(lag, cap)
         scores = lag_scores(view, a.energy, lag, width)
         if len(scores):
