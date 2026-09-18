@@ -41,6 +41,14 @@ public sealed class DefaultGroupTool : IToolPlugin
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => "";
 }
+public sealed class ResourceUtilitiesTool : IToolPlugin
+{
+    public string Name => "CNWL Group Resource";
+    public Type ViewModelType => typeof(ResourceProbeVm);
+    public Type ViewType => typeof(ProbeView);
+    public bool AllowMultipleInstances => false;
+    public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
+}
 public sealed class ProbeView : UserControl
 {
     public ProbeView() => Content = new TextBlock { Text = "CNWL group probe" };
@@ -57,6 +65,7 @@ public abstract class ProbeVmBase : IToolViewModel
 public sealed class EnglishProbeVm : ProbeVmBase { public override string Title => "CNWL Group English"; }
 public sealed class JapaneseProbeVm : ProbeVmBase { public override string Title => "CNWL Group Japanese"; }
 public sealed class DefaultProbeVm : ProbeVmBase { public override string Title => "CNWL Group Default"; }
+public sealed class ResourceProbeVm : ProbeVmBase { public override string Title => "CNWL Group Resource"; }
 
 internal static class GroupProbe
 {
@@ -107,16 +116,19 @@ internal static class GroupProbe
                     lastPaths = paths;
                     File.WriteAllLines(Path.Combine(output,"menu-tree.txt"), lines, new UTF8Encoding(false));
 
-                    var markers = new[]{"CNWL Group English","CNWL Group Japanese","CNWL Group Default"};
+                    var markers = new[]{"CNWL Group English","CNWL Group Japanese","CNWL Group Default","CNWL Group Resource"};
                     if (markers.All(paths.ContainsKey))
                     {
                         var result = new List<string> { "status=PASS_TOOL_GROUP_OBSERVED", "culture=" + culture };
                         foreach (var m in markers) result.Add(m.Replace(' ','_') + "_path=" + paths[m]);
                         var jp = paths["CNWL Group Japanese"];
                         var en = paths["CNWL Group English"];
+                        var resource = paths["CNWL Group Resource"];
+                        result.Add("resource_value=" + YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName);
                         result.Add("japanese_parent=" + Parent(jp));
                         result.Add("english_parent=" + Parent(en));
-                        result.Add("japanese_joined_localized_utilities=" + Parent(jp).Contains("ユーティリティ", StringComparison.Ordinal));
+                        result.Add("resource_parent=" + Parent(resource));
+                        result.Add("resource_matches_existing_english_parent=" + (Parent(resource) == Parent(en)));
                         result.Add("english_created_or_joined_parent=" + Parent(en));
                         File.WriteAllLines(Path.Combine(output,"result.txt"), result, new UTF8Encoding(false));
                         timer.Stop();
@@ -126,7 +138,7 @@ internal static class GroupProbe
                 if (ticks >= 100)
                 {
                     timer.Stop();
-                    var markers = new[]{"CNWL Group English","CNWL Group Japanese","CNWL Group Default"};
+                    var markers = new[]{"CNWL Group English","CNWL Group Japanese","CNWL Group Default","CNWL Group Resource"};
                     var result = new List<string> { "status=FAIL_TIMEOUT", "culture=" + culture, "observed_marker_count=" + lastPaths.Count };
                     foreach (var m in markers) result.Add(m.Replace(' ','_') + "_path=" + (lastPaths.TryGetValue(m, out var p) ? p : "<missing>"));
                     File.WriteAllLines(Path.Combine(output,"result.txt"), result, new UTF8Encoding(false));
