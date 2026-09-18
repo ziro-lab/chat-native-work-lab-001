@@ -1,0 +1,7 @@
+{
+  "targets_seconds": [60, 120],
+  "per_file_targets": {},
+  "phase": 4,
+  "budget_seconds_per_fit": 180,
+  "max_files": 20
+}

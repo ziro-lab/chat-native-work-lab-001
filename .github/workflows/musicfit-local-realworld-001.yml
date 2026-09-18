@@ -1,0 +1,165 @@
+name: musicfit-local-realworld-001
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/audio/musicfit-local-realworld-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - '.github/workflows/musicfit-local-realworld-001.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/audio/musicfit-local-realworld-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - '.github/workflows/musicfit-local-realworld-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-and-package:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install local runner dependencies
+        run: python -m pip install -r experiments/audio/musicfit-local-realworld-001/requirements.txt
+
+      - name: Build synthetic repeating BGM fixture
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          import numpy as np
+          import soundfile as sf
+
+          root = Path("experiments/audio/musicfit-local-realworld-001/_smoke")
+          input_dir = root / "input"
+          input_dir.mkdir(parents=True, exist_ok=True)
+
+          sr = 16000
+          seconds = 4
+          t = np.arange(sr * seconds, dtype=np.float32) / sr
+          pulse = 0.55 + 0.45 * (np.sin(2*np.pi*2*t) > 0).astype(np.float32)
+          phrase = (
+              0.22*np.sin(2*np.pi*220*t)
+              + 0.15*np.sin(2*np.pi*330*t + 0.2)
+              + 0.08*np.sin(2*np.pi*440*t + 0.4)
+          ) * pulse
+          phrase = phrase.astype(np.float32)
+          stereo = np.stack([phrase, phrase*0.97], axis=1)
+          song = np.concatenate([stereo, stereo*0.98, stereo*1.02, stereo], axis=0)
+          sf.write(input_dir / "synthetic-bgm.wav", song, sr, subtype="PCM_24")
+
+          settings = {
+              "targets_seconds": [20.0],
+              "per_file_targets": {},
+              "phase": 4,
+              "budget_seconds_per_fit": 120,
+              "max_files": 5
+          }
+          (root / "settings.json").write_text(
+              json.dumps(settings, indent=2), encoding="utf-8"
+          )
+
+      - name: Run local real-world test harness
+        shell: cmd
+        run: |
+          python experiments\audio\musicfit-local-realworld-001\run_local_test.py ^
+            --input experiments\audio\musicfit-local-realworld-001\_smoke\input ^
+            --output experiments\audio\musicfit-local-realworld-001\_smoke\output ^
+            --settings experiments\audio\musicfit-local-realworld-001\_smoke\settings.json ^
+            --no-open
+
+      - name: Verify review pack and scorer
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          import subprocess
+          import sys
+
+          root = Path("experiments/audio/musicfit-local-realworld-001")
+          runs = sorted((root / "_smoke" / "output").glob("run-*"))
+          assert len(runs) == 1, runs
+          run = runs[0]
+          manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+          assert manifest["success_count"] == 1, manifest
+          assert manifest["task_count"] == 1, manifest
+          task = manifest["tasks"][0]
+          assert task["status"] == "ok", task
+          assert len(task["candidates"]) >= 1, task
+          assert (run / "review.html").is_file()
+          assert (run / task["source_audio"]).is_file()
+          assert (run / task["source_ending_audio"]).is_file()
+          for candidate in task["candidates"]:
+              assert (run / candidate["audio"]).is_file()
+              assert (run / candidate["ending_audio"]).is_file()
+
+          ratings = {
+              "schema": "musicfit-local-ratings/v1",
+              "tasks": [{
+                  "id": task["id"],
+                  "best": task["candidates"][0]["blind_id"],
+                  "candidates": [
+                      {
+                          "blind_id": c["blind_id"],
+                          "overall": "none",
+                          "ending": "none",
+                          "source_same": False
+                      }
+                      for c in task["candidates"]
+                  ]
+              }]
+          }
+          ratings_path = run / "smoke-ratings.json"
+          ratings_path.write_text(
+              json.dumps(ratings, indent=2), encoding="utf-8"
+          )
+          report_path = run / "smoke-report.json"
+          subprocess.run([
+              sys.executable,
+              str(root / "score_local_ratings.py"),
+              str(run / "manifest.json"),
+              str(ratings_path),
+              "--output",
+              str(report_path),
+          ], check=True)
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          assert report["fit_attributed_quality"]["top1_no_major_issue_rate"] == 1.0
+          assert report["fit_attributed_quality"]["top3_any_no_major_issue_rate"] == 1.0
+          print("PASS_MUSICFIT_LOCAL_REALWORLD_001")
+
+      - name: Assemble Windows test package
+        shell: pwsh
+        run: |
+          $src = "experiments/audio/musicfit-local-realworld-001"
+          $core = "experiments/audio/music-fit-core-001"
+          $dst = "package/MusicFit_Local_RealWorld_Test_v0.1.0"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          New-Item -ItemType Directory -Force -Path "$dst/input" | Out-Null
+          Copy-Item "$src/README_JA.md" $dst
+          Copy-Item "$src/settings.json" $dst
+          Copy-Item "$src/setup_windows.bat" $dst
+          Copy-Item "$src/run_windows.bat" $dst
+          Copy-Item "$src/run_local_test.py" $dst
+          Copy-Item "$src/score_local_ratings.py" $dst
+          Copy-Item "$src/requirements.txt" $dst
+          Copy-Item "$src/input/ここにBGMを入れる.txt" "$dst/input/"
+          Copy-Item -Recurse "$core/musicfit" "$dst/musicfit"
+
+      - name: Upload Windows local test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicFit-Local-RealWorld-Test-v0.1.0
+          path: package/MusicFit_Local_RealWorld_Test_v0.1.0
+          if-no-files-found: error
+          retention-days: 14

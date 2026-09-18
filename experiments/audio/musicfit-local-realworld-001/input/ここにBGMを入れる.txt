@@ -1,0 +1,4 @@
+このフォルダへ、実際にYMM4で使っているBGMを入れてください。
+
+音源はrun_local_test.pyから外部へ送信されません。
+settings.jsonで目標尺を指定し、run_windows.batを実行します。
