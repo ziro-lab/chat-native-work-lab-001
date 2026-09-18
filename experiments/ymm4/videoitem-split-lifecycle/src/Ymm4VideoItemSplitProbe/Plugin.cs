@@ -199,6 +199,13 @@ internal static class Probe
                 continue;
             }
             if (p.ParameterType == typeof(long)) { args[i] = (long)timeline.CurrentFrame; continue; }
+            if (p.ParameterType.IsEnum)
+            {
+                Array values = Enum.GetValues(p.ParameterType);
+                if (values.Length == 0) { args = []; return false; }
+                args[i] = values.GetValue(0);
+                continue;
+            }
             if (p.ParameterType == typeof(IItem) || p.ParameterType == typeof(VideoItem)) { args[i] = item; continue; }
             if (p.ParameterType == typeof(ImmutableList<IItem>)) { args[i] = timeline.SelectedItems; continue; }
             if (p.ParameterType.IsAssignableFrom(timeline.SelectedItems.GetType())) { args[i] = timeline.SelectedItems; continue; }
