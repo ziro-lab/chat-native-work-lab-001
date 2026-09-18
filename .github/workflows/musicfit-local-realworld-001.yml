@@ -71,6 +71,8 @@ jobs:
           stereo = np.stack([phrase, phrase*0.97], axis=1)
           song = np.concatenate([stereo, stereo*0.98, stereo*1.02, stereo], axis=0)
           sf.write(input_dir / "synthetic-bgm.wav", song, sr, subtype="PCM_24")
+          # Deliberately invalid MP3: one bad input must be reported, not crash the batch.
+          (input_dir / "broken.mp3").write_bytes(b"not-an-mp3")
 
           settings = {
               "targets_seconds": [20.0],
@@ -106,9 +108,15 @@ jobs:
           run = runs[0]
           manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
           assert manifest["success_count"] == 1, manifest
-          assert manifest["task_count"] == 1, manifest
-          task = manifest["tasks"][0]
-          assert task["status"] == "ok", task
+          assert manifest["error_count"] == 1, manifest
+          assert manifest["task_count"] == 2, manifest
+          ok_tasks = [t for t in manifest["tasks"] if t["status"] == "ok"]
+          error_tasks = [t for t in manifest["tasks"] if t["status"] == "error"]
+          assert len(ok_tasks) == 1 and len(error_tasks) == 1, manifest
+          task = ok_tasks[0]
+          bad = error_tasks[0]
+          assert bad["source_name"] == "broken.mp3", bad
+          assert bad["error_stage"] == "input_decode", bad
           assert len(task["candidates"]) >= 1, task
           assert (run / "review.html").is_file()
           assert (run / task["source_audio"]).is_file()
