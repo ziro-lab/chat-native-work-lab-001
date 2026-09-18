@@ -346,15 +346,12 @@ def prepare_track(rz, row, temp):
     path = temp / f"{row['id']}.wav"
     sf.write(path, song, sr, subtype="PCM_24")
     analysis = analyze(path, Config(), Budget(45))
-    if analysis.edges:
-        path.unlink(missing_ok=True)
-        return {"abstain": False}
     samples, read_sr = sf.read(path, dtype="float32", always_2d=True)
     assert read_sr == sr
     fallback = fallback_views(analysis, samples)
     path.unlink(missing_ok=True)
     return {
-        "abstain": True,
+        "abstain": not bool(analysis.edges),
         "id": str(row["id"]),
         "creator": row["creator"],
         "license": row["canonical_license"],
@@ -431,33 +428,51 @@ def main():
         and row["creator"] not in holdout_creators
     ]
     train_pool.sort(key=lambda row: stable_key(str(row["id"])))
-    by_id = {str(row["id"]): row for row in safe_rows}
+
+    # Fixed, cheap tuning cohort: 4 buckets by license and archive member size.
+    buckets = {
+        ("CC0-1.0", "small"): [],
+        ("CC0-1.0", "large"): [],
+        ("CC-BY-3.0", "small"): [],
+        ("CC-BY-3.0", "large"): [],
+    }
+    for row in train_pool:
+        lic = row["canonical_license"]
+        size_class = (
+            "small"
+            if rz.entries[row["member"]].uncompressed_size < SIZE_SPLIT_BYTES
+            else "large"
+        )
+        key = (lic, size_class)
+        if key in buckets and len(buckets[key]) < TRAIN_PER_BUCKET:
+            buckets[key].append(row)
+        if all(len(v) >= TRAIN_PER_BUCKET for v in buckets.values()):
+            break
+    if not all(len(v) == TRAIN_PER_BUCKET for v in buckets.values()):
+        raise RuntimeError(
+            "insufficient_stratified_training_rows:"
+            + repr({str(k): len(v) for k, v in buckets.items()})
+        )
+    selected_rows = [row for key in sorted(buckets) for row in buckets[key]]
 
     train = []
-    scanned = 0
+    holdout_tracks = []
     with tempfile.TemporaryDirectory(prefix="fsld-abstain-fallback-") as td:
         temp = Path(td)
-        for row in train_pool:
-            if len(train) >= TRAIN_ABSTAINS or scanned >= MAX_SCANNED:
-                break
-            scanned += 1
+        for row in selected_rows:
             prepared = prepare_track(rz, row, temp)
-            if prepared and prepared.get("abstain"):
-                train.append(prepared)
+            if prepared is None:
+                raise RuntimeError(f"training_prepare_failed:{row['id']}")
+            train.append(prepared)
             if rz.fetched_bytes > MAX_NETWORK_BYTES:
                 raise RuntimeError("network_budget_exceeded_training")
-
-        if len(train) < TRAIN_ABSTAINS:
-            raise RuntimeError(
-                f"not_enough_disjoint_abstains:{len(train)} scanned={scanned}"
-            )
 
         train_metrics = {
             name: evaluate(train, name) for name in STRATEGIES
         }
         chosen = max(train_metrics.items(), key=strategy_key)[0]
 
-        holdout_tracks = []
+        # Only after strategy selection, evaluate the four frozen normal-path abstains.
         for sid in frozen_abstain_ids:
             row = by_id.get(sid)
             if row is None:
@@ -477,9 +492,16 @@ def main():
         "final_seam_gate": SEAM_GATE,
         "chosen_strategy": chosen,
         "training": {
-            "target_abstains": TRAIN_ABSTAINS,
-            "found_abstains": len(train),
-            "scanned_sources": scanned,
+            "training_count": len(train),
+            "normal_path_abstain_count": sum(x["abstain"] for x in train),
+            "stratification": {
+                "per_bucket": TRAIN_PER_BUCKET,
+                "size_split_bytes": SIZE_SPLIT_BYTES,
+                "buckets": {
+                    f"{key[0]}-{key[1]}": [str(row["id"]) for row in rows]
+                    for key, rows in buckets.items()
+                },
+            },
             "id_overlap_with_holdout": 0,
             "creator_overlap_with_holdout": 0,
             "strategy_metrics": {
@@ -520,8 +542,8 @@ def main():
     )
     print(json.dumps({
         "chosen_strategy": chosen,
-        "training_abstains": len(train),
-        "scanned_sources": scanned,
+        "training_count": len(train),
+        "training_normal_abstains": sum(x["abstain"] for x in train),
         "training_selected": {
             k: v for k, v in train_metrics[chosen].items() if k != "tracks"
         },
