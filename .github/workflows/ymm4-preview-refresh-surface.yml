@@ -30,7 +30,7 @@ jobs:
       - if: always()
         shell: pwsh
         run: |
-          foreach($f in @('result.txt','surface.txt','events.txt','error.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+          foreach($f in @('result.txt','surface.txt','assembly-public-surface.txt','events.txt','error.txt','host-log.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: { name: ymm4-preview-refresh-surface, path: 'out/evidence/', retention-days: 14 }
