@@ -1,12 +1,13 @@
-# Music Fit human listening benchmark 001
+# Music Fit human listening benchmark 002 — source-normalized review
 
 ## Goal
 
-Measure the thing the product actually needs:
+Measure two different things without mixing them:
 
-> Given up to three Phase-4 Music Fit candidates for a target duration, is at least one candidate natural enough to use?
+1. **Absolute usability** — would the listener actually use this fitted result?
+2. **Relative edit quality** — did Music Fit introduce a new problem or make the source audibly worse?
 
-Machine loop-recovery scores are useful diagnostics, but they are not human listening acceptance. This experiment creates a **blind local listening pack** for the current `music-fit-core-001`.
+This distinction matters because the source itself may already contain clicks, abrupt transitions, unusual endings or other material the listener dislikes. Those source-native issues should affect product usability, but they should **not automatically count as Music Fit failures**.
 
 ## First-round corpus
 
@@ -27,26 +28,43 @@ Each source is fitted at three targets:
 - **extend-medium**: ~1.60×
 - **extend-long**: ~2.40×
 
-That yields 18 listening tasks and up to 54 candidates.
+That yields 18 listening tasks and 54 candidates.
 
 ## Blind review
 
-Candidate rank is hidden. A/B/C order is deterministically shuffled per task.
+Candidate rank is hidden. A/B/C order is deterministic but unrelated to algorithm rank.
 
-Each candidate provides:
+Every task exposes:
+
+- the complete source track;
+- a **5-second source-ending reference**;
+- three fitted candidates.
+
+Every candidate exposes:
 
 - the complete fitted track;
-- up to two short previews around the lowest-scoring joins;
-- an ending preview.
+- up to two short previews around low-context-score joins;
+- a 5-second ending preview.
 
-Rating:
+### Absolute usability
 
 - **◎ そのまま使える**
 - **○ 十分自然**
 - **△ 使えるが気になる**
 - **× 使わない**
 
-Optional issue flags:
+This answers the product question, but it includes the quality of the original material.
+
+### Relative edit quality
+
+- **元曲と同等 / 改善** — no new audible issue attributable to Music Fit
+- **加工由来の違和感は少しあるが許容**
+- **加工で明確に悪化した**
+- **元曲由来か加工由来か判別しにくい**
+
+The first two count as **no-major-regression**. The last option is excluded from the algorithm-quality denominator rather than treated as a failure.
+
+Issue flags now mean **problems newly introduced or worsened by Music Fit**:
 
 - Loop / Jump point
 - Seam / click / crossfade
@@ -54,44 +72,59 @@ Optional issue flags:
 - Ending
 - Other
 
-One candidate can also be marked **best** for each task.
+This allows, for example:
 
-The page exports `listening-ratings.json`. It contains only ratings and blind candidate IDs; the algorithm rank mapping remains in `manifest.json`.
+> absolute usability = ×  
+> relative edit quality = source-equivalent
+
+when a source already contains a click or awkward ending that Music Fit merely preserves.
 
 ## Score
-
-From this directory:
 
 ```bash
 python score_ratings.py /path/to/pack/manifest.json /path/to/listening-ratings.json --output report.json
 ```
 
-The main KPIs are:
+The report keeps both families of KPI.
 
-- **Top1 acceptable** — algorithm rank 1 is ◎ or ○;
-- **Top3 oracle acceptable** — any offered candidate is ◎ or ○;
-- no-acceptable rate;
-- best-candidate rank distribution;
-- failure reasons by shorten / medium extension / long extension.
+### Product KPI
 
-The target is not 100%. For this product concept, roughly **Top1 >=80–85% and Top3 >=90%** would already support a practical “listen to three and choose” workflow.
+- absolute Top1 acceptable
+- absolute Top3-any-acceptable
+- no-acceptable rate
+
+### Algorithm KPI
+
+- relative Top1 no-major-regression
+- relative Top3-any-no-major-regression
+- Top1/Top3 with **no new issue at all**
+- source-confounded candidate rate
+- newly introduced issue reasons
+
+For the plugin concept, roughly **relative Top1 >=80–85% and relative Top3 >=90%** is a useful practical target, while absolute usability is reported separately.
+
+## Compatibility
+
+Older v1 rating JSON can still be loaded. Its absolute ratings remain usable. Relative fields are simply missing and therefore excluded from the source-normalized denominator until the reviewer fills them in.
 
 ## Important limitation
 
-The first round uses six loop-derived instrumental sources from one publisher. It is intended to find obvious Phase-4 / seam / ending problems and validate the review workflow. It does **not** establish general acceptance on arbitrary songs or vocals.
+This first-round pack still uses six loop-derived instrumental sources from one publisher. It is primarily for finding Phase-4, seam and ending problems and validating the review method.
 
-A later round should add more commercial-safe full-length music from independent creators.
+It does **not** establish general acceptance on arbitrary full songs or vocals. Later rounds should add independent commercial-safe full-length music.
 
 ## PASS boundary
 
 A green build proves:
 
-- all six pinned source packs still match their expected hashes;
-- 18 fit requests run;
+- all six pinned source packs still match expected hashes;
+- 18 fit requests and 54 candidates run;
 - every generated candidate is exact-duration;
-- blind A/B/C mapping is deterministic and one-to-one;
-- complete tracks and previews are packaged as lossless FLAC;
-- attribution is included;
-- no original ZIP is uploaded.
+- blind A/B/C mapping stays hidden;
+- full source and source-ending references are present;
+- complete candidates and previews are packaged as lossless FLAC;
+- the v2 scorer reports absolute and relative metrics;
+- old v1 rating JSON still preserves absolute metrics;
+- attribution is included.
 
-PASS does not assert perceptual naturalness. That only exists after ratings are returned.
+PASS does not assert perceptual naturalness. That exists only after human ratings are returned.
