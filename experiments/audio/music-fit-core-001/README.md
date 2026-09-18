@@ -8,13 +8,22 @@ This is a **pre-plugin component**, not a YMM4 plugin. The core requires NumPy, 
 
 | Stage | Public interface | Scope |
 |---|---|---|
-| Phase 1 | `analyze()` | Beat-independent single-file recurrence, endpoint hypotheses, local-context rejection and small waveform registration. No original loop, BPM or ground truth input. |
+| Phase 1 | `analyze()` / `audition_edges()` | Beat-independent single-file recurrence plus a UI-facing selector that prefers different period lengths before duplicate phases. No original loop, BPM or ground truth input. |
 | Phase 2 | `render()` | Stereo-preserving streaming PCM24 WAV, smooth constant-sum crossfades, original sample rate and exact sample accounting. |
 | Phase 3 | `plans(..., phase=3)` | Single recurring jump type per route, protected prefix, exact duration and explicit fade ending. |
-| Phase 4 | `plans(..., phase=4)` | Bounded search across different backward/forward jumps; scored bridge to original ending when suitable; up to three distinct edit maps. |
-| Audition | `fit()` | Full candidates, each join and ending excerpt, `result.json`, local `review.html` and listening-rating JSON export. |
+| Phase 4 | `plans(..., phase=4)` | Bounded search across different backward/forward jumps; scored bridge to original ending using fixed tails plus lightweight novelty-derived ending entries; up to three distinct edit maps. |
+| Audition | `fit()` | Full candidates, period-diverse `loop_hypotheses`, each join and ending excerpt, `result.json`, local `review.html` and listening-rating JSON export. |
 
 The full integration test discovers separate 8s and 6s repetitions from a waveform, combines them into a 14s extension, preserves the original ending, and renders the exact sample count. No loop points are injected into that test's analyzer.
+
+### v0.1.1 quality adoption
+
+Two lightweight policies were promoted only after public-lab A/B evidence:
+
+- **Loop audition diversity:** the analyzer's full edge list is unchanged for planning, but `audition_edges()` prefers hypotheses separated by at least 180 ms in period before filling duplicate-period slots. On the frozen 48-source commercial-safe FSLD holdout, the annotation-derived soft Top3 audition metric improved from 87.5% to 91.67%; strict publisher-period Top3 improved from 72.92% to 77.08%. This is candidate coverage, not human acceptance.
+- **Ending-entry expansion:** Phase 4 now adds model-free novelty peaks in the final portion of the source while retaining the original fixed ending-tail candidates. On the six pinned real-derived sources, source-ending candidates increased from 9/54 to 12/54 with effectively unchanged mean transition score. This is not semantic outro recognition.
+
+Neither change lowers the normal recurrence threshold or adds a model/runtime dependency.
 
 ## Run
 
@@ -30,10 +39,11 @@ Edit `input`, `target_seconds` and a **new** `output_dir` in the example request
 
 ```python
 from pathlib import Path
-from musicfit import Budget, Config, analyze, plans
+from musicfit import Budget, Config, analyze, audition_edges, plans
 from musicfit.render import render
 c, b = Config(), Budget(seconds=120)
 a = analyze(Path('input.wav'), c, b)
+print(audition_edges(a))  # UI/listening hypotheses; planner still sees all edges
 for p in plans(a, 120.0, c, b, phase=4):
     render(Path('input.wav'), a, p, Path(p.id + '.wav'), c, b)
 ```
