@@ -350,12 +350,16 @@ def build_task(
     task_dir.mkdir(parents=True, exist_ok=False)
 
     source_audio = task_dir / "source.wav"
-    source_info = copy_as_wav(source, source_audio)
     source_ending = task_dir / "source-ending.wav"
-    write_ending(source_audio, source_ending)
-
     raw_dir = work_dir / f"{task_id}-fit"
+    source_info = None
+
     try:
+        # Decode/copy is part of the per-file task boundary. A single unsupported
+        # or damaged input must not abort the entire batch.
+        source_info = copy_as_wav(source, source_audio)
+        write_ending(source_audio, source_ending)
+
         report = fit(
             source,
             target_seconds,
@@ -413,11 +417,21 @@ def build_task(
             "id": task_id,
             "status": "error",
             "source_name": source.name,
-            "source_seconds": source_info["seconds"],
+            "source_seconds": (
+                source_info["seconds"] if source_info is not None else None
+            ),
             "target_seconds": target_seconds,
-            "source_audio": f"tasks/{task_id}/source.wav",
-            "source_ending_audio": f"tasks/{task_id}/source-ending.wav",
+            "source_audio": (
+                f"tasks/{task_id}/source.wav" if source_audio.is_file() else None
+            ),
+            "source_ending_audio": (
+                f"tasks/{task_id}/source-ending.wav"
+                if source_ending.is_file() else None
+            ),
             "candidates": [],
+            "error_stage": (
+                "input_decode" if source_info is None else "musicfit"
+            ),
             "error": f"{type(exc).__name__}: {exc}",
         }
     finally:
