@@ -125,7 +125,7 @@ internal static class PreviewProbe
                 if(active!=null)Dump("Live TimelineViewModel",active.GetType(),surface);
             }
             File.WriteAllLines(Path.Combine(OutDir,"surface.txt"),surface,new UTF8Encoding(false));
-            DumpAssemblyPublicSurface();
+            var assemblyPublicCandidates=DumpAssemblyPublicSurface();
 
             var events=new List<string>(); int seq=0; string phase="baseline";
             void Log(string s)=>events.Add($"{++seq:D4} phase={phase} frame={timeline.CurrentFrame} {s}");
@@ -151,6 +151,7 @@ internal static class PreviewProbe
             [
                 "status=PASS_PREVIEW_REFRESH_OBSERVATION",
                 "plugin_dedicated_preview_refresh_candidate_count="+pluginPreviewRefreshCandidates.Length,
+                "assembly_public_semantic_candidate_count="+assemblyPublicCandidates,
                 "preview_vm_found="+(preview!=null),
                 "timeline_vm_scrollframe_public="+scrollAvailable,
                 "timeline_vm_scrollframe_moves_currentframe="+(afterScrollFrame!=beforeScrollFrame),
@@ -207,7 +208,7 @@ internal static class PreviewProbe
         for(int i=0;i<count;i++) foreach(var child in Elements(VisualTreeHelper.GetChild(root,i))) yield return child;
     }
 
-    static void DumpAssemblyPublicSurface()
+    static int DumpAssemblyPublicSurface()
     {
         var lines=new List<string>();
         foreach(var asm in AppDomain.CurrentDomain.GetAssemblies().Where(a=>(a.GetName().Name??"").StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)).OrderBy(a=>a.GetName().Name))
@@ -215,7 +216,7 @@ internal static class PreviewProbe
             foreach(var t in SafeTypes(asm).Where(t=>t.IsPublic || t.IsNestedPublic).OrderBy(t=>t.FullName))
             {
                 var typeName=t.FullName??t.Name;
-                foreach(var m in t.GetMembers(BindingFlags.Instance|BindingFlags.Static|BindingFlags.Public))
+                foreach(var m in t.GetMembers(BindingFlags.Instance|BindingFlags.Static|BindingFlags.Public|BindingFlags.DeclaredOnly))
                 {
                     var combined=typeName+"."+m.Name;
                     var semantic=combined.Contains("Preview",StringComparison.OrdinalIgnoreCase)
@@ -230,7 +231,9 @@ internal static class PreviewProbe
                 }
             }
         }
-        File.WriteAllLines(Path.Combine(OutDir,"assembly-public-surface.txt"),lines.Distinct().OrderBy(x=>x),new UTF8Encoding(false));
+        var distinct=lines.Distinct().OrderBy(x=>x).ToArray();
+        File.WriteAllLines(Path.Combine(OutDir,"assembly-public-surface.txt"),distinct,new UTF8Encoding(false));
+        return distinct.Length;
     }
 
     static Type[] SafeTypes(Assembly a)
