@@ -30,7 +30,7 @@ jobs:
       - if: always()
         shell: pwsh
         run: |
-          foreach($f in @('result.txt','targets.txt','events.txt','visual-tree.txt','error.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+          foreach($f in @('result.txt','targets.txt','events.txt','item-candidates.txt','visual-tree.txt','error.txt','host-log.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: { name: ymm4-timeline-input-intent, path: 'out/evidence/', retention-days: 14 }
