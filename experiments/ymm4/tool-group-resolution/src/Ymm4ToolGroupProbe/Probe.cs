@@ -20,7 +20,7 @@ public sealed class PluginEntry : ILocalizePlugin
 public sealed class EnglishUtilitiesTool : IToolPlugin
 {
     public string Name => "CNWL Group English";
-    public Type ViewModelType => typeof(ProbeVm);
+    public Type ViewModelType => typeof(EnglishProbeVm);
     public Type ViewType => typeof(ProbeView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => "Utilities";
@@ -28,7 +28,7 @@ public sealed class EnglishUtilitiesTool : IToolPlugin
 public sealed class JapaneseUtilitiesTool : IToolPlugin
 {
     public string Name => "CNWL Group Japanese";
-    public Type ViewModelType => typeof(ProbeVm);
+    public Type ViewModelType => typeof(JapaneseProbeVm);
     public Type ViewType => typeof(ProbeView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => "ユーティリティ";
@@ -36,7 +36,7 @@ public sealed class JapaneseUtilitiesTool : IToolPlugin
 public sealed class DefaultGroupTool : IToolPlugin
 {
     public string Name => "CNWL Group Default";
-    public Type ViewModelType => typeof(ProbeVm);
+    public Type ViewModelType => typeof(DefaultProbeVm);
     public Type ViewType => typeof(ProbeView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => "";
@@ -45,15 +45,18 @@ public sealed class ProbeView : UserControl
 {
     public ProbeView() => Content = new TextBlock { Text = "CNWL group probe" };
 }
-public sealed class ProbeVm : IToolViewModel
+public abstract class ProbeVmBase : IToolViewModel
 {
-    public string Title => "CNWL group probe";
+    public abstract string Title { get; }
     public bool CanSuspend => false;
     public ToolState SaveState() => new() { Title = Title };
     public void LoadState(ToolState stateData) { }
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
     public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested { add { } remove { } }
 }
+public sealed class EnglishProbeVm : ProbeVmBase { public override string Title => "CNWL Group English"; }
+public sealed class JapaneseProbeVm : ProbeVmBase { public override string Title => "CNWL Group Japanese"; }
+public sealed class DefaultProbeVm : ProbeVmBase { public override string Title => "CNWL Group Default"; }
 
 internal static class GroupProbe
 {
@@ -74,6 +77,8 @@ internal static class GroupProbe
     {
         var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(500) };
         var ticks = 0;
+        var projectCreated = false;
+        var lastPaths = new Dictionary<string,string>();
         timer.Tick += (_, _) =>
         {
             try
@@ -83,6 +88,15 @@ internal static class GroupProbe
                 {
                     var main = w.DataContext;
                     if (main?.GetType().FullName != "YukkuriMovieMaker.ViewModels.MainViewModel") continue;
+                    var active = main.GetType().GetProperty("ActiveTimelineViewModel", BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(main);
+                    if (active == null && !projectCreated)
+                    {
+                        projectCreated = true;
+                        main.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(main, null);
+                        continue;
+                    }
+                    if (active == null) continue;
+
                     var prop = main.GetType().GetProperty("ToolMenuItems", BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
                     if (prop?.GetValue(main) is not IEnumerable items) continue;
 
@@ -90,6 +104,7 @@ internal static class GroupProbe
                     DumpInterface(lines);
                     var paths = new Dictionary<string,string>();
                     foreach (var item in items) Visit(item, "", lines, paths, 0);
+                    lastPaths = paths;
                     File.WriteAllLines(Path.Combine(output,"menu-tree.txt"), lines, new UTF8Encoding(false));
 
                     var markers = new[]{"CNWL Group English","CNWL Group Japanese","CNWL Group Default"};
@@ -108,7 +123,14 @@ internal static class GroupProbe
                         return;
                     }
                 }
-                if (ticks >= 80) { timer.Stop(); File.WriteAllText(Path.Combine(output,"result.txt"),"status=FAIL_TIMEOUT\n",new UTF8Encoding(false)); }
+                if (ticks >= 100)
+                {
+                    timer.Stop();
+                    var markers = new[]{"CNWL Group English","CNWL Group Japanese","CNWL Group Default"};
+                    var result = new List<string> { "status=FAIL_TIMEOUT", "culture=" + culture, "observed_marker_count=" + lastPaths.Count };
+                    foreach (var m in markers) result.Add(m.Replace(' ','_') + "_path=" + (lastPaths.TryGetValue(m, out var p) ? p : "<missing>"));
+                    File.WriteAllLines(Path.Combine(output,"result.txt"), result, new UTF8Encoding(false));
+                }
             }
             catch(Exception ex)
             {
