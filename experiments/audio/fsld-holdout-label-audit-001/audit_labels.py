@@ -57,11 +57,16 @@ def label(p,full,a):
         if beat and m:
             bars=near_int(bi/m,.001)
             bar=bars is not None and bars>=1
+    # "audition_worthy_beat_span" is intentionally a soft product metric, not
+    # ground truth: a Top3 recurrence spanning >=4 annotated integer beats is
+    # worth previewing even when the publisher supplied a longer loop file.
+    audition_worthy = strict or (beat and bi is not None and bi >= 4)
     return {"candidate_seconds":p,"strict_full_period":strict,"publisher_period_ratio":ratio,
             "integer_subperiod_factor":factor if sub else None,"integer_subperiod":sub,
             "annotated_beats_exact":be,"annotated_beats":bi,"beat_compatible":beat,
             "annotated_bars":bars,"bar_compatible":bar,
-            "practical_loop_positive":strict or (sub and bar)}
+            "practical_loop_positive":strict or (sub and bar),
+            "audition_worthy_beat_span":audition_worthy}
 
 def main():
     base=json.loads((ROOT/"holdout-baseline.json").read_text())
@@ -81,7 +86,7 @@ def main():
     miss=sorted(ids-set(by))
     if miss: raise RuntimeError(f"missing_holdout_metadata:{miss}")
 
-    rows=[]; s1=s3=p1=p3=0; bpmN=meterN=0; promoted=[]; keys=Counter()
+    rows=[]; s1=s3=p1=p3=a1=a3=0; bpmN=meterN=0; promoted=[]; audition_promoted=[]; keys=Counter()
     for b in base["tracks"]:
         a=ann_fields(by[str(b["id"])])
         bpmN+=a["bpm"] is not None; meterN+=a["meter_numerator"] is not None
@@ -89,7 +94,9 @@ def main():
         labs=[label(float(p),float(b["loop"]),a) for p in b["top"]]
         s1+=bool(labs and labs[0]["strict_full_period"]); s3+=any(x["strict_full_period"] for x in labs)
         p1+=bool(labs and labs[0]["practical_loop_positive"]); p3+=any(x["practical_loop_positive"] for x in labs)
+        a1+=bool(labs and labs[0]["audition_worthy_beat_span"]); a3+=any(x["audition_worthy_beat_span"] for x in labs)
         if labs and labs[0]["practical_loop_positive"] and not labs[0]["strict_full_period"]: promoted.append(str(b["id"]))
+        if labs and labs[0]["audition_worthy_beat_span"] and not labs[0]["strict_full_period"]: audition_promoted.append(str(b["id"]))
         rows.append({"id":str(b["id"]),"creator":b["creator"],"license":b["license"],"publisher_loop_seconds":b["loop"],
                      "metadata_annotations":a,"top3_labels":labs})
     n=len(rows)
@@ -101,10 +108,13 @@ def main():
             "annotation_key_counts":dict(keys.most_common()),
             "strict_full_period_top1":s1/n,"strict_full_period_top3":s3/n,
             "practical_bar_compatible_top1":p1/n,"practical_bar_compatible_top3":p3/n,
-            "strict_failures_promoted_by_bar_compatible_subperiod":promoted,"tracks":rows}
+            "audition_worthy_beat_span_top1":a1/n,"audition_worthy_beat_span_top3":a3/n,
+            "strict_failures_promoted_by_bar_compatible_subperiod":promoted,
+            "strict_failures_soft_promoted_for_audition":audition_promoted,"tracks":rows}
     out=ROOT/"out"; out.mkdir(exist_ok=True)
     (out/"report.json").write_text(json.dumps(report,indent=2,ensure_ascii=False,allow_nan=False)+"\n")
     print(json.dumps({k:report[k] for k in ("holdout_count","bpm_available_count","meter_available_count",
         "strict_full_period_top1","strict_full_period_top3","practical_bar_compatible_top1",
-        "practical_bar_compatible_top3","strict_failures_promoted_by_bar_compatible_subperiod")},indent=2))
+        "practical_bar_compatible_top3","audition_worthy_beat_span_top1","audition_worthy_beat_span_top3",
+        "strict_failures_promoted_by_bar_compatible_subperiod","strict_failures_soft_promoted_for_audition")},indent=2))
 if __name__=="__main__": main()
