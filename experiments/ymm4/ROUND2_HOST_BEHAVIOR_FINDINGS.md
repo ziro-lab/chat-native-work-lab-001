@@ -9,10 +9,11 @@ This report records the Round 2 public-lab observations used by Template Placer 
 - Runtime: .NET 10
 - YMM4 ZIP SHA256: `125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b`
 - PR: #47
-- Reference runs:
-  - L1 Tool group: **35367666297**
-  - L2 Preview refresh: **35367666289**
-  - L3-L5 Timeline input intent: **35367666398**
+- Tested source head for all three reference runs: `9eca8374be42e86b8d905a1999a70a0e345eb2d7`
+- Reference evidence:
+  - L1 Tool group: run **35367666297**, artifact **10557201726**, SHA256 `32c19045b2f2aa63fb6ccc73aa418fc711087eba19771f04727df05d77fa5e71`
+  - L2 Preview refresh: run **35367666289**, artifact **10556713160**, SHA256 `efa97e31639c66886a449e653e8759cc662cab1c08f8989afb74331f16ce356a`
+  - L3-L5 Timeline input intent: run **35367666398**, artifact **10557226813**, SHA256 `bff069eee257782169ef4a53141911ced3c09e0bacb3d84883d2cccbb8508e2e`
 
 The input tests use OS-injected mouse/keyboard input against the real YMM4 window. They are automated input, not a human hand.
 
