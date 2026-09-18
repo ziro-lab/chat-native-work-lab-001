@@ -1,0 +1,68 @@
+name: commercial-safe-corpus-001
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/audio/commercial-safe-corpus-001/**'
+      - '.github/workflows/commercial-safe-corpus-001.yml'
+  pull_request:
+    paths:
+      - 'experiments/audio/commercial-safe-corpus-001/**'
+      - '.github/workflows/commercial-safe-corpus-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  corpus-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify strict audio license gate
+        working-directory: experiments/audio/commercial-safe-corpus-001
+        run: python verify.py
+
+      - name: Fetch pinned annotation-only sources
+        run: |
+          git clone --quiet https://github.com/DDMAL/salami-data-public.git "$RUNNER_TEMP/salami"
+          git -C "$RUNNER_TEMP/salami" checkout --quiet 8e4f95d18a3ab628c53011fa5a43e9d3be27965d
+          git clone --quiet https://github.com/urinieto/harmonixset.git "$RUNNER_TEMP/harmonix"
+          git -C "$RUNNER_TEMP/harmonix" checkout --quiet 64abeb509429e73d74559fb98e621dac866efea1
+
+      - name: Build annotation-only structure priors
+        working-directory: experiments/audio/commercial-safe-corpus-001
+        run: |
+          python build_annotation_priors.py             --salami "$RUNNER_TEMP/salami"             --harmonix "$RUNNER_TEMP/harmonix"             --output out/annotation-priors.json
+
+      - name: Assert annotation corpus stayed audio-free
+        working-directory: experiments/audio/commercial-safe-corpus-001
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path("out/annotation-priors.json").read_text())
+          assert p["audio_used"] is False
+          assert p["priors"]["salami_uppercase"]["files"] > 1000
+          assert p["priors"]["harmonix_functional"]["files"] > 800
+          print({
+              "salami_files": p["priors"]["salami_uppercase"]["files"],
+              "harmonix_files": p["priors"]["harmonix_functional"]["files"],
+          })
+          PY
+
+      - name: Upload metadata evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: commercial-safe-corpus-001-evidence
+          path: |
+            experiments/audio/commercial-safe-corpus-001/out/gate-evidence.json
+            experiments/audio/commercial-safe-corpus-001/out/annotation-priors.json
+          if-no-files-found: error
+          retention-days: 14
