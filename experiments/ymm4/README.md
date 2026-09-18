@@ -58,3 +58,8 @@ Small plugin prototypes currently consume YMM4 host observations through [`ziro-
 ## Scope boundary
 
 Each experiment remains intentionally narrow. A PASS here does not claim complete plugin lifecycle, every WPF interaction, every PSD/third-party asset combination, physical installer behavior or future YMM4 compatibility unless that experiment explicitly tests it.
+
+
+## Round 2 host behavior findings
+
+- [YMM4 4.55.1.1 Host Behavior — Round 2 Findings](ROUND2_HOST_BEHAVIOR_FINDINGS.md)
