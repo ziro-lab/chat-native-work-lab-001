@@ -36,10 +36,10 @@ try {
  if(-not(Test-Path $result)){throw 'No fresh native result.'}
  $r=Get-Content -Raw $result | ConvertFrom-Json
  Get-Content $result
- if(Test-Path (Join-Path $OutputDir 'commands.txt')){Get-Content (Join-Path $OutputDir 'commands.txt')}
+ if(Test-Path (Join-Path $OutputDir 'split-methods.txt')){Get-Content (Join-Path $OutputDir 'split-methods.txt')}
  if(Test-Path (Join-Path $OutputDir 'split.json')){Get-Content (Join-Path $OutputDir 'split.json')}
  if($r.status -ne 'PASS_VIDEOITEM_SPLIT_LIFECYCLE'){throw 'Native split probe did not pass.'}
- $required=@('fixture_exists','fps_positive','insert_source','selection_before_split','playhead_inside_source','split_command_discovered','split_created_two_pieces','timeline_partition','file_path_preserved','rate_preserved','source_partition_100_percent','one_piece_keeps_original_reference')
+ $required=@('fixture_exists','fps_positive','insert_source','selection_before_split','playhead_inside_source','split_method_discovered','split_created_two_pieces','timeline_partition','file_path_preserved','rate_preserved','source_partition_100_percent','one_piece_keeps_original_reference')
  if($r.schema -ne 'cnwl.videoitem-split-lifecycle.v1' -or $r.host -ne '4.56.1.0 Lite' -or $r.sourceHead -ne $env:GITHUB_SHA -or $r.error){throw 'Native result identity/status rejected.'}
  if($r.requirements.Count -ne $required.Count){throw 'Wrong requirement count.'}
  foreach($id in $required){$found=@($r.requirements|Where-Object id -eq $id); if($found.Count -ne 1 -or $found[0].passed -cne $true){throw "Missing/failed requirement: $id"}}
