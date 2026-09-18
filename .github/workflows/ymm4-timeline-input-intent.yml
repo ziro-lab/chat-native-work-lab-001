@@ -1,0 +1,36 @@
+name: YMM4 timeline input intent
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['experiments/ymm4/timeline-input-intent/**','.github/workflows/ymm4-timeline-input-intent.yml']
+  push:
+    branches: [main]
+    paths: ['experiments/ymm4/timeline-input-intent/**','.github/workflows/ymm4-timeline-input-intent.yml']
+permissions: { contents: read }
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false, fetch-depth: 1 }
+      - shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'){throw 'hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/timeline-input-intent/src/Ymm4TimelineInputProbe/Ymm4TimelineInputProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4TimelineInputProbe';New-Item -ItemType Directory -Force $d|Out-Null;Copy-Item out/probe/Ymm4TimelineInputProbe.dll $d
+      - shell: pwsh
+        run: ./experiments/ymm4/timeline-input-intent/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - if: always()
+        shell: pwsh
+        run: |
+          foreach($f in @('result.txt','targets.txt','events.txt','item-candidates.txt','visual-tree.txt','error.txt','host-log.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with: { name: ymm4-timeline-input-intent, path: 'out/evidence/', retention-days: 14 }

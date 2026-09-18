@@ -14,6 +14,9 @@ YMM4 host-behavior observations used by downstream plugins should be recorded he
 - [`character-layer-placement/`](character-layer-placement/) — same-Character Front/Back baselines and full-span Layer collision behavior.
 - [`template-identity/`](template-identity/) — restart-persistent ambiguity showing that `SceneId` is not a unique ItemTemplate identity.
 - [`preview-playback-rate/`](preview-playback-rate/) — records the v4.56.1.0 baseline showing that the inspected preview PlaybackRate path is not statically capped at 8x, plus the remaining public-Lab reproduction boundary.
+- [`tool-group-resolution/`](tool-group-resolution/) — YMM4 4.55.1.1 Tool Plugin group-key / existing Utilities-group observation.
+- [`preview-refresh-surface/`](preview-refresh-surface/) — YMM4 4.55.1.1 Plugin-facing preview-refresh surface and CurrentFrame/ScrollFrame event observation.
+- [`timeline-input-intent/`](timeline-input-intent/) — YMM4 4.55.1.1 real input-route ordering for Item/re-click/blank/ruler/drag/keyboard/playback-style actions.
 
 ### Recording archive investigation — YMM4 v4.56.1.0
 
@@ -55,3 +58,8 @@ Small plugin prototypes currently consume YMM4 host observations through [`ziro-
 ## Scope boundary
 
 Each experiment remains intentionally narrow. A PASS here does not claim complete plugin lifecycle, every WPF interaction, every PSD/third-party asset combination, physical installer behavior or future YMM4 compatibility unless that experiment explicitly tests it.
+
+
+## Round 2 host behavior findings
+
+- [YMM4 4.55.1.1 Host Behavior — Round 2 Findings](ROUND2_HOST_BEHAVIOR_FINDINGS.md)
