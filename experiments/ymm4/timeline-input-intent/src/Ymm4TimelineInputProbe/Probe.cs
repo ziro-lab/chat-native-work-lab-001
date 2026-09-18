@@ -131,6 +131,8 @@ internal static class InputProbe
             main.WindowState=WindowState.Maximized;
             main.Activate();
             Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
+            HideOwnTool(main.DataContext);
+            await Task.Delay(900);
 
             var character=new Character{Name="CNWL_InputA"};
             voice=new VoiceItem(character){Frame=10,Length=60,Layer=1,Serif="input probe",Remark="CNWL_INPUT_FIXTURE"};
@@ -158,12 +160,13 @@ internal static class InputProbe
 
             var ib=Box(itemElement);var tb=Box(timelineElement);var rb=Box(rulerElement);
             if(!ib.Valid||!tb.Valid||!rb.Valid)throw new InvalidOperationException("Invalid target geometry");
-            var itemPoint=ib.Center;
+            var itemPoint=FindHitPoint(main,ib,"TimelineItemView") ?? ib.Center;
             var blankX=rb.Right-30;
             if(blankX>=ib.Left-5 && blankX<=ib.Right+5) blankX=rb.Left+30;
             if(blankX>=ib.Left-5 && blankX<=ib.Right+5) blankX=Math.Clamp(ib.Right+40,rb.Left+20,rb.Right-20);
-            var blankPoint=new System.Windows.Point(blankX,Math.Clamp(itemPoint.Y,rb.Bottom+8,tb.Bottom-15));
-            var rulerPoint=new System.Windows.Point(Math.Clamp(itemPoint.X+120,rb.Left+20,rb.Right-20),rb.Top+Math.Min(rb.Height/2,20));
+            var blankBox=new ScreenBox(blankX-12,Math.Clamp(itemPoint.Y-12,rb.Bottom+5,tb.Bottom-30),24,24);
+            var blankPoint=FindHitPoint(main,blankBox,"TimelineViewModel",exclude:"TimelineItemView") ?? blankBox.Center;
+            var rulerPoint=FindHitPoint(main,rb,"TimelineScale") ?? rb.Center;
 
             File.WriteAllLines(Path.Combine(OutDir,"targets.txt"),
             [
@@ -175,7 +178,19 @@ internal static class InputProbe
                 $"ruler_point={rulerPoint.X:F1},{rulerPoint.Y:F1}"
             ],new UTF8Encoding(false));
 
+            action="focus-warmup";
+            Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
+            await ClickCore(blankPoint);
+            await Task.Delay(350);
+            t.SelectedItems=ImmutableList<IItem>.Empty;
+            t.CurrentFrame=0;
+            await Task.Delay(200);
+
             await Click("item-click",itemPoint); Snapshot("after item-click");
+            if(t.SelectedItems.Count==0)
+            {
+                await Click("item-click-retry",itemPoint); Snapshot("after item-click-retry");
+            }
             await Click("item-reclick",itemPoint); Snapshot("after item-reclick");
             await Click("blank-click",blankPoint); Snapshot("after blank-click");
             await Click("ruler-click",rulerPoint); Snapshot("after ruler-click");
@@ -195,15 +210,21 @@ internal static class InputProbe
             File.WriteAllLines(Path.Combine(OutDir,"events.txt"),ev,new UTF8Encoding(false));
 
             bool Has(string a,string token)=>ev.Any(x=>x.Contains("action="+a+" ",StringComparison.Ordinal)&&x.Contains(token,StringComparison.Ordinal));
+            var itemRoute=Has("item-click","ROUTED PreviewMouseDown")||Has("item-click-retry","ROUTED PreviewMouseDown");
+            var itemSource=Has("item-click","TimelineItemView")||Has("item-click-retry","TimelineItemView");
             var result=new[]
             {
                 "status=PASS_TIMELINE_INPUT_ROUTE",
-                "item_pointer_route_observed="+Has("item-click","ROUTED PreviewMouseDown"),
+                "item_pointer_route_observed="+itemRoute,
+                "item_source_is_timeline_item="+itemSource,
                 "item_reclick_pointer_route_observed="+Has("item-reclick","ROUTED PreviewMouseDown"),
+                "item_reclick_source_is_timeline_item="+Has("item-reclick","TimelineItemView"),
                 "item_reclick_selection_changed="+Has("item-reclick","TIMELINE PropertyChanged SelectedItems"),
                 "blank_pointer_route_observed="+Has("blank-click","ROUTED PreviewMouseDown"),
                 "blank_currentframe_changed="+Has("blank-click","TIMELINE PropertyChanged CurrentFrame"),
+                "blank_source_is_timeline_item="+Has("blank-click","TimelineItemView"),
                 "ruler_pointer_route_observed="+Has("ruler-click","ROUTED PreviewMouseDown"),
+                "ruler_source_is_timeline_scale="+Has("ruler-click","TimelineScale"),
                 "ruler_currentframe_changed="+Has("ruler-click","TIMELINE PropertyChanged CurrentFrame"),
                 "ruler_drag_currentframe_changed="+Has("ruler-drag","TIMELINE PropertyChanged CurrentFrame"),
                 "keyboard_right_frame_changed="+(afterRight!=beforeRight),
@@ -266,6 +287,45 @@ internal static class InputProbe
             try{d=VisualTreeHelper.GetParent(d);}catch{break;}
         }
         return string.Join("<-",parts);
+    }
+
+    static void HideOwnTool(object? main)
+    {
+        if(main==null)return;
+        if(main.GetType().GetProperty("ToolMenuItems")?.GetValue(main) is not IEnumerable items)return;
+        void Visit(object x,int depth)
+        {
+            if(depth>8)return;
+            var t=x.GetType();
+            var label=t.GetProperty("Header")?.GetValue(x)?.ToString()??t.GetProperty("Title")?.GetValue(x)?.ToString()??t.GetProperty("Name")?.GetValue(x)?.ToString()??"";
+            if(label.Contains("CNWL Timeline Input Probe",StringComparison.Ordinal))
+            {
+                foreach(var n in new[]{"IsActive","IsSelected","IsVisible"}) try{t.GetProperty(n)?.SetValue(x,false);}catch{}
+            }
+            var children=(t.GetProperty("Children")?.GetValue(x)??t.GetProperty("Items")?.GetValue(x)) as IEnumerable;
+            if(children!=null)foreach(var child in children)if(child!=null)Visit(child,depth+1);
+        }
+        foreach(var x in items)if(x!=null)Visit(x,0);
+    }
+
+    static System.Windows.Point? FindHitPoint(Window main,ScreenBox box,string include,string? exclude=null)
+    {
+        var xs=new[]{0.5,0.25,0.75,0.1,0.9};
+        var ys=new[]{0.5,0.3,0.7};
+        foreach(var yf in ys)foreach(var xf in xs)
+        {
+            var p=new System.Windows.Point(box.Left+box.Width*xf,box.Top+box.Height*yf);
+            try
+            {
+                var local=main.PointFromScreen(p);
+                var hit=main.InputHitTest(local);
+                var desc=Describe(hit);
+                if(desc.Contains(include,StringComparison.OrdinalIgnoreCase)
+                    && (exclude==null||!desc.Contains(exclude,StringComparison.OrdinalIgnoreCase))) return p;
+            }
+            catch{}
+        }
+        return null;
     }
 
     static FrameworkElement? FindItemElement(DependencyObject root,IItem item)
