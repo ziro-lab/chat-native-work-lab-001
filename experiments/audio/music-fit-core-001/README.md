@@ -25,6 +25,13 @@ Two lightweight policies were promoted only after public-lab A/B evidence:
 
 Neither change lowers the normal recurrence threshold or adds a model/runtime dependency.
 
+
+### Phase 5 design (planned, not implemented)
+
+The next design iteration keeps the current Phase 4 core as the lower-level engine and adds a thin structure-aware planner for user-facing **Loop / Extend / Shorten** modes. The planned additions are lightweight boundary / intro / highlight / ending hints, mode-specific edge constraints, and family-first candidate diversity.
+
+This is **design-only** and does not widen the current PASS boundary. See [`PHASE5_STRUCTURE_AWARE_PLANNER_DESIGN.md`](PHASE5_STRUCTURE_AWARE_PLANNER_DESIGN.md).
+
 ## Run
 
 Python 3.11+. Run from this directory:
