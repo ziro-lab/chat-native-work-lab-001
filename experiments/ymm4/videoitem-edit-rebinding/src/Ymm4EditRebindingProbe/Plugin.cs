@@ -4,10 +4,12 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -56,7 +58,12 @@ internal static class Probe
     private sealed record UndoState(
         bool UndoRestoredOriginalReference, bool RedoReusedSplitLeftReference, bool RedoReusedSplitRightReference,
         ItemState[] AfterSplit, ItemState[] AfterUndo, ItemState[] AfterRedo);
-    private sealed record ManagerRef(object Value,string Path);
+    private static class Native
+    {
+        [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] internal static extern void keybd_event(byte vk,byte scan,uint flags,nuint extra);
+        internal const uint KeyUp=0x0002;
+    }
 
     public static void Schedule()
     {
@@ -170,43 +177,30 @@ internal static class Probe
         Check("duplicate_same_source_range",dup.Take(2).All(v=>Near(v.ContentOffset.TotalSeconds,8)&&v.Length==300&&SamePath(v.FilePath,media)));
         Check("duplicate_different_timeline_positions",dup.Select(v=>v.Frame).Distinct().Count()>=2);
 
-        // Undo/Redo of a real split. Observe semantic restoration and object-reference churn.
-        var managersBefore=FindUndoRedoManagers(main,active,timeline);
-        Check("undo_manager_surface",managersBefore.Length>0&&managersBefore.All(m=>m.Value.GetType().GetMethod("UndoAsync",BindingFlags.Instance|BindingFlags.Public)!=null));
-
+        // Real shortcut route: Ctrl+B -> Ctrl+Z -> Ctrl+Y.
+        // This matters because calling Timeline.SplitSelectedAndGroupedItems directly does not itself establish
+        // the top-level UI undo transaction in this host.
         var undoSource=NewItem(media,6500,600,30,5,"UNDO_SPLIT",fps);
         Check("undo_insert",timeline.TryAddItems([undoSource],undoSource.Frame,undoSource.Layer));
         timeline.SelectedItems=ImmutableList.Create<IItem>(undoSource);
-        split.Invoke(timeline,[undoSource.Frame+240,splitNone]);
+        timeline.CurrentFrame=undoSource.Frame+240;
+        var mainWindow=Application.Current.Windows.Cast<Window>().First(w=>ReferenceEquals(w.DataContext,main));
+        mainWindow.WindowState=WindowState.Maximized;mainWindow.Activate();Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
+        await Task.Delay(500);
+        await ChordAsync(0x11,0x42); // Ctrl+B
         var afterSplit=FindByRemark(timeline,"UNDO_SPLIT").OrderBy(x=>x.Frame).ToArray();
-        Check("undo_split_created",afterSplit.Length==2&&!afterSplit.Any(x=>ReferenceEquals(x,undoSource)));
-        var managersAfter=FindUndoRedoManagers(main,active,timeline);
-        File.WriteAllText(Path.Combine(output,"undo-managers.json"),JsonSerializer.Serialize(managersAfter.Select(m=>new{
-            m.Path,
-            type=m.Value.GetType().AssemblyQualifiedName,
-            isUndoable=ReadBool(m.Value,"IsUndoable"),
-            isRedoable=ReadBool(m.Value,"IsRedoable")
-        }),new JsonSerializerOptions{WriteIndented=true}));
-        var managerRef=managersAfter.FirstOrDefault(m=>ReadBool(m.Value,"IsUndoable"))
-            ??throw new InvalidOperationException("No discovered UndoRedoManager is undoable after split.");
-        var undoManager=managerRef.Value;
-        var undoAsync=undoManager.GetType().GetMethod("UndoAsync",BindingFlags.Instance|BindingFlags.Public)
-            ??throw new MissingMethodException("UndoRedoManager.UndoAsync");
-        var redoAsync=undoManager.GetType().GetMethod("RedoAsync",BindingFlags.Instance|BindingFlags.Public)
-            ??throw new MissingMethodException("UndoRedoManager.RedoAsync");
-        var isRedoable=undoManager.GetType().GetProperty("IsRedoable")??throw new MissingMemberException("IsRedoable");
-        Check("undo_available_after_split",true);
+        Check("keyboard_split_created",afterSplit.Length==2&&!afterSplit.Any(x=>ReferenceEquals(x,undoSource)));
         var splitLeft=afterSplit[0];var splitRight=afterSplit[1];
-        await (Task)(undoAsync.Invoke(undoManager,null)??throw new InvalidOperationException("Undo task missing"));
-        await Task.Delay(150);
+
+        await ChordAsync(0x11,0x5A); // Ctrl+Z
         var afterUndo=FindByRemark(timeline,"UNDO_SPLIT").OrderBy(x=>x.Frame).ToArray();
-        Check("undo_restores_one_piece",afterUndo.Length==1&&afterUndo[0].Frame==6500&&afterUndo[0].Length==600&&Near(afterUndo[0].ContentOffset.TotalSeconds,5));
-        Check("redo_available_after_undo",(bool)(isRedoable.GetValue(undoManager)??false));
-        bool undoOriginalRef=ReferenceEquals(afterUndo[0],undoSource);
-        await (Task)(redoAsync.Invoke(undoManager,null)??throw new InvalidOperationException("Redo task missing"));
-        await Task.Delay(150);
+        Check("keyboard_undo_restores_one_piece",afterUndo.Length==1&&afterUndo[0].Frame==6500&&afterUndo[0].Length==600
+            &&Near(afterUndo[0].ContentOffset.TotalSeconds,5)&&SamePath(afterUndo[0].FilePath,media));
+        bool undoOriginalRef=afterUndo.Length==1&&ReferenceEquals(afterUndo[0],undoSource);
+
+        await ChordAsync(0x11,0x59); // Ctrl+Y
         var afterRedo=FindByRemark(timeline,"UNDO_SPLIT").OrderBy(x=>x.Frame).ToArray();
-        Check("redo_restores_two_pieces",afterRedo.Length==2&&afterRedo[0].Frame==6500&&afterRedo[0].Length==240
+        Check("keyboard_redo_restores_two_pieces",afterRedo.Length==2&&afterRedo[0].Frame==6500&&afterRedo[0].Length==240
             &&afterRedo[1].Frame==6740&&afterRedo[1].Length==360&&Near(afterRedo[0].ContentOffset.TotalSeconds,5)&&Near(afterRedo[1].ContentOffset.TotalSeconds,9));
 
         var undoObservation=new UndoState(
@@ -239,36 +233,13 @@ internal static class Probe
     private static ItemState State(VideoItem v,VideoItem reference,int fps)=>new(
         v.Remark??"",ReferenceEquals(v,reference),v.Frame,v.Length,v.Layer,v.ContentOffset.TotalSeconds,Rate(v,fps),Path.GetFullPath(v.FilePath??""));
 
-    private static ManagerRef[] FindUndoRedoManagers(params object[] roots)
+    private static async Task ChordAsync(byte modifier,byte key)
     {
-        var visited=new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var found=new List<ManagerRef>();
-        void Walk(object? obj,string path,int depth)
-        {
-            if(obj==null||depth>8||!visited.Add(obj))return;
-            var type=obj.GetType();
-            if(type.FullName=="YukkuriMovieMaker.UndoRedo.UndoRedoManager"){found.Add(new(obj,path));return;}
-            if(type.IsPrimitive||obj is string||obj is Type||obj is MemberInfo)return;
-            string asm=type.Assembly.GetName().Name??"";
-            bool allowed=asm.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)||asm.StartsWith("Reactive",StringComparison.Ordinal)
-                ||asm=="System.Collections.Immutable";
-            if(!allowed)return;
-            foreach(var f in type.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
-            {
-                object? value=null;try{value=f.GetValue(obj);}catch{}
-                if(value!=null)Walk(value,path+"."+f.Name,depth+1);
-            }
-            foreach(var p in type.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
-            {
-                if(p.GetIndexParameters().Length!=0||p.Name is "Items" or "SelectedItems" or "Characters")continue;
-                object? value=null;try{value=p.GetValue(obj);}catch{}
-                if(value!=null)Walk(value,path+"."+p.Name,depth+1);
-            }
-        }
-        for(int i=0;i<roots.Length;i++)Walk(roots[i],"root"+i,0);
-        return found.GroupBy(x=>x.Value,ReferenceEqualityComparer.Instance).Select(g=>g.First()).ToArray();
+        Native.keybd_event(modifier,0,0,0);await Task.Delay(40);
+        Native.keybd_event(key,0,0,0);await Task.Delay(40);
+        Native.keybd_event(key,0,Native.KeyUp,0);Native.keybd_event(modifier,0,Native.KeyUp,0);
+        await Task.Delay(450);
     }
-    private static bool ReadBool(object obj,string name)=>obj.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.Public)?.GetValue(obj) is true;
 
     private static Timeline? FindTimelineGraph(object main,object active)
     {
