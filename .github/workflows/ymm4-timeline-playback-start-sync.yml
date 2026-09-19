@@ -59,7 +59,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          foreach($f in @('result.json','trace.txt','trigger.txt','preview-surface.txt','error.txt','provenance.json')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+          foreach($f in @('result.json','trace.txt','trigger.txt','preview-surface.txt','error.txt','host-log.txt','provenance.json')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
