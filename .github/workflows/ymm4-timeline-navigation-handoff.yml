@@ -30,14 +30,14 @@ jobs:
           $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
           if(-not$exe){throw 'YMM4 exe missing'}
           "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Generate red/blue synthetic preview fixture
+      - name: Generate red/green synthetic preview fixture
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out/fixture|Out-Null
           $ff=Get-ChildItem $env:YMM4_DIR -Recurse -Filter ffmpeg.exe|Select-Object -First 1
           if(-not$ff){throw 'Bundled ffmpeg missing'}
-          & $ff.FullName -nostdin -hide_banner -loglevel error -y -f lavfi -i "color=c=red:size=320x180:rate=60:duration=2" -f lavfi -i "color=c=blue:size=320x180:rate=60:duration=2" -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0" -an -c:v ffv1 out/fixture/red-blue.mkv
-          if($LASTEXITCODE-ne0 -or -not(Test-Path out/fixture/red-blue.mkv)){throw 'Fixture generation failed'}
+          & $ff.FullName -nostdin -hide_banner -loglevel error -y -f lavfi -i "color=c=red:size=320x180:rate=60:duration=2" -f lavfi -i "color=c=green:size=320x180:rate=60:duration=2" -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0" -an -c:v mpeg4 -q:v 2 -pix_fmt yuv420p out/fixture/red-green.mp4
+          if($LASTEXITCODE-ne0 -or -not(Test-Path out/fixture/red-green.mp4)){throw 'Fixture generation failed'}
       - name: Build and install probe
         shell: pwsh
         run: |
@@ -49,7 +49,7 @@ jobs:
           Copy-Item out/probe/Ymm4TimelineNavigationHandoffProbe.dll $d
       - name: Run real-host navigation observation
         shell: pwsh
-        run: ./experiments/ymm4/timeline-navigation-handoff/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence') -MediaPath (Join-Path $PWD 'out/fixture/red-blue.mkv')
+        run: ./experiments/ymm4/timeline-navigation-handoff/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence') -MediaPath (Join-Path $PWD 'out/fixture/red-green.mp4')
       - name: Record provenance
         if: always()
         shell: pwsh

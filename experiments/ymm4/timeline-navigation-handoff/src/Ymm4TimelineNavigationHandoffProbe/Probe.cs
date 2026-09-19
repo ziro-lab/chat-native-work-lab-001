@@ -95,6 +95,8 @@ internal static class Bootstrap
 internal static class Native
 {
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x,int y);
+    [DllImport("user32.dll")] internal static extern void mouse_event(uint flags,uint dx,uint dy,uint data,nuint extra);
     [DllImport("user32.dll")] internal static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] internal static extern int ReleaseDC(IntPtr hWnd,IntPtr hDC);
     [DllImport("gdi32.dll")] internal static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -104,7 +106,7 @@ internal static class Native
     [DllImport("gdi32.dll")] internal static extern bool DeleteDC(IntPtr hdc);
     [DllImport("gdi32.dll")] internal static extern bool BitBlt(IntPtr hdcDest,int x,int y,int cx,int cy,IntPtr hdcSrc,int x1,int y1,uint rop);
     [DllImport("gdi32.dll")] internal static extern int GetDIBits(IntPtr hdc,IntPtr hbmp,uint start,uint lines,byte[] bits,ref BITMAPINFO bmi,uint usage);
-    internal const uint SRCCOPY=0x00CC0020,BI_RGB=0,DIB_RGB_COLORS=0;
+    internal const uint LD=0x0002,LU=0x0004,SRCCOPY=0x00CC0020,BI_RGB=0,DIB_RGB_COLORS=0;
     [StructLayout(LayoutKind.Sequential)] internal struct BITMAPINFOHEADER
     {
         public uint biSize; public int biWidth; public int biHeight; public ushort biPlanes; public ushort biBitCount;
@@ -113,13 +115,20 @@ internal static class Native
     [StructLayout(LayoutKind.Sequential)] internal struct BITMAPINFO { public BITMAPINFOHEADER bmiHeader; public uint bmiColors; }
 }
 
-internal sealed record ColorSample(int R,int G,int B,bool IsRed,bool IsBlue);
-internal sealed record ScrollState(int Index,double HorizontalOffset,double ScrollableWidth,double ViewportWidth);
+internal readonly record struct ScreenBox(int X,int Y,int Width,int Height)
+{
+    public int CenterX=>X+Width/2; public int CenterY=>Y+Height/2; public bool Valid=>Width>10&&Height>10;
+}
+internal sealed record ColorSample(int R,int G,int B,int RedPixels,int GreenPixels,int PixelCount,bool IsRed,bool IsGreen);
 internal sealed record Result(
-    string schema,string status,string host,bool pluginFocusObserved,bool timelineFocusObserved,bool previewPixelProbeUsable,
-    bool directNavigationPreviewUpdated,bool timelineFocusUpdatesPreview,ColorSample initial,ColorSample afterDirect,ColorSample afterFocus,
-    bool scrollFramePublic,bool scrollFrameMovesViewport,bool scrollFrameMovesCurrentFrame,bool directFarNavigationMovesViewport,
-    int publicVisibleRangeCandidateCount,string[] publicSurface,ScrollState[] nearScroll,ScrollState[] directFarScroll,ScrollState[] afterScrollFrame,string? error);
+    string schema,string status,string host,int fps,bool pluginFocusObserved,
+    bool realTimelineClickFocusObserved,bool realTimelineClickFrameChanged,string observedTimelineFocusTarget,
+    bool previewPixelProbeUsable,bool directNavigationPreviewUpdated,bool realTimelineClickUpdatesPreview,
+    bool programmaticObservedTargetFocusSucceeded,bool programmaticFocusUpdatesPreview,
+    ColorSample initial,ColorSample afterDirect,ColorSample afterRealClick,ColorSample afterDirect2,ColorSample afterProgrammaticFocus,
+    bool scrollFramePublic,bool containFrameInViewportPublic,bool nearContainsNear,bool nearContainsFar,bool directFarContainsFar,bool afterScrollContainsFar,
+    bool scrollFrameMovesViewport,bool scrollFrameMovesCurrentFrame,bool directFarNavigationMovesViewport,
+    int publicVisibleRangeCandidateCount,string[] publicSurface,string? error);
 
 internal static class NavigationProbe
 {
@@ -131,8 +140,10 @@ internal static class NavigationProbe
     {
         try{
             Directory.CreateDirectory(OutDir);File.WriteAllText(Path.Combine(OutDir,"error.txt"),error,new UTF8Encoding(false));
-            var z=new ColorSample(0,0,0,false,false);
-            File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(new Result("cnwl.timeline-navigation-handoff.v1","FAIL_EXCEPTION","4.55.1.1 Lite",false,false,false,false,false,z,z,z,false,false,false,false,0,[],[],[],[],error),new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
+            var z=new ColorSample(0,0,0,0,0,0,false,false);
+            File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(new Result(
+                "cnwl.timeline-navigation-handoff.v1","FAIL_EXCEPTION","4.55.1.1 Lite",0,false,false,false,"",false,false,false,false,false,
+                z,z,z,z,z,false,false,false,false,false,false,false,false,false,0,[],error),new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
         }catch{}
     }
 
@@ -146,31 +157,43 @@ internal static class NavigationProbe
             main.WindowState=WindowState.Maximized;main.Activate();Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);await Task.Delay(1200);
             if(!File.Exists(Media))throw new FileNotFoundException("Media fixture missing",Media);
 
-            var fps=60;
+            var videoInfo=t.GetType().GetProperty("VideoInfo",BindingFlags.Instance|BindingFlags.Public)?.GetValue(t);
+            var fps=Convert.ToInt32(videoInfo?.GetType().GetProperty("FPS",BindingFlags.Instance|BindingFlags.Public)?.GetValue(videoInfo)??60,CultureInfo.InvariantCulture);
+            if(fps<=0)throw new InvalidOperationException("FPS unavailable");
+            var redFrame=Math.Max(1,fps/2);var greenFrame=fps*3;var length=fps*4;var farFrame=fps*50;
+
             var video=t.Items.OfType<VideoItem>().FirstOrDefault(x=>x.Remark=="CNWL_NAV_COLOR")??new VideoItem{
-                FilePath=Media,Frame=0,Length=240,Layer=1,ContentOffset=TimeSpan.Zero,Remark="CNWL_NAV_COLOR"};
+                FilePath=Media,Frame=0,Length=length,Layer=1,ContentOffset=TimeSpan.Zero,Remark="CNWL_NAV_COLOR"};
             video.PlaybackRate2.SetFirstValue(100);video.PlaybackRate2.SetAnimationParameters(video.Length,fps);
             if(!t.Items.Contains(video)&&!t.TryAddItems([video],video.Frame,video.Layer))throw new InvalidOperationException("Could not insert color VideoItem");
             var far=t.Items.OfType<VideoItem>().FirstOrDefault(x=>x.Remark=="CNWL_NAV_FAR")??new VideoItem{
-                FilePath=Media,Frame=3000,Length=120,Layer=2,ContentOffset=TimeSpan.Zero,Remark="CNWL_NAV_FAR"};
+                FilePath=Media,Frame=farFrame,Length=fps*2,Layer=2,ContentOffset=TimeSpan.Zero,Remark="CNWL_NAV_FAR"};
             far.PlaybackRate2.SetFirstValue(100);far.PlaybackRate2.SetAnimationParameters(far.Length,fps);
             if(!t.Items.Contains(far)&&!t.TryAddItems([far],far.Frame,far.Layer))throw new InvalidOperationException("Could not insert far VideoItem");
             t.RefreshTimelineLengthAndMaxLayer();await Task.Delay(1800);
 
-            var timelineView=FindLargest(main,fe=>fe.GetType().FullName=="YukkuriMovieMaker.Views.TimelineView"||fe.DataContext?.GetType().FullName=="YukkuriMovieMaker.ViewModels.TimelineViewModel")
+            var timelineView=FindLargest(main,fe=>fe.GetType().FullName=="YukkuriMovieMaker.Views.TimelineView")
+                ??FindLargest(main,fe=>fe.DataContext?.GetType().FullName=="YukkuriMovieMaker.ViewModels.TimelineViewModel")
                 ??throw new InvalidOperationException("TimelineView not found");
-            var preview=FindLargest(main,fe=>{
-                var n=fe.GetType().FullName??"";var d=fe.DataContext?.GetType().FullName??"";
-                return !n.Contains(nameof(Ymm4TimelineNavigationHandoffProbe),StringComparison.Ordinal)&&
-                    (n.Contains("PreviewView",StringComparison.OrdinalIgnoreCase)||d.Contains("PreviewViewModel",StringComparison.OrdinalIgnoreCase));
-            })??throw new InvalidOperationException("Preview visual not found");
+            var previewCandidates=Elements(main).Where(fe=>fe.IsVisible&&fe.ActualWidth>30&&fe.ActualHeight>30&&
+                ((fe.GetType().FullName??"").Contains("Preview",StringComparison.OrdinalIgnoreCase)||
+                 (fe.DataContext?.GetType().FullName??"").Contains("Preview",StringComparison.OrdinalIgnoreCase))).ToArray();
+            File.WriteAllLines(Path.Combine(OutDir,"preview-candidates.txt"),previewCandidates.Select(DescribeElement),new UTF8Encoding(false));
+            var preview=previewCandidates.Where(x=>x.GetType().FullName=="YukkuriMovieMaker.Views.PreviewView").OrderByDescending(Area).FirstOrDefault()
+                ??previewCandidates.OrderByDescending(Area).FirstOrDefault()
+                ??throw new InvalidOperationException("Preview visual not found");
             var active=timelineView.DataContext??throw new InvalidOperationException("TimelineView DataContext missing");
             var scrollFrame=active.GetType().GetMethod("ScrollFrame",BindingFlags.Instance|BindingFlags.Public,null,[typeof(int)],null);
+            var containFrame=active.GetType().GetMethod("ContainFrameInViewport",BindingFlags.Instance|BindingFlags.Public,null,[typeof(int)],null);
+            var scrollToItem=active.GetType().GetMethods(BindingFlags.Instance|BindingFlags.Public).FirstOrDefault(m=>m.Name=="ScrollToItem"&&m.GetParameters().Length==1);
             var publicSurface=PublicSurface(active).ToArray();
-            var visibleCount=publicSurface.Count(x=>x.Contains("VISIBLE_RANGE_CANDIDATE",StringComparison.Ordinal));
+            var visibleCount=publicSurface.Count(x=>x.Contains("VISIBLE_RANGE_CANDIDATE",StringComparison.Ordinal)||x.Contains("VIEWPORT_CANDIDATE",StringComparison.Ordinal));
 
-            bool timelineFocus=FocusTimeline(main,timelineView);await Task.Delay(250);
-            t.CurrentFrame=30;t.SelectItem(video);scrollFrame?.Invoke(active,[30]);await Task.Delay(1400);
+            if(scrollFrame!=null)scrollFrame.Invoke(active,[redFrame]); else scrollToItem?.Invoke(active,[video]);
+            await Task.Delay(600);
+            var itemElement=FindItemElement(timelineView,video)??throw new InvalidOperationException("Rendered VideoItem not found");
+            t.CurrentFrame=redFrame;t.SelectItem(video);await Task.Delay(250);
+            await Click(itemElement);await Task.Delay(1200);
             var initial=CapturePreview(preview);
             var previewUsable=initial.IsRed;
 
@@ -178,52 +201,80 @@ internal static class NavigationProbe
             Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(250);
             var pluginFocus=ReferenceEquals(Keyboard.FocusedElement,button)||button.IsKeyboardFocusWithin;
 
-            t.CurrentFrame=180;t.SelectItem(video);await Task.Delay(900);
+            t.CurrentFrame=greenFrame;t.SelectItem(video);await Task.Delay(900);
             var afterDirect=CapturePreview(preview);
-            var directUpdated=afterDirect.IsBlue;
+            var directUpdated=afterDirect.IsGreen;
 
+            var frameBeforeClick=t.CurrentFrame;
             main.Activate();Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
-            timelineFocus=FocusTimeline(main,timelineView);await Task.Delay(1000);
-            var afterFocus=CapturePreview(preview);
-            var focusUpdates=previewUsable&&!directUpdated&&afterFocus.IsBlue;
+            await Click(itemElement);await Task.Delay(1000);
+            var frameChanged=t.CurrentFrame!=frameBeforeClick;
+            var focusTarget=Keyboard.FocusedElement as IInputElement;
+            var focusDo=focusTarget as DependencyObject;
+            var realFocus=focusDo!=null&&IsWithin(focusDo,timelineView);
+            var focusType=focusTarget?.GetType().FullName??"<null>";
+            var afterRealClick=CapturePreview(preview);
+            var clickUpdates=previewUsable&&!directUpdated&&!frameChanged&&afterRealClick.IsGreen;
 
-            scrollFrame?.Invoke(active,[30]);await Task.Delay(450);
-            var near=ScrollStates(timelineView);
+            t.CurrentFrame=redFrame;t.SelectItem(video);await Task.Delay(250);
+            await Click(itemElement);await Task.Delay(900);
+            var reset=CapturePreview(preview);
+            Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(200);
+            t.CurrentFrame=greenFrame;t.SelectItem(video);await Task.Delay(800);
+            var afterDirect2=CapturePreview(preview);
+            var programFocus=false;
+            if(focusTarget!=null){
+                main.Activate();Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
+                try{Keyboard.Focus(focusTarget);await Task.Delay(900);programFocus=Keyboard.FocusedElement is DependencyObject d&&IsWithin(d,timelineView);}catch{}
+            }
+            var afterProgramFocus=CapturePreview(preview);
+            var programFocusUpdates=reset.IsRed&&!afterDirect2.IsGreen&&programFocus&&afterProgramFocus.IsGreen;
+
+            if(scrollFrame!=null)scrollFrame.Invoke(active,[redFrame]);await Task.Delay(500);
+            var nearContainsNear=InvokeBool(containFrame,active,redFrame);
+            var nearContainsFar=InvokeBool(containFrame,active,farFrame);
             Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(150);
-            t.CurrentFrame=3000;t.SelectItem(far);await Task.Delay(500);
-            var directFar=ScrollStates(timelineView);
-            var directFarMoved=OffsetsChanged(near,directFar);
-            var beforeFrame=t.CurrentFrame;
-            if(scrollFrame!=null)scrollFrame.Invoke(active,[3000]);
+            t.CurrentFrame=farFrame;t.SelectItem(far);await Task.Delay(500);
+            var directFarContains=InvokeBool(containFrame,active,farFrame);
+            var beforeScrollFrame=t.CurrentFrame;
+            if(scrollFrame!=null)scrollFrame.Invoke(active,[farFrame]);
             await Task.Delay(650);
-            var afterScroll=ScrollStates(timelineView);
-            var scrollMoves=OffsetsChanged(directFar,afterScroll);
-            var scrollMovesFrame=t.CurrentFrame!=beforeFrame;
+            var afterScrollContains=InvokeBool(containFrame,active,farFrame);
+            var scrollMovesFrame=t.CurrentFrame!=beforeScrollFrame;
+            var directMoves=!nearContainsFar&&directFarContains;
+            var scrollMoves=!directFarContains&&afterScrollContains;
 
             File.WriteAllLines(Path.Combine(OutDir,"surface.txt"),publicSurface,new UTF8Encoding(false));
             File.WriteAllLines(Path.Combine(OutDir,"preview-samples.txt"),[
-                $"initial R={initial.R} G={initial.G} B={initial.B} red={initial.IsRed} blue={initial.IsBlue}",
-                $"after_direct R={afterDirect.R} G={afterDirect.G} B={afterDirect.B} red={afterDirect.IsRed} blue={afterDirect.IsBlue}",
-                $"after_focus R={afterFocus.R} G={afterFocus.G} B={afterFocus.B} red={afterFocus.IsRed} blue={afterFocus.IsBlue}"
+                DescribeColor("initial",initial),DescribeColor("after_direct",afterDirect),DescribeColor("after_real_click",afterRealClick),
+                DescribeColor("reset",reset),DescribeColor("after_direct2",afterDirect2),DescribeColor("after_programmatic_focus",afterProgramFocus),
+                $"focus_target={focusType} real_focus_within_timeline={realFocus} click_frame_changed={frameChanged} programmatic_focus_succeeded={programFocus}"
             ],new UTF8Encoding(false));
-            File.WriteAllLines(Path.Combine(OutDir,"scroll.txt"),DescribeScroll("near",near).Concat(DescribeScroll("direct_far",directFar)).Concat(DescribeScroll("after_scrollframe",afterScroll)),new UTF8Encoding(false));
+            File.WriteAllLines(Path.Combine(OutDir,"viewport.txt"),[
+                $"red_frame={redFrame} far_frame={farFrame}",
+                $"near_contains_near={nearContainsNear}",$"near_contains_far={nearContainsFar}",
+                $"direct_far_contains_far={directFarContains}",$"after_scrollframe_contains_far={afterScrollContains}",
+                $"direct_far_navigation_moves_viewport={directMoves}",$"scrollframe_moves_viewport={scrollMoves}",$"scrollframe_moves_currentframe={scrollMovesFrame}"
+            ],new UTF8Encoding(false));
 
-            var result=new Result("cnwl.timeline-navigation-handoff.v1","PASS_NAVIGATION_HANDOFF_OBSERVATION","4.55.1.1 Lite",pluginFocus,timelineFocus,previewUsable,
-                directUpdated,focusUpdates,initial,afterDirect,afterFocus,scrollFrame!=null,scrollMoves,scrollMovesFrame,directFarMoved,visibleCount,publicSurface,near,directFar,afterScroll,null);
+            var result=new Result("cnwl.timeline-navigation-handoff.v1","PASS_NAVIGATION_HANDOFF_OBSERVATION","4.55.1.1 Lite",fps,pluginFocus,
+                realFocus,frameChanged,focusType,previewUsable,directUpdated,clickUpdates,programFocus,programFocusUpdates,
+                initial,afterDirect,afterRealClick,afterDirect2,afterProgramFocus,
+                scrollFrame!=null,containFrame!=null,nearContainsNear,nearContainsFar,directFarContains,afterScrollContains,scrollMoves,scrollMovesFrame,directMoves,
+                visibleCount,publicSurface,null);
             File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(result,new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
         }catch(Exception ex){Fail(ex.ToString());}
     }
 
-    static bool FocusTimeline(Window main,FrameworkElement timelineView)
+    static bool InvokeBool(MethodInfo? method,object target,int frame)
     {
-        main.Activate();Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
-        foreach(var target in new[]{timelineView}.Concat(Elements(timelineView).Where(x=>x.Focusable&&x.IsVisible&&x.IsEnabled))){
-            try{
-                target.Focus();Keyboard.Focus(target);
-                if(Keyboard.FocusedElement is DependencyObject d&&IsWithin(d,timelineView))return true;
-            }catch{}
-        }
-        return false;
+        if(method==null)return false;
+        try{return method.Invoke(target,[frame]) is bool b&&b;}catch{return false;}
+    }
+    static async Task Click(FrameworkElement element)
+    {
+        var b=GetBox(element);if(!b.Valid)throw new InvalidOperationException("Click target geometry invalid");
+        Native.SetCursorPos(b.CenterX,b.CenterY);await Task.Delay(100);Native.mouse_event(Native.LD,0,0,0,0);await Task.Delay(60);Native.mouse_event(Native.LU,0,0,0,0);
     }
     static bool IsWithin(DependencyObject d,DependencyObject root)
     {
@@ -235,46 +286,69 @@ internal static class NavigationProbe
 
     static ColorSample CapturePreview(FrameworkElement preview)
     {
-        var center=preview.PointToScreen(new Point(preview.ActualWidth/2,preview.ActualHeight/2));
-        const int w=40,h=40;var x=(int)Math.Round(center.X)-w/2;var y=(int)Math.Round(center.Y)-h/2;
+        var box=GetBox(preview);if(!box.Valid)throw new InvalidOperationException("Preview geometry invalid");
+        var w=Math.Clamp(box.Width,20,1600);var h=Math.Clamp(box.Height,20,1000);
         var screen=Native.GetDC(IntPtr.Zero);if(screen==IntPtr.Zero)throw new InvalidOperationException("GetDC failed");
         var mem=Native.CreateCompatibleDC(screen);var bmp=Native.CreateCompatibleBitmap(screen,w,h);var old=Native.SelectObject(mem,bmp);
         try{
-            if(!Native.BitBlt(mem,0,0,w,h,screen,x,y,Native.SRCCOPY))throw new InvalidOperationException("BitBlt failed");
+            if(!Native.BitBlt(mem,0,0,w,h,screen,box.X,box.Y,Native.SRCCOPY))throw new InvalidOperationException("BitBlt failed");
             var bmi=new Native.BITMAPINFO{bmiHeader=new Native.BITMAPINFOHEADER{biSize=(uint)Marshal.SizeOf<Native.BITMAPINFOHEADER>(),biWidth=w,biHeight=-h,biPlanes=1,biBitCount=32,biCompression=Native.BI_RGB}};
             var bytes=new byte[w*h*4];
-            if(Native.GetDIBits(mem,bmp,0,h,bytes,ref bmi,Native.DIB_RGB_COLORS)==0)throw new InvalidOperationException("GetDIBits failed");
-            long rr=0,gg=0,bb=0;for(var i=0;i<bytes.Length;i+=4){bb+=bytes[i];gg+=bytes[i+1];rr+=bytes[i+2];}
-            var n=w*h;var r=(int)(rr/n);var g=(int)(gg/n);var b=(int)(bb/n);
-            return new(r,g,b,r>b+35&&r>g+25,b>r+35&&b>g+25);
+            if(Native.GetDIBits(mem,bmp,0,(uint)h,bytes,ref bmi,Native.DIB_RGB_COLORS)==0)throw new InvalidOperationException("GetDIBits failed");
+            long rr=0,gg=0,bb=0;var red=0;var green=0;
+            for(var i=0;i<bytes.Length;i+=4){
+                var b=bytes[i];var g=bytes[i+1];var r=bytes[i+2];bb+=b;gg+=g;rr+=r;
+                if(r>120&&r>g+45&&r>b+45)red++;
+                if(g>100&&g>r+35&&g>b+35)green++;
+            }
+            var n=w*h;var ar=(int)(rr/n);var ag=(int)(gg/n);var ab=(int)(bb/n);
+            var threshold=Math.Max(100,n/50);
+            return new(ar,ag,ab,red,green,n,red>threshold,green>threshold);
         }finally{
             Native.SelectObject(mem,old);Native.DeleteObject(bmp);Native.DeleteDC(mem);Native.ReleaseDC(IntPtr.Zero,screen);
         }
     }
-
-    static ScrollState[] ScrollStates(FrameworkElement timelineView)=>Elements(timelineView).OfType<ScrollViewer>().Where(x=>x.IsVisible)
-        .Select((x,i)=>new ScrollState(i,x.HorizontalOffset,x.ScrollableWidth,x.ViewportWidth)).ToArray();
-    static bool OffsetsChanged(ScrollState[] a,ScrollState[] b)=>a.Any(x=>b.FirstOrDefault(y=>y.Index==x.Index) is { } y&&Math.Abs(y.HorizontalOffset-x.HorizontalOffset)>1);
-    static IEnumerable<string> DescribeScroll(string name,ScrollState[] s)=>s.Select(x=>$"{name}[{x.Index}] offset={x.HorizontalOffset:F2} scrollable={x.ScrollableWidth:F2} viewport={x.ViewportWidth:F2}");
+    static string DescribeColor(string name,ColorSample c)=>$"{name} avg=({c.R},{c.G},{c.B}) red_pixels={c.RedPixels}/{c.PixelCount} green_pixels={c.GreenPixels}/{c.PixelCount} red={c.IsRed} green={c.IsGreen}";
 
     static IEnumerable<string> PublicSurface(object active)
     {
         var t=active.GetType();
         foreach(var p in t.GetProperties(BindingFlags.Instance|BindingFlags.Public).Where(p=>Relevant(p.Name)).OrderBy(p=>p.Name)){
-            var prefix=(p.Name.Contains("Frame",StringComparison.OrdinalIgnoreCase)&&(p.Name.Contains("Visible",StringComparison.OrdinalIgnoreCase)||p.Name.Contains("Viewport",StringComparison.OrdinalIgnoreCase)))?"VISIBLE_RANGE_CANDIDATE ":"";
+            var prefix=p.Name.Equals("Viewport",StringComparison.OrdinalIgnoreCase)||p.Name.Contains("Visible",StringComparison.OrdinalIgnoreCase)?"VIEWPORT_CANDIDATE ":"";
             string value;try{value=p.CanRead?(p.GetValue(active)?.ToString()??"<null>"):"<write-only>";}catch{value="<throw>";}
             yield return $"{prefix}PROPERTY {t.FullName}.{p.Name}:{p.PropertyType.FullName} value={value}";
         }
         foreach(var m in t.GetMethods(BindingFlags.Instance|BindingFlags.Public).Where(m=>Relevant(m.Name)).OrderBy(m=>m.Name)){
-            var prefix=(m.Name.Contains("Frame",StringComparison.OrdinalIgnoreCase)&&(m.Name.Contains("Visible",StringComparison.OrdinalIgnoreCase)||m.Name.Contains("Viewport",StringComparison.OrdinalIgnoreCase)))?"VISIBLE_RANGE_CANDIDATE ":"";
+            var prefix=m.Name.Equals("ContainFrameInViewport",StringComparison.Ordinal)?"VISIBLE_RANGE_CANDIDATE ":"";
             yield return $"{prefix}METHOD {t.FullName}.{m.Name}({string.Join(",",m.GetParameters().Select(p=>p.ParameterType.FullName))}):{m.ReturnType.FullName}";
         }
     }
-    static bool Relevant(string n)=>new[]{"Scroll","Visible","Viewport","Frame","Offset","Scale"}.Any(x=>n.Contains(x,StringComparison.OrdinalIgnoreCase));
-    static FrameworkElement? FindLargest(DependencyObject root,Func<FrameworkElement,bool> pred)=>Elements(root).Where(x=>x.IsVisible&&x.ActualWidth>30&&x.ActualHeight>30&&pred(x)).OrderByDescending(x=>x.ActualWidth*x.ActualHeight).FirstOrDefault();
+    static bool Relevant(string n)=>new[]{"Scroll","Visible","Viewport","Frame","Offset","Scale","Focus","Active"}.Any(x=>n.Contains(x,StringComparison.OrdinalIgnoreCase));
+    static FrameworkElement? FindItemElement(DependencyObject root,IItem item)=>Elements(root).Where(x=>x.IsVisible&&ReferencesItem(x.DataContext,item)&&GetBox(x).Valid).OrderByDescending(Area).FirstOrDefault();
+    static bool ReferencesItem(object? dc,IItem item)
+    {
+        if(dc==null)return false;if(ReferenceEquals(dc,item))return true;
+        foreach(var p in dc.GetType().GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).Where(p=>p.CanRead&&p.GetIndexParameters().Length==0&&(typeof(IItem).IsAssignableFrom(p.PropertyType)||p.Name.Contains("Item",StringComparison.OrdinalIgnoreCase))).Take(40)){
+            try{
+                var v=p.GetValue(dc);if(ReferenceEquals(v,item))return true;
+                if(v is IEnumerable e&&v is not string)foreach(var x in e)if(ReferenceEquals(x,item))return true;
+            }catch{}
+        }
+        return false;
+    }
+    static string DescribeElement(FrameworkElement fe){var b=GetBox(fe);return $"{fe.GetType().FullName} dc={fe.DataContext?.GetType().FullName??"<null>"} box={b.X},{b.Y},{b.Width},{b.Height} focusable={fe.Focusable}";}
+    static double Area(FrameworkElement x)=>x.ActualWidth*x.ActualHeight;
+    static FrameworkElement? FindLargest(DependencyObject root,Func<FrameworkElement,bool> pred)=>Elements(root).Where(x=>x.IsVisible&&x.ActualWidth>30&&x.ActualHeight>30&&pred(x)).OrderByDescending(Area).FirstOrDefault();
     static IEnumerable<FrameworkElement> Elements(DependencyObject root)
     {
         if(root is FrameworkElement fe)yield return fe;int n=0;try{n=VisualTreeHelper.GetChildrenCount(root);}catch{}
         for(var i=0;i<n;i++)foreach(var x in Elements(VisualTreeHelper.GetChild(root,i)))yield return x;
+    }
+    static ScreenBox GetBox(FrameworkElement fe)
+    {
+        try{
+            var a=fe.PointToScreen(new Point(0,0));var b=fe.PointToScreen(new Point(fe.ActualWidth,fe.ActualHeight));
+            return new((int)Math.Round(a.X),(int)Math.Round(a.Y),(int)Math.Round(b.X-a.X),(int)Math.Round(b.Y-a.Y));
+        }catch{return default;}
     }
 }

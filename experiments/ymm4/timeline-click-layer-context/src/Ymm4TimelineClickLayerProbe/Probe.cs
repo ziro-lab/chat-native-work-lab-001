@@ -131,14 +131,17 @@ internal static class LayerProbe
 
             var timelineView=FindLargest(main,fe=>fe.GetType().FullName=="YukkuriMovieMaker.Views.TimelineView"||fe.DataContext?.GetType().FullName=="YukkuriMovieMaker.ViewModels.TimelineViewModel")
                 ??throw new InvalidOperationException("TimelineView not found");
-            var itemElements=items.Select(i=>FindItemElement(timelineView,i)??throw new InvalidOperationException("Rendered item missing for layer "+i.Layer)).ToArray();
             var timelineBox=GetBox(timelineView);
             if(!timelineBox.Valid)throw new InvalidOperationException("Timeline geometry invalid");
 
             var samples=new List<Sample>();
             var surface=PublicLayerSurface(active.GetType()).ToList();
             for(var n=0;n<items.Length;n++){
-                var item=items[n];var ib=GetBox(itemElements[n]);
+                var item=items[n];
+                try{scrollToItem?.Invoke(active,[item]);}catch{}
+                await Task.Delay(500);
+                var itemElement=FindItemElement(timelineView,item)??throw new InvalidOperationException("Rendered item missing after ScrollToItem for layer "+item.Layer);
+                var ib=GetBox(itemElement);
                 var point=FindBlankPoint(main,timelineView,timelineBox,ib.CenterY)??throw new InvalidOperationException("No blank Timeline hit on layer "+item.Layer);
                 Native.SetCursorPos((int)Math.Round(point.X),(int)Math.Round(point.Y));await Task.Delay(120);
                 var hit=Mouse.DirectlyOver as DependencyObject;

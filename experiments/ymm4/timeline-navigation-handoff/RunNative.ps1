@@ -45,8 +45,8 @@ try{
  $r=Get-Content -Raw $result|ConvertFrom-Json
  Get-Content $result
  if($r.schema-cne'cnwl.timeline-navigation-handoff.v1'-or$r.status-cne'PASS_NAVIGATION_HANDOFF_OBSERVATION'-or$r.host-cne'4.55.1.1 Lite'){throw 'Navigation handoff observation rejected'}
- if($r.pluginFocusObserved-cne$true -or $r.timelineFocusObserved-cne$true -or $r.scrollFramePublic-cne$true){throw 'Required focus/ScrollFrame observation missing'}
- Write-Output "PASS_NAVIGATION_HANDOFF_OBSERVATION preview_probe_usable=$($r.previewPixelProbeUsable) focus_updates_preview=$($r.timelineFocusUpdatesPreview) scrollframe_moves_viewport=$($r.scrollFrameMovesViewport)"
+ if($r.pluginFocusObserved-cne$true -or $r.scrollFramePublic-cne$true -or $r.containFrameInViewportPublic-cne$true){throw 'Required plugin-focus / public viewport observation missing'}
+ Write-Output "PASS_NAVIGATION_HANDOFF_OBSERVATION preview_probe_usable=$($r.previewPixelProbeUsable) real_click_updates_preview=$($r.realTimelineClickUpdatesPreview) programmatic_focus_updates_preview=$($r.programmaticFocusUpdatesPreview) scrollframe_moves_viewport=$($r.scrollFrameMovesViewport)"
 }finally{
  if(-not$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
  Remove-Item Env:CNWL_YMM4_NAV_HANDOFF_DIR,Env:CNWL_YMM4_NAV_HANDOFF_MEDIA -ErrorAction SilentlyContinue
