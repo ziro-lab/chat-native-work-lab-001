@@ -12,109 +12,220 @@ namespace Ymm4LoopSurfaceProbe;
 
 public sealed class PluginEntry : ILocalizePlugin
 {
-    public string Name=>"Chat Native Work Lab — Recording Archive Loop Surface";
-    public void SetCulture(CultureInfo cultureInfo)=>Probe.Schedule();
+    public string Name => "Chat Native Work Lab — Recording Archive Loop Surface";
+    public void SetCulture(CultureInfo cultureInfo) => Probe.Schedule();
 }
+
 internal static class Probe
 {
-    static bool scheduled; static string output="";
-    static readonly Dictionary<ushort,OpCode> Ops=typeof(OpCodes).GetFields(BindingFlags.Public|BindingFlags.Static).Where(f=>f.FieldType==typeof(OpCode)).Select(f=>(OpCode)f.GetValue(null)!).ToDictionary(o=>unchecked((ushort)o.Value));
+    private static bool scheduled;
+    private static string output = "";
+    private static readonly Dictionary<ushort, OpCode> Ops = typeof(OpCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.FieldType == typeof(OpCode))
+        .Select(f => (OpCode)f.GetValue(null)!)
+        .ToDictionary(o => unchecked((ushort)o.Value));
+
     public static void Schedule()
     {
-        var dir=Environment.GetEnvironmentVariable("CNWL_YMM4_LOOP_SURFACE_DIR");
-        if(scheduled||string.IsNullOrWhiteSpace(dir))return; scheduled=true; output=Path.GetFullPath(dir);Directory.CreateDirectory(output);
-        Application.Current.Dispatcher.BeginInvoke(new Action(Run),DispatcherPriority.ApplicationIdle);
+        var dir = Environment.GetEnvironmentVariable("CNWL_YMM4_LOOP_SURFACE_DIR");
+        if (scheduled || string.IsNullOrWhiteSpace(dir)) return;
+        scheduled = true;
+        output = Path.GetFullPath(dir);
+        Directory.CreateDirectory(output);
+        Application.Current.Dispatcher.BeginInvoke(new Action(Run), DispatcherPriority.ApplicationIdle);
     }
-    static void Run()
+
+    private static void Run()
     {
         try
         {
-            var video=new VideoItem{Length=600,ContentOffset=TimeSpan.Zero};
-            video.PlaybackRate2.SetFirstValue(100); video.PlaybackRate2.SetAnimationParameters(video.Length,60);
-            var mapProp=typeof(VideoItem).GetProperty("PlaybackRateMap",BindingFlags.Instance|BindingFlags.NonPublic)??throw new MissingMemberException("PlaybackRateMap");
-            var getSource=(object map)=>map.GetType().GetMethod("GetSourceTime",[typeof(TimeSpan),typeof(int),typeof(int),typeof(TimeSpan),typeof(TimeSpan)])??throw new MissingMethodException("GetSourceTime");
-            double[] Sample(bool loop)
-            {
-                video.IsLooped=loop; var map=mapProp.GetValue(video)??throw new Exception("map null"); var m=getSource(map);
-                return new[]{0d,1d,2d,3d,4d,5d,8d}.Select(t=>((TimeSpan)m.Invoke(map,[TimeSpan.FromSeconds(t),video.Length,60,TimeSpan.Zero,TimeSpan.FromSeconds(3)])!).TotalSeconds).ToArray();
-            }
-            var off=Sample(false); var on=Sample(true);
-            Append("MAP_LOOP_FALSE="+string.Join(",",off.Select(x=>x.ToString("R",CultureInfo.InvariantCulture))));
-            Append("MAP_LOOP_TRUE="+string.Join(",",on.Select(x=>x.ToString("R",CultureInfo.InvariantCulture))));
-            var mapSame=off.Zip(on).All(x=>Math.Abs(x.First-x.Second)<1e-9);
-            Append("PLAYBACK_RATE_MAP_IDENTICAL_WITH_LOOP_TOGGLE="+mapSame);
+            const int fps = 60;
+            var video = new VideoItem { Length = 600, ContentOffset = TimeSpan.Zero };
+            video.PlaybackRate2.SetFirstValue(100);
+            video.PlaybackRate2.SetAnimationParameters(video.Length, fps);
 
-            var refs=new List<(MethodInfo Method,List<string> Refs,List<string> Lines)>();
-            foreach(var asm in AppDomain.CurrentDomain.GetAssemblies().Where(a=>a.GetName().Name?.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)==true))
-            foreach(var type in SafeTypes(asm))
-            foreach(var method in type.GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly))
-            {
-                if(method.IsAbstract||method.ContainsGenericParameters)continue;
-                var d=Decode(method); if(d==null)continue;
-                if(d.Value.Refs.Any(r=>r.Contains("get_IsLooped",StringComparison.Ordinal)||r.Contains("isLooped",StringComparison.OrdinalIgnoreCase)))
-                    refs.Add((method,d.Value.Refs,d.Value.Lines));
-            }
-            var videoHits=refs.Where(x=>x.Method.DeclaringType?.FullName?.Contains("Player.Video.Items.VideoSource",StringComparison.Ordinal)==true).ToArray();
-            foreach(var hit in videoHits)
-            {
-                Append("=== VIDEO LOOP HIT "+Sig(hit.Method)+" ===");
-                foreach(var r in hit.Refs.Distinct()) Append("VIDEO_REF "+r);
-                foreach(var line in hit.Lines) Append("VIDEO_IL "+line);
-            }
-            foreach(var hit in refs.OrderBy(x=>x.Method.DeclaringType?.FullName).ThenBy(x=>x.Method.Name))
-            {
-                Append("=== LOOP HIT "+Sig(hit.Method)+" ===");
-                foreach(var r in hit.Refs.Distinct()) if(r.Contains("Loop",StringComparison.OrdinalIgnoreCase)||r.Contains("Content",StringComparison.OrdinalIgnoreCase)||r.Contains("PlaybackRate",StringComparison.OrdinalIgnoreCase)) Append("REF "+r);
-                foreach(var line in hit.Lines) Append("IL "+line);
-            }
-            var videoSource=AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes).FirstOrDefault(t=>t.FullName=="YukkuriMovieMaker.Player.Video.Items.VideoSource");
-            if(videoSource!=null)
-                foreach(var m in videoSource.GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static).Where(m=>m.Name.Contains("SourceTime",StringComparison.Ordinal)||m.Name=="Update"))
-                    Append("VIDEOSOURCE_METHOD "+Sig(m));
+            var mapProp = typeof(VideoItem).GetProperty("PlaybackRateMap", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new MissingMemberException("PlaybackRateMap");
+            var map = mapProp.GetValue(video) ?? throw new InvalidOperationException("map null");
+            var getSource = map.GetType().GetMethod("GetSourceTime",
+                [typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan)])
+                ?? throw new MissingMethodException("GetSourceTime");
 
-            Assert(mapSame,"PlaybackRateMap mapping itself is unchanged by IsLooped toggle");
-            Assert(refs.Count>0,"native YMM4 contains IsLooped references");
-            Append("VIDEO_SOURCE_LOOP_HITS="+videoHits.Length);
-            File.WriteAllLines(Path.Combine(output,"result.txt"),[
+            double[] MapSample(bool loop)
+            {
+                video.IsLooped = loop;
+                var current = mapProp.GetValue(video) ?? throw new InvalidOperationException("map null");
+                var method = current.GetType().GetMethod("GetSourceTime",
+                    [typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan)])
+                    ?? throw new MissingMethodException("GetSourceTime");
+                return new[] { 0d, 1d, 2d, 3d, 4d, 5d, 8d }
+                    .Select(t => ((TimeSpan)method.Invoke(current,
+                        [TimeSpan.FromSeconds(t), video.Length, fps, TimeSpan.Zero, TimeSpan.FromSeconds(3)])!).TotalSeconds)
+                    .ToArray();
+            }
+
+            var mapOff = MapSample(false);
+            var mapOn = MapSample(true);
+            var mapSame = mapOff.Zip(mapOn).All(x => Math.Abs(x.First - x.Second) < 1e-9);
+            Append("MAP_LOOP_FALSE=" + Join(mapOff));
+            Append("MAP_LOOP_TRUE=" + Join(mapOn));
+            Append("PLAYBACK_RATE_MAP_IDENTICAL_WITH_LOOP_TOGGLE=" + mapSame);
+
+            var videoSourceType = AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes)
+                .FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Player.Video.Items.VideoSource")
+                ?? throw new TypeLoadException("VideoSource missing");
+            var calculate = videoSourceType.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+                .SingleOrDefault(m => m.Name == "CalculateSourceTime" && m.GetParameters().Length == 8)
+                ?? throw new MissingMethodException("VideoSource.CalculateSourceTime");
+            Assert(calculate.IsStatic, "VideoSource.CalculateSourceTime is static and directly observable");
+
+            double Native(double itemSeconds, bool loop, double contentLength, double sourceDuration)
+            {
+                object?[] args =
+                [
+                    map, TimeSpan.FromSeconds(itemSeconds), video.Length, fps, TimeSpan.Zero,
+                    TimeSpan.FromSeconds(contentLength), loop, TimeSpan.FromSeconds(sourceDuration)
+                ];
+                var raw = calculate.Invoke(null, args);
+                return raw is TimeSpan value ? value.TotalSeconds : double.NaN;
+            }
+
+            var times = new[] { 0d, 1d, 2d, 2.9d, 3d, 3.1d, 4d, 5.9d, 6d, 8.9d };
+            var noLoopNative = times.Select(t => Native(t, false, 3, 3)).ToArray();
+            var loopOriginal = times.Select(t => Native(t, true, 3, 3)).ToArray();
+            var loopShortClip = times.Select(t => Native(t, true, 1, 1)).ToArray();
+            var loopLongSource = times.Select(t => Native(t, true, 3, 7)).ToArray();
+            var shorteningChanges = loopOriginal.Zip(loopShortClip).Any(x => Math.Abs(x.First - x.Second) > 1e-9);
+            var sourceDurationChanges = loopOriginal.Zip(loopLongSource).Any(x => Math.Abs(x.First - x.Second) > 1e-9);
+
+            Append("NATIVE_TIMES=" + Join(times));
+            Append("NATIVE_NO_LOOP_CONTENT3_SOURCE3=" + Join(noLoopNative));
+            Append("NATIVE_LOOP_CONTENT3_SOURCE3=" + Join(loopOriginal));
+            Append("NATIVE_LOOP_CONTENT1_SOURCE1=" + Join(loopShortClip));
+            Append("NATIVE_LOOP_CONTENT3_SOURCE7=" + Join(loopLongSource));
+            Append("SHORTENING_CHANGES_LOOP_MAPPING=" + shorteningChanges);
+            Append("SOURCE_DURATION_CHANGES_LOOP_MAPPING=" + sourceDurationChanges);
+
+            var refs = new List<(MethodInfo Method, List<string> Refs)>();
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies()
+                         .Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true))
+            foreach (var type in SafeTypes(asm))
+            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            {
+                if (method.IsAbstract || method.ContainsGenericParameters) continue;
+                var decoded = Decode(method);
+                if (decoded == null) continue;
+                if (decoded.Any(r => r.Contains("get_IsLooped", StringComparison.Ordinal) || r.Contains("isLooped", StringComparison.OrdinalIgnoreCase)))
+                    refs.Add((method, decoded));
+            }
+
+            var videoHits = refs.Where(x => x.Method.DeclaringType?.FullName == "YukkuriMovieMaker.Player.Video.Items.VideoSource").ToArray();
+            foreach (var hit in videoHits)
+            {
+                Append("VIDEO_LOOP_HIT=" + Sig(hit.Method));
+                foreach (var r in hit.Refs.Distinct()) Append("VIDEO_REF " + r);
+            }
+
+            Assert(mapSame, "PlaybackRateMap mapping itself is unchanged by IsLooped toggle");
+            Assert(refs.Count > 0, "native YMM4 contains IsLooped references");
+
+            File.WriteAllLines(Path.Combine(output, "result.txt"),
+            [
                 "status=PASS_LOOP_SURFACE_OBSERVATION",
-                "map_identical_with_loop_toggle="+mapSame,
-                "islooped_il_hit_count="+refs.Count,
-                "video_source_islooped_hit_count="+videoHits.Length,
-                "video_source_loop_methods="+string.Join(";",videoHits.Select(x=>Sig(x.Method)))
-            ],new UTF8Encoding(false));
-        }catch(Exception ex){Append("ERROR "+ex);File.WriteAllLines(Path.Combine(output,"result.txt"),["status=FAIL_EXCEPTION","detail="+ex.GetBaseException().Message],new UTF8Encoding(false));}
-    }
-    static (List<string> Lines,List<string> Refs)? Decode(MethodInfo method)
-    {
-        byte[]? b;try{b=method.GetMethodBody()?.GetILAsByteArray();}catch{return null;} if(b==null)return null;
-        var lines=new List<string>();var refs=new List<string>();int i=0;
-        while(i<b.Length)
-        {
-            int off=i;ushort code=b[i++];if(code==0xFE){if(i>=b.Length)break;code=(ushort)(0xFE00|b[i++]);}
-            if(!Ops.TryGetValue(code,out var op))break;string operand="";
-            switch(op.OperandType)
-            {
-                case OperandType.InlineNone:break;
-                case OperandType.ShortInlineI:case OperandType.ShortInlineVar:case OperandType.ShortInlineBrTarget:operand=b[i].ToString();i++;break;
-                case OperandType.InlineVar:operand=BitConverter.ToUInt16(b,i).ToString();i+=2;break;
-                case OperandType.InlineI:case OperandType.InlineBrTarget:operand=BitConverter.ToInt32(b,i).ToString();i+=4;break;
-                case OperandType.ShortInlineR:operand=BitConverter.ToSingle(b,i).ToString("R",CultureInfo.InvariantCulture);i+=4;break;
-                case OperandType.InlineI8:operand=BitConverter.ToInt64(b,i).ToString();i+=8;break;
-                case OperandType.InlineR:operand=BitConverter.ToDouble(b,i).ToString("R",CultureInfo.InvariantCulture);i+=8;break;
-                case OperandType.InlineSwitch:{var n=BitConverter.ToInt32(b,i);i+=4+4*n;operand="switch["+n+"]";break;}
-                case OperandType.InlineField:case OperandType.InlineMethod:case OperandType.InlineTok:case OperandType.InlineType:case OperandType.InlineString:case OperandType.InlineSig:
-                {
-                    var token=BitConverter.ToInt32(b,i);i+=4;operand=Resolve(method,token,op.OperandType);
-                    if(op.OperandType is OperandType.InlineField or OperandType.InlineMethod or OperandType.InlineTok or OperandType.InlineType)refs.Add(operand);break;
-                }
-            }
-            lines.Add($"{off:X4}: {op.Name}{(operand.Length>0?" "+operand:"")}");
+                "map_identical_with_loop_toggle=" + mapSame,
+                "islooped_il_hit_count=" + refs.Count,
+                "video_source_islooped_hit_count=" + videoHits.Length,
+                "shortening_changes_loop_mapping=" + shorteningChanges,
+                "source_duration_changes_loop_mapping=" + sourceDurationChanges,
+                "native_loop_original=" + Join(loopOriginal),
+                "native_loop_short_clip=" + Join(loopShortClip)
+            ], new UTF8Encoding(false));
         }
-        return(lines,refs);
+        catch (Exception ex)
+        {
+            Append("ERROR " + ex);
+            File.WriteAllLines(Path.Combine(output, "result.txt"),
+                ["status=FAIL_EXCEPTION", "detail=" + ex.GetBaseException().Message], new UTF8Encoding(false));
+        }
     }
-    static string Resolve(MethodInfo m,int token,OperandType kind){try{if(kind==OperandType.InlineString)return "string:"+m.Module.ResolveString(token);if(kind==OperandType.InlineSig)return "sig";var mem=m.Module.ResolveMember(token,m.DeclaringType?.IsGenericType==true?m.DeclaringType.GetGenericArguments():Type.EmptyTypes,m.IsGenericMethod?m.GetGenericArguments():Type.EmptyTypes);return mem==null?$"token:{token:X8}":(mem.DeclaringType?.FullName??mem.Module.Name)+"::"+mem.Name+" "+mem;}catch{return $"token:{token:X8}";}}
-    static Type[] SafeTypes(Assembly a){try{return a.GetTypes();}catch(ReflectionTypeLoadException e){return e.Types.Where(t=>t!=null).Cast<Type>().ToArray();}}
-    static string Sig(MethodInfo m)=>(m.DeclaringType?.FullName??"<global>")+"::"+m.Name+"("+string.Join(",",m.GetParameters().Select(p=>p.ParameterType.FullName))+")";
-    static void Assert(bool ok,string name){if(!ok)throw new Exception("ASSERT FAIL: "+name);Append("ASSERT PASS: "+name);}
-    static void Append(string s)=>File.AppendAllText(Path.Combine(output,"loop-surface.txt"),s+Environment.NewLine,new UTF8Encoding(false));
+
+    private static string Join(IEnumerable<double> values) =>
+        string.Join(",", values.Select(x => x.ToString("R", CultureInfo.InvariantCulture)));
+
+    private static List<string>? Decode(MethodInfo method)
+    {
+        byte[]? bytes;
+        try { bytes = method.GetMethodBody()?.GetILAsByteArray(); } catch { return null; }
+        if (bytes == null) return null;
+        var refs = new List<string>();
+        var i = 0;
+        while (i < bytes.Length)
+        {
+            ushort code = bytes[i++];
+            if (code == 0xFE)
+            {
+                if (i >= bytes.Length) break;
+                code = (ushort)(0xFE00 | bytes[i++]);
+            }
+            if (!Ops.TryGetValue(code, out var op)) break;
+            switch (op.OperandType)
+            {
+                case OperandType.InlineNone: break;
+                case OperandType.ShortInlineI:
+                case OperandType.ShortInlineVar:
+                case OperandType.ShortInlineBrTarget: i += 1; break;
+                case OperandType.InlineVar: i += 2; break;
+                case OperandType.InlineI:
+                case OperandType.InlineBrTarget:
+                case OperandType.ShortInlineR: i += 4; break;
+                case OperandType.InlineI8:
+                case OperandType.InlineR: i += 8; break;
+                case OperandType.InlineSwitch:
+                    var n = BitConverter.ToInt32(bytes, i); i += 4 + 4 * n; break;
+                case OperandType.InlineField:
+                case OperandType.InlineMethod:
+                case OperandType.InlineTok:
+                case OperandType.InlineType:
+                case OperandType.InlineString:
+                case OperandType.InlineSig:
+                    var token = BitConverter.ToInt32(bytes, i); i += 4;
+                    if (op.OperandType is OperandType.InlineField or OperandType.InlineMethod or OperandType.InlineTok or OperandType.InlineType)
+                        refs.Add(Resolve(method, token));
+                    break;
+            }
+        }
+        return refs;
+    }
+
+    private static string Resolve(MethodInfo method, int token)
+    {
+        try
+        {
+            var member = method.Module.ResolveMember(token,
+                method.DeclaringType?.IsGenericType == true ? method.DeclaringType.GetGenericArguments() : Type.EmptyTypes,
+                method.IsGenericMethod ? method.GetGenericArguments() : Type.EmptyTypes);
+            return member == null ? $"token:{token:X8}" : (member.DeclaringType?.FullName ?? member.Module.Name) + "::" + member.Name + " " + member;
+        }
+        catch { return $"token:{token:X8}"; }
+    }
+
+    private static Type[] SafeTypes(Assembly assembly)
+    {
+        try { return assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t != null).Cast<Type>().ToArray(); }
+    }
+
+    private static string Sig(MethodInfo method) =>
+        (method.DeclaringType?.FullName ?? "<global>") + "::" + method.Name + "(" +
+        string.Join(",", method.GetParameters().Select(p => p.ParameterType.FullName)) + ")";
+
+    private static void Assert(bool condition, string name)
+    {
+        if (!condition) throw new InvalidOperationException("ASSERT FAIL: " + name);
+        Append("ASSERT PASS: " + name);
+    }
+
+    private static void Append(string line) =>
+        File.AppendAllText(Path.Combine(output, "loop-surface.txt"), line + Environment.NewLine, new UTF8Encoding(false));
 }
