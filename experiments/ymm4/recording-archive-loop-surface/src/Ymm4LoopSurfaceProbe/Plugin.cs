@@ -54,13 +54,19 @@ internal static class Probe
                 if(d.Value.Refs.Any(r=>r.Contains("get_IsLooped",StringComparison.Ordinal)||r.Contains("isLooped",StringComparison.OrdinalIgnoreCase)))
                     refs.Add((method,d.Value.Refs,d.Value.Lines));
             }
+            var videoHits=refs.Where(x=>x.Method.DeclaringType?.FullName?.Contains("Player.Video.Items.VideoSource",StringComparison.Ordinal)==true).ToArray();
+            foreach(var hit in videoHits)
+            {
+                Append("=== VIDEO LOOP HIT "+Sig(hit.Method)+" ===");
+                foreach(var r in hit.Refs.Distinct()) Append("VIDEO_REF "+r);
+                foreach(var line in hit.Lines) Append("VIDEO_IL "+line);
+            }
             foreach(var hit in refs.OrderBy(x=>x.Method.DeclaringType?.FullName).ThenBy(x=>x.Method.Name))
             {
                 Append("=== LOOP HIT "+Sig(hit.Method)+" ===");
                 foreach(var r in hit.Refs.Distinct()) if(r.Contains("Loop",StringComparison.OrdinalIgnoreCase)||r.Contains("Content",StringComparison.OrdinalIgnoreCase)||r.Contains("PlaybackRate",StringComparison.OrdinalIgnoreCase)) Append("REF "+r);
                 foreach(var line in hit.Lines) Append("IL "+line);
             }
-            var videoHits=refs.Where(x=>x.Method.DeclaringType?.FullName?.Contains("Player.Video.Items.VideoSource",StringComparison.Ordinal)==true).ToArray();
             var videoSource=AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes).FirstOrDefault(t=>t.FullName=="YukkuriMovieMaker.Player.Video.Items.VideoSource");
             if(videoSource!=null)
                 foreach(var m in videoSource.GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static).Where(m=>m.Name.Contains("SourceTime",StringComparison.Ordinal)||m.Name=="Update"))
@@ -73,7 +79,8 @@ internal static class Probe
                 "status=PASS_LOOP_SURFACE_OBSERVATION",
                 "map_identical_with_loop_toggle="+mapSame,
                 "islooped_il_hit_count="+refs.Count,
-                "video_source_islooped_hit_count="+videoHits.Length
+                "video_source_islooped_hit_count="+videoHits.Length,
+                "video_source_loop_methods="+string.Join(";",videoHits.Select(x=>Sig(x.Method)))
             ],new UTF8Encoding(false));
         }catch(Exception ex){Append("ERROR "+ex);File.WriteAllLines(Path.Combine(output,"result.txt"),["status=FAIL_EXCEPTION","detail="+ex.GetBaseException().Message],new UTF8Encoding(false));}
     }
