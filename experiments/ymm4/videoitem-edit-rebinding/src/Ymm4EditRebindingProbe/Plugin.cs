@@ -10,6 +10,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -61,8 +62,10 @@ internal static class Probe
     private static class Native
     {
         [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x,int y);
+        [DllImport("user32.dll")] internal static extern void mouse_event(uint flags,uint dx,uint dy,uint data,nuint extra);
         [DllImport("user32.dll")] internal static extern void keybd_event(byte vk,byte scan,uint flags,nuint extra);
-        internal const uint KeyUp=0x0002;
+        internal const uint MouseDown=0x0002,MouseUp=0x0004,KeyUp=0x0002;
     }
 
     public static void Schedule()
@@ -186,7 +189,12 @@ internal static class Probe
         timeline.CurrentFrame=undoSource.Frame+240;
         var mainWindow=Application.Current.Windows.Cast<Window>().First(w=>ReferenceEquals(w.DataContext,main));
         mainWindow.WindowState=WindowState.Maximized;mainWindow.Activate();Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
-        await Task.Delay(500);
+        await Task.Delay(600);
+        var timelineElement=FindTimelineElement(mainWindow,active)??throw new InvalidOperationException("Timeline visual not found.");
+        await ClickCenterAsync(timelineElement);
+        timeline.SelectedItems=ImmutableList.Create<IItem>(undoSource);
+        timeline.CurrentFrame=undoSource.Frame+240;
+        await Task.Delay(250);
         await ChordAsync(0x11,0x42); // Ctrl+B
         var afterSplit=FindByRemark(timeline,"UNDO_SPLIT").OrderBy(x=>x.Frame).ToArray();
         Check("keyboard_split_created",afterSplit.Length==2&&!afterSplit.Any(x=>ReferenceEquals(x,undoSource)));
@@ -239,6 +247,31 @@ internal static class Probe
         Native.keybd_event(key,0,0,0);await Task.Delay(40);
         Native.keybd_event(key,0,Native.KeyUp,0);Native.keybd_event(modifier,0,Native.KeyUp,0);
         await Task.Delay(450);
+    }
+
+    private static FrameworkElement? FindTimelineElement(DependencyObject root,object active)
+        => Elements(root).Where(fe=>fe.IsVisible&&fe.ActualWidth>100&&fe.ActualHeight>60
+            &&(ReferenceEquals(fe.DataContext,active)||fe.GetType().Name.Equals("TimelineView",StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(fe=>fe.ActualWidth*fe.ActualHeight).FirstOrDefault();
+
+    private static IEnumerable<FrameworkElement> Elements(DependencyObject root)
+    {
+        if(root is FrameworkElement fe)yield return fe;
+        int count=0;try{count=VisualTreeHelper.GetChildrenCount(root);}catch{}
+        for(int i=0;i<count;i++)
+        {
+            DependencyObject? child=null;try{child=VisualTreeHelper.GetChild(root,i);}catch{}
+            if(child==null)continue;
+            foreach(var nested in Elements(child))yield return nested;
+        }
+    }
+
+    private static async Task ClickCenterAsync(FrameworkElement fe)
+    {
+        var p=fe.PointToScreen(new Point(fe.ActualWidth*0.5,Math.Min(fe.ActualHeight-20,Math.Max(20,fe.ActualHeight*0.5))));
+        Native.SetCursorPos((int)Math.Round(p.X),(int)Math.Round(p.Y));await Task.Delay(80);
+        Native.mouse_event(Native.MouseDown,0,0,0,0);await Task.Delay(50);Native.mouse_event(Native.MouseUp,0,0,0,0);
+        await Task.Delay(300);
     }
 
     private static Timeline? FindTimelineGraph(object main,object active)
