@@ -190,6 +190,10 @@ internal static class NavigationProbe
             var visibleCount=publicSurface.Count(x=>x.Contains("VISIBLE_RANGE_CANDIDATE",StringComparison.Ordinal)||x.Contains("VIEWPORT_CANDIDATE",StringComparison.Ordinal));
             var focusService=active.GetType().GetProperty("FocusService",BindingFlags.Instance|BindingFlags.Public)?.GetValue(active);
             var focusServiceSurface=focusService==null?[]:DescribePublicMembers(focusService.GetType()).ToArray();
+            var focusRequestedEvent=focusService?.GetType().GetEvent("FocusRequested",BindingFlags.Instance|BindingFlags.Public);
+            var focusRequestCount=0;
+            EventHandler? focusRequestHandler=(_,_)=>focusRequestCount++;
+            if(focusRequestedEvent?.EventHandlerType==typeof(EventHandler)) focusRequestedEvent.AddEventHandler(focusService,focusRequestHandler);
             File.WriteAllLines(Path.Combine(OutDir,"focus-service.txt"),focusServiceSurface,new UTF8Encoding(false));
 
             if(scrollFrame!=null)scrollFrame.Invoke(active,[redFrame]); else scrollToItem?.Invoke(active,[video]);
@@ -204,13 +208,17 @@ internal static class NavigationProbe
             Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(250);
             var pluginFocus=ReferenceEquals(Keyboard.FocusedElement,button)||button.IsKeyboardFocusWithin;
 
+            var focusRequestsBeforeDirect=focusRequestCount;
             t.CurrentFrame=greenFrame;t.SelectItem(video);await Task.Delay(900);
+            var focusRequestsAfterDirect=focusRequestCount;
             var afterDirect=CapturePreview(preview);
             var directUpdated=afterDirect.IsGreen;
 
             var frameBeforeClick=t.CurrentFrame;
+            var focusRequestsBeforeRealClick=focusRequestCount;
             main.Activate();Native.SetForegroundWindow(new WindowInteropHelper(main).Handle);
             await Click(itemElement);await Task.Delay(1000);
+            var focusRequestsAfterRealClick=focusRequestCount;
             var frameChanged=t.CurrentFrame!=frameBeforeClick;
             var focusTarget=Keyboard.FocusedElement as IInputElement;
             var focusDo=focusTarget as DependencyObject;
@@ -239,19 +247,31 @@ internal static class NavigationProbe
                      m.Name.Equals("RequestFocus",StringComparison.OrdinalIgnoreCase)||
                      m.Name.Equals("SetFocus",StringComparison.OrdinalIgnoreCase)))
                 .OrderBy(m=>m.Name,StringComparer.Ordinal).FirstOrDefault();
-            var focusServiceInvoked=false;var focusServiceKeyboardTarget="<not-invoked>";
+            var focusServiceInvoked=false;var focusServiceKeyboardTarget="<not-invoked>";var focusServiceKeyboardRoute="<not-invoked>";
+            var focusRequestsBeforeExplicit=focusRequestCount;
             if(focusServiceCandidate!=null){
                 Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(150);
                 t.CurrentFrame=greenFrame;t.SelectItem(video);await Task.Delay(250);
                 try{
                     focusServiceCandidate.Invoke(focusService,null);focusServiceInvoked=true;await Task.Delay(600);
                     focusServiceKeyboardTarget=Keyboard.FocusedElement?.GetType().FullName??"<null>";
+                    focusServiceKeyboardRoute=DescribeRoute(Keyboard.FocusedElement as DependencyObject);
                 }catch(Exception ex){focusServiceKeyboardTarget="THROW:"+ex.GetBaseException().GetType().FullName+":"+ex.GetBaseException().Message;}
             }
+            var focusRequestsAfterExplicit=focusRequestCount;
             File.AppendAllLines(Path.Combine(OutDir,"focus-service.txt"),[
+                $"focus_requests_before_direct={focusRequestsBeforeDirect}",
+                $"focus_requests_after_direct={focusRequestsAfterDirect}",
+                $"focus_requests_before_real_click={focusRequestsBeforeRealClick}",
+                $"focus_requests_after_real_click={focusRequestsAfterRealClick}",
+                $"real_click_requested_focus={focusRequestsAfterRealClick>focusRequestsBeforeRealClick}",
                 $"candidate={focusServiceCandidate?.Name??"<none>"}",
                 $"invoked={focusServiceInvoked}",
-                $"keyboard_target_after_invoke={focusServiceKeyboardTarget}"
+                $"focus_requests_before_explicit={focusRequestsBeforeExplicit}",
+                $"focus_requests_after_explicit={focusRequestsAfterExplicit}",
+                $"explicit_focus_raised_request={focusRequestsAfterExplicit>focusRequestsBeforeExplicit}",
+                $"keyboard_target_after_invoke={focusServiceKeyboardTarget}",
+                $"keyboard_route_after_invoke={focusServiceKeyboardRoute}"
             ],new UTF8Encoding(false));
 
             if(scrollFrame!=null)scrollFrame.Invoke(active,[redFrame]);await Task.Delay(500);
@@ -287,6 +307,8 @@ internal static class NavigationProbe
                 scrollFrame!=null,containFrame!=null,nearContainsNear,nearContainsFar,directFarContains,afterScrollContains,scrollMoves,scrollMovesFrame,directMoves,
                 visibleCount,publicSurface,null);
             File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(result,new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
+            if(focusRequestedEvent?.EventHandlerType==typeof(EventHandler)&&focusRequestHandler!=null)
+                focusRequestedEvent.RemoveEventHandler(focusService,focusRequestHandler);
         }catch(Exception ex){Fail(ex.ToString());}
     }
 
@@ -300,6 +322,16 @@ internal static class NavigationProbe
         var b=GetBox(element);if(!b.Valid)throw new InvalidOperationException("Click target geometry invalid");
         Native.SetCursorPos(b.CenterX,b.CenterY);await Task.Delay(100);Native.mouse_event(Native.LD,0,0,0,0);await Task.Delay(60);Native.mouse_event(Native.LU,0,0,0,0);
     }
+    static string DescribeRoute(DependencyObject? source)
+    {
+        var parts=new List<string>();var current=source;
+        for(var i=0;i<12&&current!=null;i++){
+            parts.Add(current.GetType().FullName+"[dc="+((current as FrameworkElement)?.DataContext?.GetType().FullName??"<null>")+"]");
+            current=Parent(current);
+        }
+        return string.Join("<-",parts);
+    }
+
     static bool IsWithin(DependencyObject d,DependencyObject root)
     {
         for(var x=d;x!=null;x=Parent(x))if(ReferenceEquals(x,root))return true;return false;
