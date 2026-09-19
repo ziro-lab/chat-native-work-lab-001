@@ -6,7 +6,7 @@ Is the apparent 8x preview-speed limit in YMM4 an actual playback-engine limit, 
 
 ## Status
 
-**Baseline observation recorded; public-Lab native UI-structure proof PASS; full playback-path reproduction still pending.**
+**Baseline observation recorded; public-Lab native UI-structure proof PASS; x32 overflow/restart boundary probe PASS; full playback/audio-path reproduction still pending.**
 
 - Date: 2026-09-16
 - YMM4 version inspected: **v4.56.1.0**
@@ -61,6 +61,22 @@ This establishes that, in the inspected build, the visible speed selector is an 
 In an interactive YMM4 session, continuing the normal playback-speed-up operation after the UI-visible 8x point made playback **clearly faster than 8x**, while audio continued to follow the accelerated preview.
 
 The user also observed that the high-speed preview remained perceptually much smoother than expected for such a large rate increase.
+
+### Public-Lab x32 overflow / restart observation
+
+A dedicated real-host probe tested the setting boundary above x32 without installing the downstream plugin.
+
+The synthetic Windows `Ctrl+.` route was first validated with `PlaybackRate 126 -> 127`, then the same native YMM4 speed-up route was invoked three more times.
+
+Observed setting sequence:
+
+```text
+126 -> 127 -> 128 -> 129 -> 130
+```
+
+The live setting also accepted a direct value of 128. YMM4 was then closed through its normal main-window close path with 128 left in place. On relaunch, `PlaybackRate=128` was loaded again and the native 32-item selector initialized with `SelectedIndex=-1` / blank selected text.
+
+See [OVERFLOW_BOUNDARY.md](OVERFLOW_BOUNDARY.md) for the exact run, artifact, hashes, PASS boundary and lifecycle distinction between an already-materialized selector and a fresh restart.
 
 ## Current interpretation
 
