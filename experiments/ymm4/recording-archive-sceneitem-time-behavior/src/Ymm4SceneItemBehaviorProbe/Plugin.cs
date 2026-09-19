@@ -48,24 +48,26 @@ internal static class Probe
                 {
                     var root = window.DataContext;
                     if (root?.GetType().FullName != "YukkuriMovieMaker.ViewModels.MainViewModel") continue;
-                    var active = root.GetType().GetProperty("ActiveTimelineViewModel")?.GetValue(root);
-                    if (active == null)
+                    var model = root.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(root);
+                    if (model == null) continue;
+                    var scenes = model.GetType().GetProperty("Scenes", BindingFlags.Instance | BindingFlags.Public)?.GetValue(model) as Scenes;
+                    var main = scenes?.Timelines.FirstOrDefault();
+                    if (main != null)
                     {
-                        if (ticks - lastCreateAttempt >= 8)
-                        {
-                            lastCreateAttempt = ticks;
-                            root.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(root, null);
-                        }
-                        break;
+                        timer.Stop();
+                        await RunAsync(model, main);
+                        return;
                     }
 
-                    var model = root.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(root);
-                    var main = active.GetType().GetField("timeline", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(active) as Timeline;
-                    if (model == null || main == null) continue;
-
-                    timer.Stop();
-                    await RunAsync(model, main);
-                    return;
+                    if (ticks - lastCreateAttempt >= 8)
+                    {
+                        lastCreateAttempt = ticks;
+                        var create = root.GetType().GetMethod("CreateProject", Type.EmptyTypes)
+                            ?? throw new MissingMethodException("MainViewModel.CreateProject");
+                        create.Invoke(root, null);
+                        Append($"CREATE_PROJECT_RETRY tick={ticks}");
+                    }
+                    break;
                 }
 
                 if (ticks >= 180) throw new TimeoutException("YMM4 timeline did not become ready.");
