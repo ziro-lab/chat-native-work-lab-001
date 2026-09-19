@@ -1,0 +1,107 @@
+name: YMM4 Recording Archive boundaries round 3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/recording-archive-boundaries-round3]
+    paths:
+      - 'experiments/ymm4/recording-archive-relative-path-portability/**'
+      - 'experiments/ymm4/recording-archive-zero-eof-boundary/**'
+      - 'experiments/ymm4/recording-archive-loop-surface/**'
+      - 'experiments/ymm4/recording-archive-map-validation-perf/**'
+      - '.github/workflows/ymm4-recording-archive-boundaries-round3.yml'
+  pull_request:
+    paths:
+      - 'experiments/ymm4/recording-archive-relative-path-portability/**'
+      - 'experiments/ymm4/recording-archive-zero-eof-boundary/**'
+      - 'experiments/ymm4/recording-archive-loop-surface/**'
+      - 'experiments/ymm4/recording-archive-map-validation-perf/**'
+      - '.github/workflows/ymm4-recording-archive-boundaries-round3.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-recording-archive-boundaries-r3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-boundaries:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK missing' }
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 exe missing.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate safe synthetic media fixture with bundled FFmpeg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/fixture | Out-Null
+          $ff=Get-ChildItem $env:YMM4_DIR -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if(-not $ff){throw 'Bundled ffmpeg missing'}
+          & $ff.FullName -hide_banner -loglevel error -f lavfi -i "testsrc2=size=320x180:rate=60" -f lavfi -i "sine=frequency=997:sample_rate=48000" -t 3 -c:v libx264 -g 60 -keyint_min 60 -pix_fmt yuv420p -c:a aac -shortest out/fixture/clock.mp4
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path out/fixture/clock.mp4)){throw 'Fixture generation failed'}
+      - name: Build and install probes
+        shell: pwsh
+        run: |
+          $cases=@(
+            @('relative','experiments/ymm4/recording-archive-relative-path-portability/src/Ymm4RelativePathPortabilityProbe/Ymm4RelativePathPortabilityProbe.csproj','Ymm4RelativePathPortabilityProbe'),
+            @('eof','experiments/ymm4/recording-archive-zero-eof-boundary/src/Ymm4ZeroEofProbe/Ymm4ZeroEofProbe.csproj','Ymm4ZeroEofProbe'),
+            @('loop','experiments/ymm4/recording-archive-loop-surface/src/Ymm4LoopSurfaceProbe/Ymm4LoopSurfaceProbe.csproj','Ymm4LoopSurfaceProbe'),
+            @('perf','experiments/ymm4/recording-archive-map-validation-perf/src/Ymm4MapValidationPerfProbe/Ymm4MapValidationPerfProbe.csproj','Ymm4MapValidationPerfProbe')
+          )
+          foreach($c in $cases){
+            $out="out/build-$($c[0])";New-Item -ItemType Directory -Force $out|Out-Null
+            dotnet build $c[1] -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o $out --nologo -warnaserror 2>&1 | Tee-Object "$out/build.txt"
+            if($LASTEXITCODE -ne 0){throw "Build failed: $($c[0])"}
+            $dest=Join-Path $env:YMM4_DIR ("user\plugin\"+$c[2]);New-Item -ItemType Directory -Force $dest|Out-Null
+            Copy-Item (Join-Path $out ($c[2]+'.dll')) $dest
+          }
+      - name: Relative-path portability observation
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-relative-path-portability/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-relative') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
+      - name: Zero-percent EOF boundary observation
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-zero-eof-boundary/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-eof') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
+      - name: Loop playback surface observation
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-loop-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-loop')
+      - name: All-frame map-validation cost observation
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-map-validation-perf/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-perf')
+      - name: Print bounded evidence
+        if: always()
+        shell: pwsh
+        run: |
+          foreach($dir in @('out/evidence-relative','out/evidence-eof','out/evidence-loop','out/evidence-perf')){
+            if(Test-Path $dir){Write-Host "=== $dir ===";Get-ChildItem $dir -File|ForEach-Object{Write-Host "--- $($_.Name) ---";Get-Content $_.FullName|Select-Object -First 300}}
+          }
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-recording-archive-boundaries-round3
+          path: |
+            out/evidence-*/
+            out/build-*/build.txt
+            out/fixture/clock.mp4
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14
