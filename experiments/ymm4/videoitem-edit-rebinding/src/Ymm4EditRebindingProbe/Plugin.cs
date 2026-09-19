@@ -60,11 +60,14 @@ internal static class Probe
 
     private static Timeline FindTimeline(object active)
     {
+        var exact=active.GetType().GetProperty("Timeline",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
+        try{if(exact?.GetValue(active) is Timeline direct)return direct;}catch{}
         foreach(var p in active.GetType().GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
         {
-            if(p.GetIndexParameters().Length!=0||!typeof(Timeline).IsAssignableFrom(p.PropertyType))continue;
+            if(p.GetIndexParameters().Length!=0)continue;
             try{if(p.GetValue(active) is Timeline t)return t;}catch{}
         }
+        File.WriteAllLines(Path.Combine(output,"active-pre-timeline.txt"),active.GetType().GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).Select(p=>$"{p.Name} : {p.PropertyType.FullName}"));
         throw new MissingMemberException("Timeline not found.");
     }
 
