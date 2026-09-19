@@ -48,8 +48,8 @@ try{
  $r=Get-Content -Raw $result|ConvertFrom-Json
  Get-Content $result
  if($r.schema-cne'cnwl.timeline-playback-start-sync.v1'-or$r.status-cne'PASS_PLAYBACK_START_SYNC_OBSERVATION'-or$r.host-cne'4.55.1.1 Lite'){throw 'Playback sync observation rejected'}
- if(@($r.programmatic.playbackFrames).Count-lt1 -or @($r.ruler.playbackFrames).Count-lt1){throw 'Playback trace missing'}
- Write-Output "PASS_PLAYBACK_START_SYNC_OBSERVATION programmatic_near=$($r.programmatic.startedNearDisplayedFrame) ruler_near=$($r.ruler.startedNearDisplayedFrame)"
+ if(@($r.timelineOnly.playbackFrames).Count-lt1 -or @($r.timelinePlusSeek.playbackFrames).Count-lt1 -or @($r.ruler.playbackFrames).Count-lt1){throw 'Playback trace missing'}
+ Write-Output "PASS_PLAYBACK_START_SYNC_OBSERVATION timeline_only_near=$($r.timelineOnly.startedNearDisplayedFrame) timeline_plus_seek_near=$($r.timelinePlusSeek.startedNearDisplayedFrame) ruler_near=$($r.ruler.startedNearDisplayedFrame)"
 }finally{
  if(-not$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
  Remove-Item Env:CNWL_YMM4_PLAYBACK_SYNC_DIR -ErrorAction SilentlyContinue

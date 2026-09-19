@@ -101,8 +101,10 @@ internal static class Native
     internal const uint LD=0x0002,LU=0x0004;
 }
 
-internal sealed record PlaybackCase(string name,int displayedFrame,int firstPlaybackFrame,int[] playbackFrames,bool startedNearDisplayedFrame,Dictionary<string,string> beforeState,Dictionary<string,string> afterNavigateState);
-internal sealed record Result(string schema,string status,string host,string playbackTrigger,PlaybackCase programmatic,PlaybackCase ruler,string[] previewSurface,string? error);
+internal sealed record PlaybackCase(string name,int displayedFrame,int firstPlaybackFrame,int[] playbackFrames,bool startedNearDisplayedFrame,
+    Dictionary<string,string> beforeState,Dictionary<string,string> afterNavigateState,Dictionary<string,string> afterSyncState);
+internal sealed record Result(string schema,string status,string host,string playbackTrigger,string syncRoute,
+    PlaybackCase timelineOnly,PlaybackCase timelinePlusSeek,PlaybackCase ruler,string[] previewSurface,string? error);
 
 internal static class PlaybackProbe
 {
@@ -117,8 +119,8 @@ internal static class PlaybackProbe
     {
         try{
             Directory.CreateDirectory(OutDir);File.WriteAllText(Path.Combine(OutDir,"error.txt"),error,new UTF8Encoding(false));
-            var e=new PlaybackCase("error",0,0,[],false,[],[]);
-            File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(new Result("cnwl.timeline-playback-start-sync.v1","FAIL_EXCEPTION","4.55.1.1 Lite","",e,e,[],error),new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
+            var e=new PlaybackCase("error",0,0,[],false,[],[],[]);
+            File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(new Result("cnwl.timeline-playback-start-sync.v1","FAIL_EXCEPTION","4.55.1.1 Lite","","",e,e,e,[],error),new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
         }catch{}
     }
 
@@ -146,21 +148,41 @@ internal static class PlaybackProbe
             var surface=DescribeSurface(previewVm).ToArray();
             File.WriteAllLines(Path.Combine(OutDir,"preview-surface.txt"),surface,new UTF8Encoding(false));
 
-            var (playCommand,playName)=FindPlayCommand(previewVm);
-            if(playCommand==null)throw new InvalidOperationException("No executable public/visible Play command found. See preview-surface.txt.");
-            File.WriteAllText(Path.Combine(OutDir,"trigger.txt"),playName,new UTF8Encoding(false));
+            var togglePlay=previewVm.GetType().GetMethod("TogglePlayAsync",BindingFlags.Instance|BindingFlags.Public,null,Type.EmptyTypes,null)
+                ??throw new InvalidOperationException("PreviewViewModel.TogglePlayAsync() not found");
+            var stop=previewVm.GetType().GetMethod("StopAsync",BindingFlags.Instance|BindingFlags.Public,null,Type.EmptyTypes,null)
+                ??throw new InvalidOperationException("PreviewViewModel.StopAsync() not found");
+            var seek=previewVm.GetType().GetMethod("SeekAsync",BindingFlags.Instance|BindingFlags.Public,null,[typeof(int)],null)
+                ??throw new InvalidOperationException("PreviewViewModel.SeekAsync(int) not found");
+            var playName="PreviewViewModel.TogglePlayAsync()";
+            var syncName="PreviewViewModel.SeekAsync(int)";
+            File.WriteAllText(Path.Combine(OutDir,"trigger.txt"),playName+"\n"+syncName,new UTF8Encoding(false));
 
             if(t is INotifyPropertyChanged npc)npc.PropertyChanged+=TimelineChanged;
-
-            // Case A: plugin owns focus; only public Timeline state is changed.
             var button=ProbeView.Current?.FocusTarget??throw new InvalidOperationException("Probe focus target missing");
-            Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(200);
+
+            // Case A: Tool focus + Timeline.CurrentFrame only.
+            await InvokeTask(seek,previewVm,0);await Task.Delay(250);
+            Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(150);
             var beforeA=State(previewVm);
             t.CurrentFrame=voice.Frame;t.SelectItem(voice);await Task.Delay(250);
             var afterA=State(previewVm);
-            var program=await MeasurePlayback("programmatic",t.CurrentFrame,playCommand);
+            var timelineOnly=await MeasurePlayback("timeline-only",t.CurrentFrame,previewVm,togglePlay,stop);
+            timelineOnly=timelineOnly with{beforeState=beforeA,afterNavigateState=afterA,afterSyncState=afterA};
 
-            // Case B: real ruler click establishes a native host position, then start playback.
+            // Case B: same Tool-focus navigation, then the public Preview seek surface.
+            await InvokeTask(seek,previewVm,0);await Task.Delay(250);
+            Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(150);
+            var beforeSeek=State(previewVm);
+            t.CurrentFrame=voice.Frame;t.SelectItem(voice);await Task.Delay(200);
+            var afterTimeline=State(previewVm);
+            await InvokeTask(seek,previewVm,voice.Frame);await Task.Delay(350);
+            var afterSeek=State(previewVm);
+            var timelinePlusSeek=await MeasurePlayback("timeline-plus-seek",t.CurrentFrame,previewVm,togglePlay,stop);
+            timelinePlusSeek=timelinePlusSeek with{beforeState=beforeSeek,afterNavigateState=afterTimeline,afterSyncState=afterSeek};
+
+            // Case C: real ruler click as native-control behavior.
+            await InvokeTask(seek,previewVm,0);await Task.Delay(250);
             var active=timelineView.DataContext;
             var scrollFrame=active?.GetType().GetMethod("ScrollFrame",BindingFlags.Instance|BindingFlags.Public,null,[typeof(int)],null);
             scrollFrame?.Invoke(active,[300]);await Task.Delay(350);
@@ -168,16 +190,16 @@ internal static class PlaybackProbe
             var rb=Box(ruler);var click=new Point(rb.Left+rb.Width*.55,rb.Top+rb.Height*.5);
             await Click(click);await Task.Delay(450);
             var rulerFrame=t.CurrentFrame;
-            var beforeB=State(previewVm);
-            var rulerCase=await MeasurePlayback("ruler",rulerFrame,playCommand);
-            rulerCase=rulerCase with{beforeState=beforeB,afterNavigateState=State(previewVm)};
+            var rulerState=State(previewVm);
+            var rulerCase=await MeasurePlayback("ruler",rulerFrame,previewVm,togglePlay,stop);
+            rulerCase=rulerCase with{beforeState=rulerState,afterNavigateState=rulerState,afterSyncState=State(previewVm)};
 
-            program=program with{beforeState=beforeA,afterNavigateState=afterA};
             if(t is INotifyPropertyChanged npc2)npc2.PropertyChanged-=TimelineChanged;
 
-            var result=new Result("cnwl.timeline-playback-start-sync.v1","PASS_PLAYBACK_START_SYNC_OBSERVATION","4.55.1.1 Lite",playName,program,rulerCase,surface,null);
+            var result=new Result("cnwl.timeline-playback-start-sync.v1","PASS_PLAYBACK_START_SYNC_OBSERVATION","4.55.1.1 Lite",playName,syncName,timelineOnly,timelinePlusSeek,rulerCase,surface,null);
             File.WriteAllText(Path.Combine(OutDir,"trace.txt"),string.Join(Environment.NewLine,new[]{
-                $"programmatic displayed={program.displayedFrame} first={program.firstPlaybackFrame} frames={string.Join(",",program.playbackFrames)} near={program.startedNearDisplayedFrame}",
+                $"timeline_only displayed={timelineOnly.displayedFrame} first={timelineOnly.firstPlaybackFrame} frames={string.Join(",",timelineOnly.playbackFrames)} near={timelineOnly.startedNearDisplayedFrame}",
+                $"timeline_plus_seek displayed={timelinePlusSeek.displayedFrame} first={timelinePlusSeek.firstPlaybackFrame} frames={string.Join(",",timelinePlusSeek.playbackFrames)} near={timelinePlusSeek.startedNearDisplayedFrame}",
                 $"ruler displayed={rulerCase.displayedFrame} first={rulerCase.firstPlaybackFrame} frames={string.Join(",",rulerCase.playbackFrames)} near={rulerCase.startedNearDisplayedFrame}"
             }),new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(OutDir,"result.json"),JsonSerializer.Serialize(result,new JsonSerializerOptions{WriteIndented=true}),new UTF8Encoding(false));
@@ -188,42 +210,21 @@ internal static class PlaybackProbe
     {
         if(e.PropertyName==nameof(Timeline.CurrentFrame)&&phase.Length>0&&timeline!=null)lock(Frames)Frames.Add(timeline.CurrentFrame);
     }
-    static async Task<PlaybackCase> MeasurePlayback(string name,int displayed,ICommand play)
+    static async Task<PlaybackCase> MeasurePlayback(string name,int displayed,object preview,MethodInfo togglePlay,MethodInfo stop)
     {
         lock(Frames)Frames.Clear();phase=name;
-        if(!play.CanExecute(null))throw new InvalidOperationException("Play command cannot execute for "+name);
-        play.Execute(null);await Task.Delay(650);
+        await InvokeTask(togglePlay,preview);await Task.Delay(650);
         var observed=Frames.ToArray();
-        // Most native play commands are toggles; invoke again to stop when still executable.
-        try{if(play.CanExecute(null))play.Execute(null);}catch{}
-        await Task.Delay(250);phase="";
+        await InvokeTask(stop,preview);await Task.Delay(250);phase="";
         observed=observed.Length==0?Frames.ToArray():observed;
         var first=observed.FirstOrDefault();
         var near=observed.Length>0&&Math.Abs(first-displayed)<=15;
-        return new(name,displayed,first,observed.Take(30).ToArray(),near,[],[]);
+        return new(name,displayed,first,observed.Take(30).ToArray(),near,[],[],[]);
     }
-
-    static (ICommand? Command,string Name) FindPlayCommand(object preview)
+    static async Task InvokeTask(MethodInfo method,object target,params object?[] args)
     {
-        var candidates=new List<(ICommand Command,string Name,int Score)>();
-        foreach(var p in preview.GetType().GetProperties(BindingFlags.Instance|BindingFlags.Public).Where(p=>p.CanRead)){
-            object? v=null;try{v=p.GetValue(preview);}catch{}
-            if(v is not ICommand c)continue;
-            int score=0;var n=p.Name;
-            if(n.Contains("Play",StringComparison.OrdinalIgnoreCase))score+=10;
-            if(n.Contains("Pause",StringComparison.OrdinalIgnoreCase)||n.Contains("Stop",StringComparison.OrdinalIgnoreCase)||n.Contains("Rate",StringComparison.OrdinalIgnoreCase))score-=5;
-            try{if(c.CanExecute(null))score+=2;}catch{}
-            candidates.Add((c,"PreviewViewModel."+p.Name,score));
-        }
-        var best=candidates.OrderByDescending(x=>x.Score).FirstOrDefault(x=>x.Score>0);
-        if(best.Command!=null)return(best.Command,best.Name);
-        foreach(var b in Application.Current.Windows.Cast<Window>().SelectMany(Elements).OfType<ButtonBase>().Where(x=>x.IsVisible)){
-            if(b.Command==null)continue;
-            var text=(b.ToolTip?.ToString()??"")+" "+(b is Button btn?btn.Content?.ToString():"");
-            if(text.Contains("再生",StringComparison.OrdinalIgnoreCase)||text.Contains("play",StringComparison.OrdinalIgnoreCase))
-                return(b.Command,"VisualButton:"+text.Trim());
-        }
-        return(null,"<none>");
+        var value=method.Invoke(target,args);
+        if(value is Task task)await task;
     }
 
     static Dictionary<string,string> State(object preview)

@@ -28,7 +28,7 @@ No private playback field is used as product evidence.
 
 `PASS_PLAYBACK_START_SYNC_OBSERVATION` means both playback-start sequences executed and their Timeline frame traces were recorded.
 
-The result separately reports whether playback began near the programmatically displayed frame and whether it began near the real-ruler-click frame.
+The result separately reports whether playback began near the displayed frame with Timeline-only navigation, whether adding public Preview `SeekAsync(frame)` synchronizes it, and whether the real-ruler-click control begins near its displayed frame.
 
 ## NOT PROVEN
 
