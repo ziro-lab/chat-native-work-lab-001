@@ -1,0 +1,77 @@
+name: YMM4 preview playback-rate overflow boundary
+
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/preview-playback-rate/overflow-probe/**'
+      - '.github/workflows/ymm4-preview-playback-rate-overflow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  overflow-probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK is not present.' }
+
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash = (Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe = Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YukkuriMovieMaker.exe not found.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build overflow probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe | Out-Null
+          dotnet build experiments/ymm4/preview-playback-rate/overflow-probe/Ymm4PreviewRateOverflowProbe/Ymm4PreviewRateOverflowProbe.csproj `
+            -c Release `
+            "-p:YMM4DirPath=$env:YMM4_DIR" `
+            -o out/probe `
+            --nologo `
+            -warnaserror 2>&1 | Tee-Object out/build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Overflow probe build failed.' }
+
+      - name: Install probe
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:YMM4_DIR 'user\plugin\Ymm4PreviewRateOverflowProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/probe/Ymm4PreviewRateOverflowProbe.dll (Join-Path $dest 'Ymm4PreviewRateOverflowProbe.dll')
+
+      - name: Observe x32 overflow and restart persistence in real YMM4
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/preview-playback-rate/overflow-probe/RunNative.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -OutputDir (Join-Path $PWD 'out/evidence')
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-preview-playback-rate-overflow
+          path: |
+            out/evidence/
+            out/build.txt
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14
