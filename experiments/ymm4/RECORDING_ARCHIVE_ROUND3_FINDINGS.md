@@ -10,69 +10,62 @@ Exact host:
 
 - YMM4 Lite 4.56.1.0
 - official ZIP SHA256: `49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a`
-- source head: `56a202408452fa6ac9ca6bffde5948b6b3a06d69`
-- workflow run: `35428911261`
-- job: `105859748495`, completed / success
-- artifact: `10580281320`
-- artifact SHA256: `a2c0fa9637ff548dfa1490bc70e4f346c8a37bb16cefc4c04b980a7574d94a99`
+- final tested head: `737127e52d9dcb7ef3a0aaef5b7c87862c170c24`
+- final workflow run: `35431031566`
+- native-boundaries job: `105865515319`, completed / success
+- SceneItem behavior job: `105865515231`, completed / success
+- native artifact: `10580747697`
+- native artifact SHA256: `ef5a33b26b5a5f88d922b563aadbf89ad5d8897662e5b984e3da7e4066b0f2e4`
+- SceneItem behavior artifact: `10580058903`
+- SceneItem behavior artifact SHA256: `cf5155427488abe569167b56e246716415fad88f2629feac29c9db14a118f444`
 
-All eight observation steps completed successfully on the final run. A PASS means the stated observation completed; it does not silently broaden the product support boundary.
+All observations completed successfully on the final run. A PASS means the stated host behavior was observed; it does not silently broaden product support.
 
 ## 1. Relative VideoItem paths are preserved but not project-relative portable
-
-Two independent native observations were run.
 
 A VideoItem with `FilePath=recordings\clip.mp4` serializes and reloads with the relative string unchanged. After the project/media folder is copied from A to B and the A-side media is removed:
 
 - the B-side candidate media exists;
 - the loaded VideoItem still contains `recordings\clip.mp4`;
 - `ContentLength` remains zero;
-- detached `LoadProjectFile(B\project.ymmp)` does not rewrite the VideoItem path;
-- live opening of B points the live project path to B, but the relative VideoItem still has `ContentLength=0`.
-
-Observed result: YMM4 v4.56.1.0 does not resolve that relative VideoItem path against the containing `.ymmp` directory in the tested routes.
+- live opening of the B-side project points the project path to B, but the relative VideoItem still has `ContentLength=0`.
 
 ### Product consequence
 
-Changing Recording Archive from absolute paths to simple project-relative paths would not make the archive folder portable on this host. The current absolute-path strategy is justified unless a different YMM4-supported relocation mechanism is found.
+Simple project-relative FilePath rewriting does not make the archive folder portable on this host. Keep the verified absolute-path behavior unless YMM4 exposes a different relocation mechanism.
 
 ## 2. Unicode and >260-character absolute paths work in the tested host
 
-The baseline Unicode path test passed at:
+The baseline Unicode path test passed around 200 characters.
 
-- media absolute path length: 200 characters;
-- project absolute path length: 207 characters.
+The extended case also passed:
 
-The extended path case also passed:
-
-- >260 attempt: true;
-- media absolute path length: 402 characters;
-- project absolute path length: 407 characters;
-- VideoItem content length remained positive after save/load;
-- the exact absolute media path survived.
+- media absolute path: **402 characters**
+- project absolute path: **407 characters**
+- exact media path preserved
+- VideoItem content loaded successfully
 
 ### Product consequence
 
-No artificial 260-character product limit is justified by this observation. This is still one synthetic Windows/YMM4 case, not a guarantee for every filesystem/share/provider.
+No artificial 260-character product limit is justified by this evidence.
 
 ## 3. Non-zero container timestamps are normalized to media-relative model time
 
-The synthetic MKV reports container `start_time=4.979` seconds through FFprobe.
+A synthetic three-second MKV shifted to a roughly +5-second container origin loads successfully.
 
-YMM4 VideoItem observation:
+Observed YMM4 model behavior:
 
-- `ContentLength=3` seconds;
-- `OriginalContentLength=3` seconds;
-- a 100% PlaybackRateMap with `ContentOffset=0` maps item times 0/1/2 seconds to source times 0/1/2;
-- `ContentOffset=1` maps item-time zero to source time 1.
+- `ContentLength=3 s`
+- `OriginalContentLength=3 s`
+- model source samples at item times 0/1/2 s are **0/1/2 s**
 
-Observed result: the YMM4 project model / PlaybackRateMap uses media-relative source coordinates rather than exposing the container's 4.979-second timestamp origin.
+The YMM4 project model / PlaybackRateMap therefore exposes media-relative zero-based source coordinates rather than the container PTS origin.
 
 ### Product consequence
 
-The product's current rejection of non-zero media start timestamps is a conservative FFmpeg-backend boundary, not a YMM4 model requirement. Removing that rejection still requires a product-side stream-copy/packet-time proof that correctly normalizes container PTS/DTS.
+The current product rejection of non-zero media start timestamps is conservative, not a YMM4 model requirement. Removing it still requires a product-side FFmpeg/ffprobe proof that translates between YMM4 model time and container timestamps without changing media identity.
 
-## 4. SceneItem has an explicit parent-item to child-scene time mapping surface
+## 4. SceneItem parent-to-child time mapping is explicit and behaviorally usable
 
 Static native inspection of `SceneSource.Update(TimelineItemSourceDescription)` verified that it:
 
@@ -80,39 +73,47 @@ Static native inspection of `SceneSource.Update(TimelineItemSourceDescription)` 
 - supplies SceneItem `ContentOffset`;
 - supplies SceneItem `ContentLength`;
 - reads `SceneItem.IsLooped`;
-- reads the referenced child scene duration;
+- reads the referenced child-scene duration;
 - forwards the mapped source time to child `ITimelineSource.Update`.
 
-`SceneItem.ContentLength` is resolved through `GlobalSceneInfo`.
-
-### Product consequence
-
-The host exposes enough timing structure to investigate dependency-scene interval minimization instead of always conserving every VideoItem in a referenced scene. This round proves the mapping surface, not a complete recursive-pruning algorithm. Product behavior should remain the current safe superset until an end-to-end nested-scene equivalence proof is added.
-
-## 5. Exact-EOF 0% freeze reaches EOF; it is not clamped before the file source
-
-The synthetic media duration is 3 seconds at 60 fps.
+A separate fresh-runner real-project behavior probe created Main → Child, with a three-second child scene and parent `ContentOffset=0.5 s`.
 
 Observed:
 
-- a 0% PlaybackRateMap can map both item-time zero and later item time to source offset exactly 3.0 seconds;
-- the last-frame probe time 2.983333... seconds decodes one frame;
-- exact 3.0-second EOF decodes zero frames through FFmpeg;
-- native `VideoSource.CalculateSourceTime` returns approximately 2.9833433 seconds for the last-frame case;
-- at exact EOF it returns exactly 3.0 seconds;
-- therefore VideoSource does not clamp exact EOF to a prior decodable frame before passing source time onward.
+- 100%: parent 0 s → child 0.5 s
+- 100%: parent 0.5 s → child 1.0 s
+- 100% relative consumed range: `[0,1]` s
+- 200%: parent 0 s → child 0.5 s
+- 200%: parent 0.5 s → child 1.5 s
+- 200% relative consumed range: `[0,2]` s
+- positive-rate cases start from the child-front origin
 
 ### Product consequence
 
-An exact-EOF 0% item is a real boundary case. The product should not silently rewrite it to the previous frame merely to make FFmpeg verification pass, because that would change the model source time. Until actual YMM4 final-render/file-source semantics at EOF are proven equivalent, fail-closed behavior is safer than an implicit clamp.
+A future optimizer can propagate **non-loop** parent SceneItem intervals into child-scene time instead of always conserving every VideoItem in the referenced scene. Current whole-scene retention remains the safe fallback for loop/cycle/unproven nested cases.
+
+## 5. Exact-EOF 0% freeze reaches EOF; it is not clamped before the file source
+
+For the synthetic 3 s / 60 fps media:
+
+- one-frame-before-EOF time `2.983333...` s decodes one frame;
+- exact `3.000000` s EOF decodes zero frames through FFmpeg;
+- PlaybackRateMap/native VideoSource calculation allows the exact 3.0 s source time;
+- native VideoSource does **not** clamp it to the previous decodable frame.
+
+### Product consequence
+
+This is a real edge case, but silently rewriting the archived source time from exact EOF to the previous frame would violate the primary requirement that the archive Project preserve the original Project's source-time semantics.
+
+Therefore the product should **remain fail-closed for an exact-EOF 0% item** until actual YMM4 final-render/file-source semantics prove a different representation equivalent. Do not add an implicit clamp merely to satisfy FFmpeg verification.
 
 ## 6. Looping is applied above PlaybackRateMap and depends on media duration
 
-Toggling `VideoItem.IsLooped` does not change the PlaybackRateMap mapping itself.
+Toggling `VideoItem.IsLooped` does not change PlaybackRateMap itself.
 
-Native `VideoSource.CalculateSourceTime` applies the loop behavior after that mapping. With a 3-second source, the observed loop sequence wraps at the media boundary (values include the host's small ~10 microsecond boundary offset). Repeating the same item against a 1-second shortened clip changes the mapped sequence. Changing the supplied source duration also changes loop mapping.
+Native `VideoSource.CalculateSourceTime` applies loop behavior using `IsLooped` plus source duration. Replacing the original three-second source with a one-second shortened clip changes the repeated source-time mapping. Changing source duration also changes the mapping.
 
-Final observation flags:
+Final flags:
 
 - `map_identical_with_loop_toggle=True`
 - `shortening_changes_loop_mapping=True`
@@ -120,28 +121,22 @@ Final observation flags:
 
 ### Product consequence
 
-Arbitrarily trimming a looped source changes loop semantics even if PlaybackRate2 and ContentOffset are preserved. The current product rejection of looped VideoItems is therefore justified.
+Trimming a looped VideoItem and simply keeping `IsLooped=true` is not equivalent. Current product rejection is justified. Loop support needs a transform that preserves the original loop-period/source-duration semantics plus save/reload equivalence proof.
 
-Loop support is not impossible, but it needs a strategy that preserves the original loop period/source-duration semantics (for example retaining a proven equivalent loop window or the full source) plus archive save/reload equivalence tests.
+## 7. Product-style all-frame PlaybackRateMap verification is not a primary CPU bottleneck
 
-## 7. Product-style all-frame PlaybackRateMap verification is not a major CPU bottleneck on the runner
+Final-run timing on the hosted runner:
 
-The probe intentionally mirrors the product's reflection-heavy per-frame source-time lookup.
+- 36,000 uncached reflective calls: **0.0467 s**
+- 360,000 uncached calls: **0.2743 s**
+- 360,000 cached-MethodInfo calls: **0.0627 s**
+- 7.2 million uncached calls extrapolate to about **5.49 s**
 
-Observed on the GitHub Windows runner:
-
-- 36,000 uncached calls: 0.0419328 s;
-- 360,000 uncached calls: 0.2959582 s;
-- 360,000 cached-MethodInfo calls: 0.0558035 s;
-- estimated 7,200,000 uncached calls: 5.919164 s.
-
-7.2 million calls corresponds roughly to 100 ten-minute 60 fps VideoItems checked twice.
+Other successful Round 3 runs landed in the same general range.
 
 ### Product consequence
 
-The correctness-oriented all-frame validation does not need to be removed. Caching the reflected `GetSourceTime` MethodInfo remains a cheap optimization with a substantial margin, especially for slower user CPUs, but the current validation model is not inherently impractical.
-
-This is a microbenchmark of the mapping loop only; YMM4 JSON save/load, media probing, stream-copy and decoded-frame verification are separate costs.
+Keep the strong all-frame equivalence gate. Caching MethodInfo is a cheap optimization if real user projects show a need, but correctness does not need to be weakened preemptively.
 
 ## Round 3 product decisions
 
@@ -149,20 +144,20 @@ This is a microbenchmark of the mapping loop only; YMM4 JSON save/load, media pr
 | --- | --- | --- |
 | Relative archive paths | Relative string preserved but unresolved after relocation | Keep absolute paths; do not advertise folder portability |
 | Unicode / long absolute paths | 402/407-character paths passed | No artificial MAX_PATH restriction |
-| Non-zero container timestamp | YMM4 model normalizes to 0-based media time | Product support is plausible after FFmpeg backend proof |
-| Dependency SceneItem | Parent-to-child time mapping surface exists | Future optimization candidate; keep current safe superset for now |
-| 0% exact EOF | VideoSource passes exact EOF; FFmpeg has no frame there | Keep fail-closed until rendered/file-source semantics are proven |
-| Looped VideoItem | Loop depends on source duration outside PlaybackRateMap | Keep unsupported until equivalent loop-period preservation is proven |
-| All-frame map validation | ~5.9 s estimated for 7.2M uncached calls on runner | Keep validation; optionally cache MethodInfo |
+| Non-zero container timestamp | YMM4 model normalizes to 0-based media time | Add product media-coordinate proof, then support |
+| Dependency SceneItem | Static + behavioral parent→child mapping is available | Future non-loop dependency minimization |
+| 0% exact EOF | Model reaches exact EOF; no decodable frame exists there | Fail closed; do not silently shift source time |
+| Looped VideoItem | Loop depends on actual source duration above PlaybackRateMap | Keep unsupported until equivalent loop preservation is proven |
+| All-frame map validation | Low mapping cost in hosted observations | Keep validation; cache reflection only if useful |
 
-## What remains outside the public Lab boundary
+## What remains outside the current public-Lab proof
 
-The main remaining unknowns are not simple model/reflection questions:
+The main remaining unknowns are no longer basic model/reflection questions:
 
-- actual final-composited YMM4 pixel/audio equivalence for unusual EOF/file-source behavior;
+- actual final-composited YMM4 pixel/audio behavior for the unusual exact-EOF file-source case;
 - real OBS/game-recording codec/GOP/VFR/edit-list variations;
 - arbitrary third-party custom VideoItem/effect payloads;
 - physical user workflow and filesystem/provider behavior;
 - global knowledge of whether another project still needs an original recording.
 
-Those belong in product/manual acceptance or targeted future experiments when a concrete failure appears.
+Those belong in product/manual acceptance or a targeted future experiment when a concrete failure appears.
