@@ -54,25 +54,48 @@ internal static class Probe
             var mapProp = typeof(VideoItem).GetProperty("PlaybackRateMap", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?? throw new MissingMemberException("PlaybackRateMap");
             var map = mapProp.GetValue(item) ?? throw new InvalidOperationException("map null");
-            var method = map.GetType().GetMethod("GetSourceTime",
+            var mapMethod = map.GetType().GetMethod("GetSourceTime",
                 [typeof(TimeSpan), typeof(int), typeof(int), typeof(TimeSpan), typeof(TimeSpan)])
                 ?? throw new MissingMethodException("GetSourceTime");
 
-            double Source(double offset, double itemSeconds)
+            double MapSource(double offset, double itemSeconds)
             {
-                var raw = method.Invoke(map,
+                var raw = mapMethod.Invoke(map,
                     [TimeSpan.FromSeconds(itemSeconds), item.Length, fps, TimeSpan.FromSeconds(offset), item.ContentLength]);
-                return raw is TimeSpan ts ? ts.TotalSeconds : double.NaN;
+                return raw is TimeSpan value ? value.TotalSeconds : double.NaN;
+            }
+
+            var videoSourceType = AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes)
+                .FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Player.Video.Items.VideoSource")
+                ?? throw new TypeLoadException("VideoSource missing");
+            var calculate = videoSourceType.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+                .SingleOrDefault(m => m.Name == "CalculateSourceTime" && m.GetParameters().Length == 8)
+                ?? throw new MissingMethodException("VideoSource.CalculateSourceTime");
+
+            double NativeSource(double offset)
+            {
+                object?[] args =
+                [
+                    map, TimeSpan.Zero, item.Length, fps, TimeSpan.FromSeconds(offset),
+                    item.ContentLength, false, TimeSpan.FromSeconds(duration)
+                ];
+                var raw = calculate.Invoke(null, args);
+                return raw is TimeSpan value ? value.TotalSeconds : double.NaN;
             }
 
             var lastFrame = Math.Max(0, duration - 1d / fps);
             foreach (var offset in new[] { lastFrame, duration })
             {
-                var s0 = Source(offset, 0);
-                var s1 = Source(offset, 1);
+                var s0 = MapSource(offset, 0);
+                var s1 = MapSource(offset, 1);
                 Append($"CASE offset={offset:R} source0={s0:R} source1={s1:R}");
                 Assert(Math.Abs(s0 - s1) < 1e-7, $"0% freezes source at offset={offset:R}");
             }
+
+            var nativeLast = NativeSource(lastFrame);
+            var nativeEof = NativeSource(duration);
+            Append("NATIVE_VIDEO_SOURCE_LAST=" + nativeLast.ToString("R", CultureInfo.InvariantCulture));
+            Append("NATIVE_VIDEO_SOURCE_EOF=" + nativeEof.ToString("R", CultureInfo.InvariantCulture));
 
             var ffmpeg = FFmpegResourceLocator.GetFFmpegExePath();
             Assert(File.Exists(ffmpeg), "YMM4 bundled ffmpeg exists");
@@ -87,7 +110,10 @@ internal static class Probe
                 "duration=" + duration.ToString("R", CultureInfo.InvariantCulture),
                 "last_frame_hash_rows=" + lastRows,
                 "exact_eof_hash_rows=" + eofRows,
-                "exact_eof_decodes_frame=" + (eofRows > 0)
+                "exact_eof_decodes_frame=" + (eofRows > 0),
+                "video_source_calculated_last=" + nativeLast.ToString("R", CultureInfo.InvariantCulture),
+                "video_source_calculated_eof=" + nativeEof.ToString("R", CultureInfo.InvariantCulture),
+                "video_source_clamps_eof_before_file_source=" + (nativeEof < duration - 1e-9)
             ], new UTF8Encoding(false));
         }
         catch (Exception ex)
@@ -120,6 +146,12 @@ internal static class Probe
         process.WaitForExit();
         Append($"FFMPEG t={time:R} exit={process.ExitCode} stderr={stderr.Trim()}");
         return stdout.Split('\n').Select(x => x.Trim()).Count(x => x.Length > 0 && !x.StartsWith('#'));
+    }
+
+    private static Type[] SafeTypes(Assembly assembly)
+    {
+        try { return assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t != null).Cast<Type>().ToArray(); }
     }
 
     private static void Assert(bool condition, string name)
