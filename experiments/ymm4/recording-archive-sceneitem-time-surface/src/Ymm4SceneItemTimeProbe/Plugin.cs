@@ -42,42 +42,24 @@ internal static class Probe
         {
             var sceneItemType = typeof(SceneItem);
             Append("TYPE=" + sceneItemType.FullName);
-            foreach (var property in sceneItemType.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                         .Where(p => p.Name is "SceneId" or "ContentLength" or "OriginalContentLength"
-                             or "ContentOffset" or "IsLooped" or "PlaybackRate2" or "ContentSeparations"))
-                Append($"PROP public {property.PropertyType.FullName} {property.Name}");
-
-            var hits = new List<(MethodInfo Method, List<string> Refs)>();
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies()
-                         .Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true))
-            foreach (var type in SafeTypes(asm))
-            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            foreach (var name in new[] { "SceneId", "ContentLength", "OriginalContentLength", "ContentOffset", "IsLooped", "PlaybackRate2", "ContentSeparations" })
             {
-                if (method.IsAbstract || method.ContainsGenericParameters) continue;
-                var refs = DecodeRefs(method);
-                if (refs == null) continue;
-                var hasScene = refs.Any(r => r.Contains("SceneItem::get_SceneId", StringComparison.Ordinal)
-                    || r.Contains("SceneItem::SceneId", StringComparison.Ordinal));
-                var hasTiming = refs.Any(r => r.Contains("PlaybackRateMap", StringComparison.Ordinal)
-                    || r.Contains("ContentOffset", StringComparison.Ordinal)
-                    || r.Contains("ContentLength", StringComparison.Ordinal)
-                    || r.Contains("get_Frame", StringComparison.Ordinal)
-                    || r.Contains("get_Length", StringComparison.Ordinal));
-                if (hasScene && hasTiming) hits.Add((method, refs));
+                var property = sceneItemType.GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+                if (property != null) Append($"PROP public {property.PropertyType.FullName} {property.Name}");
             }
 
-            foreach (var hit in hits.OrderBy(x => x.Method.DeclaringType?.FullName).ThenBy(x => x.Method.Name))
-            {
-                Append("HIT " + Sig(hit.Method));
-                foreach (var reference in hit.Refs.Distinct()) Append("REF " + reference);
-            }
+            var sceneSourceType = AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes)
+                .FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Player.Video.Items.SceneSource")
+                ?? throw new TypeLoadException("SceneSource missing");
+            var sceneUpdate = sceneSourceType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(m => m.Name == "Update")
+                ?? throw new MissingMethodException("SceneSource.Update missing");
+            var updateRefs = DecodeRefs(sceneUpdate) ?? throw new InvalidOperationException("SceneSource.Update has no IL body");
 
-            var update = hits.SingleOrDefault(x =>
-                x.Method.DeclaringType?.FullName == "YukkuriMovieMaker.Player.Video.Items.SceneSource"
-                && x.Method.Name == "Update");
-            if (update.Method == null) throw new MissingMethodException("SceneSource.Update timing path missing");
+            Append("HIT " + Sig(sceneUpdate));
+            foreach (var reference in updateRefs.Distinct()) Append("REF " + reference);
 
-            bool Has(string text) => update.Refs.Any(r => r.Contains(text, StringComparison.Ordinal));
+            bool Has(string text) => updateRefs.Any(r => r.Contains(text, StringComparison.Ordinal));
             var usesPlaybackMap = Has("PlaybackRateMap::GetSourceTime");
             var usesContentOffset = Has("BaseItem::get_ContentOffset");
             var usesContentLength = Has("BaseItem::get_ContentLength");
@@ -85,10 +67,11 @@ internal static class Probe
             var usesChildDuration = Has("ISceneInfo::get_Duration");
             var updatesChildTimeline = Has("ITimelineSource::Update");
 
-            var contentLengthGetter = hits.SingleOrDefault(x =>
-                x.Method.DeclaringType == typeof(SceneItem) && x.Method.Name == "get_ContentLength");
-            var contentLengthUsesGlobalScene = contentLengthGetter.Method != null
-                && contentLengthGetter.Refs.Any(r => r.Contains("GlobalSceneInfo::GetValue", StringComparison.Ordinal));
+            var contentLengthGetter = sceneItemType.GetProperty("ContentLength", BindingFlags.Instance | BindingFlags.Public)?.GetMethod
+                ?? throw new MissingMethodException("SceneItem.ContentLength getter missing");
+            var contentLengthRefs = DecodeRefs(contentLengthGetter) ?? [];
+            foreach (var reference in contentLengthRefs.Distinct()) Append("CONTENT_LENGTH_REF " + reference);
+            var contentLengthUsesGlobalScene = contentLengthRefs.Any(r => r.Contains("GlobalSceneInfo::GetValue", StringComparison.Ordinal));
 
             Assert(usesPlaybackMap, "SceneSource.Update maps parent item time through PlaybackRateMap.GetSourceTime");
             Assert(usesContentOffset && usesContentLength, "SceneSource.Update supplies SceneItem ContentOffset and ContentLength");
@@ -99,7 +82,6 @@ internal static class Probe
             File.WriteAllLines(Path.Combine(output, "result.txt"),
             [
                 "status=PASS_SCENEITEM_TIME_SURFACE",
-                "timing_reference_hit_count=" + hits.Count,
                 "scene_source_uses_playbackratemap=" + usesPlaybackMap,
                 "scene_source_uses_content_offset=" + usesContentOffset,
                 "scene_source_uses_content_length=" + usesContentLength,
@@ -107,7 +89,7 @@ internal static class Probe
                 "scene_source_uses_child_duration=" + usesChildDuration,
                 "scene_source_updates_child_timeline=" + updatesChildTimeline,
                 "sceneitem_content_length_uses_global_scene=" + contentLengthUsesGlobalScene,
-                "candidate_methods=" + string.Join(";", hits.Select(x => Sig(x.Method)))
+                "scene_source_update=" + Sig(sceneUpdate)
             ], new UTF8Encoding(false));
         }
         catch (Exception ex)
@@ -123,6 +105,7 @@ internal static class Probe
         byte[]? bytes;
         try { bytes = method.GetMethodBody()?.GetILAsByteArray(); } catch { return null; }
         if (bytes == null) return null;
+
         var refs = new List<string>();
         var i = 0;
         while (i < bytes.Length)
@@ -134,6 +117,7 @@ internal static class Probe
                 code = (ushort)(0xFE00 | bytes[i++]);
             }
             if (!Ops.TryGetValue(code, out var op)) break;
+
             switch (op.OperandType)
             {
                 case OperandType.InlineNone: break;
@@ -147,17 +131,24 @@ internal static class Probe
                 case OperandType.InlineI8:
                 case OperandType.InlineR: i += 8; break;
                 case OperandType.InlineSwitch:
-                    var n = BitConverter.ToInt32(bytes, i); i += 4 + 4 * n; break;
+                {
+                    var count = BitConverter.ToInt32(bytes, i);
+                    i += 4 + 4 * count;
+                    break;
+                }
                 case OperandType.InlineField:
                 case OperandType.InlineMethod:
                 case OperandType.InlineTok:
                 case OperandType.InlineType:
                 case OperandType.InlineString:
                 case OperandType.InlineSig:
-                    var token = BitConverter.ToInt32(bytes, i); i += 4;
+                {
+                    var token = BitConverter.ToInt32(bytes, i);
+                    i += 4;
                     if (op.OperandType is OperandType.InlineField or OperandType.InlineMethod or OperandType.InlineTok or OperandType.InlineType)
                         refs.Add(Resolve(method, token));
                     break;
+                }
             }
         }
         return refs;
