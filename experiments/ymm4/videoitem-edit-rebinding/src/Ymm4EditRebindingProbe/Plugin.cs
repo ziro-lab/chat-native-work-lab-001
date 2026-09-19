@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
@@ -14,12 +15,36 @@ namespace Ymm4EditRebindingProbe;
 
 public sealed class Entry : ILocalizePlugin
 {
-    public string Name => "CNWL VideoItem Edit Rebinding";
+    public string Name => "CNWL VideoItem Edit Rebinding Bootstrap";
     public void SetCulture(CultureInfo cultureInfo) => Probe.Schedule();
+}
+
+public sealed class EditRebindingTool : IToolPlugin
+{
+    public string Name => "CNWL VideoItem Edit Rebinding";
+    public Type ViewModelType => typeof(EditRebindingModel);
+    public Type ViewType => typeof(EditRebindingView);
+    public bool AllowMultipleInstances => false;
+}
+public sealed class EditRebindingView : UserControl
+{
+    public EditRebindingView()=>Content=new TextBlock{Text="CNWL edit rebinding probe"};
+}
+public sealed class EditRebindingModel : ITimelineToolViewModel, IToolViewModel, IDisposable
+{
+    public string Title=>"CNWL VideoItem Edit Rebinding";
+    public bool CanSuspend=>false;
+    public void SetTimelineToolInfo(TimelineToolInfo info)=>Probe.Info=info;
+    public ToolState SaveState()=>new(){Title=Title};
+    public void LoadState(ToolState stateData){}
+    public void Dispose(){}
+    public event PropertyChangedEventHandler? PropertyChanged { add{} remove{} }
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested { add{} remove{} }
 }
 
 internal static class Probe
 {
+    internal static TimelineToolInfo? Info;
     private static bool scheduled;
     private static string output="";
     private static readonly List<object> requirements=[];
@@ -34,11 +59,12 @@ internal static class Probe
 
     private static void Start()
     {
-        bool created=false;
+        int ticks=0; bool created=false, opened=false;
         var timer=new DispatcherTimer(DispatcherPriority.ApplicationIdle){Interval=TimeSpan.FromMilliseconds(300)};
         timer.Tick+=(_,_)=>{
             try
             {
+                ticks++;
                 var main=Application.Current.Windows.Cast<Window>().Select(w=>w.DataContext)
                     .FirstOrDefault(x=>x?.GetType().FullName=="YukkuriMovieMaker.ViewModels.MainViewModel");
                 if(main==null)return;
@@ -48,27 +74,40 @@ internal static class Probe
                     if(!created){created=true;main.GetType().GetMethod("CreateProject",Type.EmptyTypes)?.Invoke(main,null);}
                     return;
                 }
-                var timeline=FindTimeline(active);
-                timer.Stop();
-                Run(main,active,timeline);
-                Write("PASS_EDIT_REBIND_DISCOVERY",null);
+                if(!opened){opened=OpenTool(main);}
+                if(Info?.Timeline is Timeline timeline)
+                {
+                    timer.Stop();Run(main,active,timeline);Write("PASS_EDIT_REBIND_DISCOVERY",null);return;
+                }
+                if(ticks>180)throw new TimeoutException("TimelineToolInfo callback not received.");
             }
             catch(Exception ex){timer.Stop();Write("FAIL_EDIT_REBIND_DISCOVERY",ex.ToString());}
         };
         timer.Start();
     }
 
-    private static Timeline FindTimeline(object active)
+    private static bool OpenTool(object main)
     {
-        var exact=active.GetType().GetProperty("Timeline",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
-        try{if(exact?.GetValue(active) is Timeline direct)return direct;}catch{}
-        foreach(var p in active.GetType().GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
+        var roots=main.GetType().GetProperty("ToolMenuItems")?.GetValue(main) as System.Collections.IEnumerable;
+        if(roots==null)return false;
+        bool Visit(object item,int depth)
         {
-            if(p.GetIndexParameters().Length!=0)continue;
-            try{if(p.GetValue(active) is Timeline t)return t;}catch{}
+            if(depth>6)return false;
+            var type=item.GetType();
+            var header=type.GetProperty("Header")?.GetValue(item)?.ToString()??"";
+            if(header.Contains("CNWL VideoItem Edit Rebinding",StringComparison.Ordinal)
+                && type.GetProperty("Command")?.GetValue(item) is ICommand command)
+            {
+                var p=type.GetProperty("CommandParameter")?.GetValue(item);
+                if(command.CanExecute(p)){command.Execute(p);return true;}
+            }
+            foreach(var name in new[]{"Items","Children","MenuItems"})
+                if(type.GetProperty(name)?.GetValue(item) is System.Collections.IEnumerable children)
+                    foreach(var child in children)if(child!=null&&Visit(child,depth+1))return true;
+            return false;
         }
-        File.WriteAllLines(Path.Combine(output,"active-pre-timeline.txt"),active.GetType().GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).Select(p=>$"{p.Name} : {p.PropertyType.FullName}"));
-        throw new MissingMemberException("Timeline not found.");
+        foreach(var root in roots)if(root!=null&&Visit(root,0))return true;
+        return false;
     }
 
     private static bool Interesting(string n)
