@@ -75,15 +75,58 @@ internal static class Probe
                     return;
                 }
                 if(!opened){opened=OpenTool(main);}
-                if(Info?.Timeline is Timeline timeline)
+                var timeline=Info?.Timeline ?? FindTimelineGraph(main,active);
+                if(timeline!=null)
                 {
                     timer.Stop();Run(main,active,timeline);Write("PASS_EDIT_REBIND_DISCOVERY",null);return;
                 }
-                if(ticks>180)throw new TimeoutException("TimelineToolInfo callback not received.");
+                if(ticks>180)throw new TimeoutException("Timeline could not be resolved from tool callback or host object graph.");
             }
             catch(Exception ex){timer.Stop();Write("FAIL_EDIT_REBIND_DISCOVERY",ex.ToString());}
         };
         timer.Start();
+    }
+
+    private static Timeline? FindTimelineGraph(object main, object active)
+    {
+        var visited=new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var paths=new List<string>();
+        Timeline? Walk(object? obj,string path,int depth)
+        {
+            if(obj==null||depth>4||!visited.Add(obj))return null;
+            if(obj is Timeline found){File.WriteAllText(Path.Combine(output,"timeline-path.txt"),path);return found;}
+            var type=obj.GetType();
+            if(type.Assembly.GetName().Name?.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)!=true
+                && !type.FullName!.StartsWith("Reactive.Bindings",StringComparison.Ordinal)) return null;
+            foreach(var p in type.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
+            {
+                if(p.GetIndexParameters().Length!=0||p.Name is "Items" or "SelectedItems" or "Characters")continue;
+                object? value=null;try{value=p.GetValue(obj);}catch{}
+                if(value==null)continue;
+                paths.Add(path+"."+p.Name+" : "+value.GetType().FullName);
+                if(value is Timeline t){File.WriteAllText(Path.Combine(output,"timeline-path.txt"),path+"."+p.Name);return t;}
+                if(depth<4 && (value.GetType().Assembly.GetName().Name?.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)==true
+                    || value.GetType().FullName?.StartsWith("Reactive.Bindings",StringComparison.Ordinal)==true))
+                {
+                    var nested=Walk(value,path+"."+p.Name,depth+1);if(nested!=null)return nested;
+                }
+            }
+            foreach(var f in type.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
+            {
+                object? value=null;try{value=f.GetValue(obj);}catch{}
+                if(value==null)continue;
+                paths.Add(path+"."+f.Name+" : "+value.GetType().FullName);
+                if(value is Timeline t){File.WriteAllText(Path.Combine(output,"timeline-path.txt"),path+"."+f.Name);return t;}
+                if(depth<4 && value.GetType().Assembly.GetName().Name?.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)==true)
+                {
+                    var nested=Walk(value,path+"."+f.Name,depth+1);if(nested!=null)return nested;
+                }
+            }
+            return null;
+        }
+        var result=Walk(active,"active",0)??Walk(main,"main",0);
+        if(result==null)File.WriteAllLines(Path.Combine(output,"timeline-search.txt"),paths.Take(5000));
+        return result;
     }
 
     private static bool OpenTool(object main)
