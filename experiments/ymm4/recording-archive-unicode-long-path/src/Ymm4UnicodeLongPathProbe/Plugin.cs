@@ -1,0 +1,19 @@
+using System.Globalization;using System.IO;using System.Reflection;using System.Text;using System.Windows;using System.Windows.Threading;using YukkuriMovieMaker.Plugin;using YukkuriMovieMaker.Project;using YukkuriMovieMaker.Project.Items;using YmmProject=YukkuriMovieMaker.Project.Project;
+namespace Ymm4UnicodeLongPathProbe;
+public sealed class PluginEntry:ILocalizePlugin{public string Name=>"Chat Native Work Lab — Recording Archive Unicode Long Path";public void SetCulture(CultureInfo c)=>Probe.Schedule();}
+internal static class Probe
+{
+ static bool once;static string output="",fixture="";
+ public static void Schedule(){var d=Environment.GetEnvironmentVariable("CNWL_YMM4_UNICODE_LONG_DIR");var f=Environment.GetEnvironmentVariable("CNWL_YMM4_UNICODE_LONG_FIXTURE");if(once||string.IsNullOrWhiteSpace(d)||string.IsNullOrWhiteSpace(f))return;once=true;output=Path.GetFullPath(d);fixture=Path.GetFullPath(f);Directory.CreateDirectory(output);Application.Current.Dispatcher.BeginInvoke(new Action(Start),DispatcherPriority.ApplicationIdle);}
+ static void Start(){var n=0;var created=false;var timer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(400)};timer.Tick+=async(_,_)=>{try{foreach(Window w in Application.Current.Windows){var root=w.DataContext;if(root?.GetType().FullName!="YukkuriMovieMaker.ViewModels.MainViewModel")continue;var active=root.GetType().GetProperty("ActiveTimelineViewModel")?.GetValue(root);if(active==null&&!created){created=true;root.GetType().GetMethod("CreateProject",Type.EmptyTypes)?.Invoke(root,null);break;}var model=root.GetType().GetField("model",BindingFlags.Instance|BindingFlags.NonPublic)?.GetValue(root);var tl=active?.GetType().GetField("timeline",BindingFlags.Instance|BindingFlags.NonPublic)?.GetValue(active) as Timeline;if(model==null||tl==null)continue;timer.Stop();await Run(model,tl);return;}if(++n>120)throw new TimeoutException();}catch(Exception ex){timer.Stop();File.WriteAllLines(Path.Combine(output,"result.txt"),["status=FAIL_EXCEPTION","detail="+ex.GetBaseException().Message],new UTF8Encoding(false));}};timer.Start();}
+ static async Task Run(object model,Timeline tl)
+ {
+  var seg="日本語 スペース [記号] 🚀_"+new string('長',90);var dir=Path.Combine(output,seg);Directory.CreateDirectory(dir);var media=Path.Combine(dir,"録画素材 🚀 [01].mp4");File.Copy(fixture,media,true);
+  var item=new VideoItem(media){Frame=0,Layer=10,Remark="CNWL_UNICODE_LONG"};if(!tl.TryAddItems([item],0,10))throw new Exception("add failed");await Idle();await Idle();if(item.ContentLength<=TimeSpan.Zero)throw new Exception("ContentLength zero");
+  var project=Path.Combine(dir,"作品 アーカイブ 🚀 [長い名前].ymmp");var mt=model.GetType();(mt.GetMethod("SaveProject",[typeof(string)])??throw new MissingMethodException()).Invoke(model,[project]);
+  var load=mt.GetMethod("LoadProjectFile",[typeof(string)])??throw new MissingMethodException("LoadProjectFile");var task=load.Invoke(model,[project]) as Task??throw new Exception("load task");await task;var p=task.GetType().GetProperty("Result")?.GetValue(task) as YmmProject??throw new Exception("project result");
+  var tp=p.GetType().GetProperty("Timelines",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)??throw new Exception("Timelines");var tls=(tp.GetValue(p) as IEnumerable<Timeline>)!.ToArray();var loaded=tls.SelectMany(x=>x.Items).OfType<VideoItem>().Single(x=>x.Remark=="CNWL_UNICODE_LONG");await Idle();
+  File.WriteAllLines(Path.Combine(output,"result.txt"),["status=PASS_UNICODE_LONG_PATH","media_path_chars="+media.Length,"project_path_chars="+project.Length,"content_length_positive="+(loaded.ContentLength>TimeSpan.Zero),"exact_path_preserved="+string.Equals(Path.GetFullPath(media),Path.GetFullPath(loaded.FilePath),StringComparison.OrdinalIgnoreCase)],new UTF8Encoding(false));
+ }
+ static async Task Idle()=>await Application.Current.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle).Task;
+}
