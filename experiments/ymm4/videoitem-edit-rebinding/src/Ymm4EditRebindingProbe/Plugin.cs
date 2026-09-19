@@ -56,6 +56,7 @@ internal static class Probe
     private sealed record UndoState(
         bool UndoRestoredOriginalReference, bool RedoReusedSplitLeftReference, bool RedoReusedSplitRightReference,
         ItemState[] AfterSplit, ItemState[] AfterUndo, ItemState[] AfterRedo);
+    private sealed record ManagerRef(object Value,string Path);
 
     public static void Schedule()
     {
@@ -170,15 +171,8 @@ internal static class Probe
         Check("duplicate_different_timeline_positions",dup.Select(v=>v.Frame).Distinct().Count()>=2);
 
         // Undo/Redo of a real split. Observe semantic restoration and object-reference churn.
-        var undoManager=FindUndoRedoManager(main,active,timeline)
-            ??throw new MissingMemberException("UndoRedoManager instance not found.");
-        var undoAsync=undoManager.GetType().GetMethod("UndoAsync",BindingFlags.Instance|BindingFlags.Public)
-            ??throw new MissingMethodException("UndoRedoManager.UndoAsync");
-        var redoAsync=undoManager.GetType().GetMethod("RedoAsync",BindingFlags.Instance|BindingFlags.Public)
-            ??throw new MissingMethodException("UndoRedoManager.RedoAsync");
-        var isUndoable=undoManager.GetType().GetProperty("IsUndoable")??throw new MissingMemberException("IsUndoable");
-        var isRedoable=undoManager.GetType().GetProperty("IsRedoable")??throw new MissingMemberException("IsRedoable");
-        Check("undo_manager_surface",undoAsync.IsPublic&&redoAsync.IsPublic);
+        var managersBefore=FindUndoRedoManagers(main,active,timeline);
+        Check("undo_manager_surface",managersBefore.Length>0&&managersBefore.All(m=>m.Value.GetType().GetMethod("UndoAsync",BindingFlags.Instance|BindingFlags.Public)!=null));
 
         var undoSource=NewItem(media,6500,600,30,5,"UNDO_SPLIT",fps);
         Check("undo_insert",timeline.TryAddItems([undoSource],undoSource.Frame,undoSource.Layer));
@@ -186,7 +180,22 @@ internal static class Probe
         split.Invoke(timeline,[undoSource.Frame+240,splitNone]);
         var afterSplit=FindByRemark(timeline,"UNDO_SPLIT").OrderBy(x=>x.Frame).ToArray();
         Check("undo_split_created",afterSplit.Length==2&&!afterSplit.Any(x=>ReferenceEquals(x,undoSource)));
-        Check("undo_available_after_split",(bool)(isUndoable.GetValue(undoManager)??false));
+        var managersAfter=FindUndoRedoManagers(main,active,timeline);
+        File.WriteAllText(Path.Combine(output,"undo-managers.json"),JsonSerializer.Serialize(managersAfter.Select(m=>new{
+            m.Path,
+            type=m.Value.GetType().AssemblyQualifiedName,
+            isUndoable=ReadBool(m.Value,"IsUndoable"),
+            isRedoable=ReadBool(m.Value,"IsRedoable")
+        }),new JsonSerializerOptions{WriteIndented=true}));
+        var managerRef=managersAfter.FirstOrDefault(m=>ReadBool(m.Value,"IsUndoable"))
+            ??throw new InvalidOperationException("No discovered UndoRedoManager is undoable after split.");
+        var undoManager=managerRef.Value;
+        var undoAsync=undoManager.GetType().GetMethod("UndoAsync",BindingFlags.Instance|BindingFlags.Public)
+            ??throw new MissingMethodException("UndoRedoManager.UndoAsync");
+        var redoAsync=undoManager.GetType().GetMethod("RedoAsync",BindingFlags.Instance|BindingFlags.Public)
+            ??throw new MissingMethodException("UndoRedoManager.RedoAsync");
+        var isRedoable=undoManager.GetType().GetProperty("IsRedoable")??throw new MissingMemberException("IsRedoable");
+        Check("undo_available_after_split",true);
         var splitLeft=afterSplit[0];var splitRight=afterSplit[1];
         await (Task)(undoAsync.Invoke(undoManager,null)??throw new InvalidOperationException("Undo task missing"));
         await Task.Delay(150);
@@ -230,38 +239,36 @@ internal static class Probe
     private static ItemState State(VideoItem v,VideoItem reference,int fps)=>new(
         v.Remark??"",ReferenceEquals(v,reference),v.Frame,v.Length,v.Layer,v.ContentOffset.TotalSeconds,Rate(v,fps),Path.GetFullPath(v.FilePath??""));
 
-    private static object? FindUndoRedoManager(params object[] roots)
+    private static ManagerRef[] FindUndoRedoManagers(params object[] roots)
     {
         var visited=new HashSet<object>(ReferenceEqualityComparer.Instance);
-        object? Walk(object? obj,int depth)
+        var found=new List<ManagerRef>();
+        void Walk(object? obj,string path,int depth)
         {
-            if(obj==null||depth>7||!visited.Add(obj))return null;
+            if(obj==null||depth>8||!visited.Add(obj))return;
             var type=obj.GetType();
-            if(type.FullName=="YukkuriMovieMaker.UndoRedo.UndoRedoManager")return obj;
-            if(type.IsPrimitive||obj is string||obj is Type||obj is MemberInfo)return null;
+            if(type.FullName=="YukkuriMovieMaker.UndoRedo.UndoRedoManager"){found.Add(new(obj,path));return;}
+            if(type.IsPrimitive||obj is string||obj is Type||obj is MemberInfo)return;
             string asm=type.Assembly.GetName().Name??"";
-            bool allowed=asm.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)
-                ||asm.StartsWith("Reactive",StringComparison.Ordinal)
+            bool allowed=asm.StartsWith("YukkuriMovieMaker",StringComparison.Ordinal)||asm.StartsWith("Reactive",StringComparison.Ordinal)
                 ||asm=="System.Collections.Immutable";
-            if(!allowed)return null;
+            if(!allowed)return;
             foreach(var f in type.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
             {
                 object? value=null;try{value=f.GetValue(obj);}catch{}
-                if(value==null)continue;
-                var found=Walk(value,depth+1);if(found!=null)return found;
+                if(value!=null)Walk(value,path+"."+f.Name,depth+1);
             }
             foreach(var p in type.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic))
             {
                 if(p.GetIndexParameters().Length!=0||p.Name is "Items" or "SelectedItems" or "Characters")continue;
                 object? value=null;try{value=p.GetValue(obj);}catch{}
-                if(value==null)continue;
-                var found=Walk(value,depth+1);if(found!=null)return found;
+                if(value!=null)Walk(value,path+"."+p.Name,depth+1);
             }
-            return null;
         }
-        foreach(var root in roots){var found=Walk(root,0);if(found!=null)return found;}
-        return null;
+        for(int i=0;i<roots.Length;i++)Walk(roots[i],"root"+i,0);
+        return found.GroupBy(x=>x.Value,ReferenceEqualityComparer.Instance).Select(g=>g.First()).ToArray();
     }
+    private static bool ReadBool(object obj,string name)=>obj.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.Public)?.GetValue(obj) is true;
 
     private static Timeline? FindTimelineGraph(object main,object active)
     {
