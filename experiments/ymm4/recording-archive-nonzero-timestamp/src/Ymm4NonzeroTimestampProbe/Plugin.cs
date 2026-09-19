@@ -6,7 +6,6 @@ using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
-using YukkuriMovieMaker.Plugin.FileSource.FFmpeg;
 using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4NonzeroTimestampProbe;
@@ -103,8 +102,8 @@ internal static class Probe
 
     private static double ProbeContainerStart()
     {
-        var ffprobe = Path.Combine(FFmpegResourceLocator.GetFFmpegDirectory(), "ffprobe.exe");
-        if (!File.Exists(ffprobe)) throw new FileNotFoundException("ffprobe missing", ffprobe);
+        var ffprobe = Directory.GetFiles(AppContext.BaseDirectory, "ffprobe.exe", SearchOption.AllDirectories).SingleOrDefault()
+            ?? throw new FileNotFoundException("bundled ffprobe missing below YMM4 base directory");
         var psi = new ProcessStartInfo(ffprobe)
         {
             UseShellExecute = false,
