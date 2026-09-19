@@ -13,6 +13,7 @@ on:
       - 'experiments/ymm4/recording-archive-unicode-long-path/**'
       - 'experiments/ymm4/recording-archive-nonzero-timestamp/**'
       - 'experiments/ymm4/recording-archive-sceneitem-time-surface/**'
+      - 'experiments/ymm4/recording-archive-sceneitem-time-behavior/**'
       - '.github/workflows/ymm4-recording-archive-boundaries-round3.yml'
   pull_request:
     paths:
@@ -24,6 +25,7 @@ on:
       - 'experiments/ymm4/recording-archive-unicode-long-path/**'
       - 'experiments/ymm4/recording-archive-nonzero-timestamp/**'
       - 'experiments/ymm4/recording-archive-sceneitem-time-surface/**'
+      - 'experiments/ymm4/recording-archive-sceneitem-time-behavior/**'
       - '.github/workflows/ymm4-recording-archive-boundaries-round3.yml'
 
 permissions:
@@ -83,7 +85,8 @@ jobs:
             @('relative-live','experiments/ymm4/recording-archive-relative-path-live-open/src/Ymm4RelativeLiveOpenProbe/Ymm4RelativeLiveOpenProbe.csproj','Ymm4RelativeLiveOpenProbe'),
             @('unicode','experiments/ymm4/recording-archive-unicode-long-path/src/Ymm4UnicodeLongPathProbe/Ymm4UnicodeLongPathProbe.csproj','Ymm4UnicodeLongPathProbe'),
             @('nonzero-ts','experiments/ymm4/recording-archive-nonzero-timestamp/src/Ymm4NonzeroTimestampProbe/Ymm4NonzeroTimestampProbe.csproj','Ymm4NonzeroTimestampProbe'),
-            @('sceneitem-time','experiments/ymm4/recording-archive-sceneitem-time-surface/src/Ymm4SceneItemTimeProbe/Ymm4SceneItemTimeProbe.csproj','Ymm4SceneItemTimeProbe')
+            @('sceneitem-time','experiments/ymm4/recording-archive-sceneitem-time-surface/src/Ymm4SceneItemTimeProbe/Ymm4SceneItemTimeProbe.csproj','Ymm4SceneItemTimeProbe'),
+            @('sceneitem-behavior','experiments/ymm4/recording-archive-sceneitem-time-behavior/src/Ymm4SceneItemBehaviorProbe/Ymm4SceneItemBehaviorProbe.csproj','Ymm4SceneItemBehaviorProbe')
           )
           foreach($c in $cases){
             $out="out/build-$($c[0])";New-Item -ItemType Directory -Force $out|Out-Null
@@ -122,6 +125,12 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-sceneitem-time-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-sceneitem-time')
+      - id: sceneitem_behavior
+        name: SceneItem parent-to-child time behavior
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-sceneitem-time-behavior/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-sceneitem-behavior') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
       - id: eof
         name: Zero-percent EOF boundary observation
         if: always()
@@ -145,7 +154,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          foreach($dir in @('out/evidence-relative','out/evidence-relative-live','out/evidence-unicode','out/evidence-nonzero-ts','out/evidence-sceneitem-time','out/evidence-eof','out/evidence-loop','out/evidence-perf')){
+          foreach($dir in @('out/evidence-relative','out/evidence-relative-live','out/evidence-unicode','out/evidence-nonzero-ts','out/evidence-sceneitem-time','out/evidence-sceneitem-behavior','out/evidence-eof','out/evidence-loop','out/evidence-perf')){
             if(Test-Path $dir){Write-Host "=== $dir ===";Get-ChildItem $dir -File|ForEach-Object{Write-Host "--- $($_.Name) ---";Get-Content $_.FullName|Select-Object -First 300}}
           }
       - name: Upload evidence
@@ -172,6 +181,7 @@ jobs:
             @('unicode','${{ steps.unicode.outcome }}'),
             @('nonzero','${{ steps.nonzero.outcome }}'),
             @('sceneitem','${{ steps.sceneitem.outcome }}'),
+            @('sceneitem-behavior','${{ steps.sceneitem_behavior.outcome }}'),
             @('eof','${{ steps.eof.outcome }}'),
             @('loop','${{ steps.loop.outcome }}'),
             @('perf','${{ steps.perf.outcome }}')
