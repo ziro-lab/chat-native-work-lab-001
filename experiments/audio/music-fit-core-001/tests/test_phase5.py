@@ -42,6 +42,22 @@ def canonical(value):
     return value
 
 
+def edit_map_only(plans_dict):
+    # Cross-platform BLAS/NumPy can move diagnostic transition scores by tiny
+    # floating-point amounts without changing the chosen edit map. The legacy
+    # golden is an arrangement-regression guard, so hash only route semantics.
+    return [
+        {
+            'id': p['id'],
+            'target_frames': p['target_frames'],
+            'spans': p['spans'],
+            'ending': p['ending'],
+            'strategy': p['strategy'],
+        }
+        for p in plans_dict
+    ]
+
+
 class StructureTests(unittest.TestCase):
     def test_checkerboard_matches_brute_force_dot_kernel(self):
         x=np.random.default_rng(51).normal(size=(50,8)); width=4
@@ -148,7 +164,7 @@ class PlannerTests(unittest.TestCase):
     def test_extend_is_explicit_legacy_delegation(self):
         a=legacy_fixture();result=arrange(a,49.35)
         self.assertEqual([p.to_dict() for p in result.candidates],
-                         [p.to_dict() for p in plans(a,49.35,phase=4)])
+                        [p.to_dict() for p in plans(a,49.35,phase=4)])
         self.assertEqual(result.diagnostics['implementation'],'legacy_phase4_delegate')
         self.assertIsNone(result.hints)
 
@@ -173,8 +189,8 @@ class PlannerTests(unittest.TestCase):
         a=legacy_fixture();c=Config(max_jumps=8,beam_width=8)
         for row in data['cases']:
             result=[p.to_dict() for p in plans(a,row['seconds'],c,phase=row['phase'])]
-            actual=hashlib.sha256(json.dumps(canonical(result),sort_keys=True,separators=(',',':')).encode()).hexdigest()
-            self.assertEqual(actual,row['plan_sha256'],result)
+            actual=hashlib.sha256(json.dumps(edit_map_only(result),sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            self.assertEqual(actual,row['edit_map_sha256'],result)
 
 
 class Phase5IntegrationTests(unittest.TestCase):

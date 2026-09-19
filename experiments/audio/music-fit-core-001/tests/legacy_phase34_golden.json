@@ -8,42 +8,43 @@
     {
       "phase": 3,
       "seconds": 8.125,
-      "plan_sha256": "054bb182201dfc2d506c57de22743e2fa3b0b56ed258bf06a1d8cdec13b05d2a"
+      "edit_map_sha256": "287006a23b35060c8ca45f770b50f70efd8d7371e978b4c860dfb41d86a47695"
     },
     {
       "phase": 3,
       "seconds": 26.7,
-      "plan_sha256": "dfb7658f63484ae67a40c702e4fd217947d8f2532585347da740d5a7fb370905"
+      "edit_map_sha256": "3e5cbb88b8a7430884685bd0286ee6bc749b68931979d13342884916cc54a46e"
     },
     {
       "phase": 3,
       "seconds": 49.35,
-      "plan_sha256": "670063b849a6727be4b40e4921e2239cc9f35df4e6d20ad6b5a7fb87fb79aede"
+      "edit_map_sha256": "403084fd9b66c8264a41f1f87d9c1aac36a32b17bbbe8f7661887ec98e52df9e"
     },
     {
       "phase": 3,
       "seconds": 84.02,
-      "plan_sha256": "ec0ccaa55b03ce86bcb2326b2bbf374ec47439690428cbfb4bf9985a1bf8d8af"
+      "edit_map_sha256": "e908c92dbf92fc897f418bd2d4d7422896f670aef07b6bd3d19fd995c60da307"
     },
     {
       "phase": 4,
       "seconds": 8.125,
-      "plan_sha256": "f3a5bbb6b9d9c0ec8c1adf849f4b3e53bfb063bf0f6e39862d2b50079db1fca4"
+      "edit_map_sha256": "68f50bb83b367213aa791687a9e3888d36c94c64e2f0a8021f1fde15995c22fb"
     },
     {
       "phase": 4,
       "seconds": 26.7,
-      "plan_sha256": "5ce0b079cd422fed5aeace28485a53f8e16ca31daf0b8ac2ac0d3ca470588d3d"
+      "edit_map_sha256": "04c74e11f14b345e3ac3f39e4e49375a070318cc6b803f26994fd917d641ea29"
     },
     {
       "phase": 4,
       "seconds": 49.35,
-      "plan_sha256": "9900000c52cd120d3a0c52966991368cb9464f6d185ad4bef96dd7f70ba43af9"
+      "edit_map_sha256": "b9079f2286fc8bcfd0ef8c609f48904f659d522e38c24fd3d22120fadb3afad6"
     },
     {
       "phase": 4,
       "seconds": 84.02,
-      "plan_sha256": "9b610b21d4216627d66eb5cd5a745dd9e5e009ee02f913b27ec44a367cc2c181"
+      "edit_map_sha256": "61d99d1a55d8260f434a201200cd3f895478a194a07ce70c2df2ef1c18df17e2"
     }
-  ]
+  ],
+  "hash_scope": "ordered candidate edit maps only: id,target_frames,spans,ending,strategy; excludes floating diagnostic scores/costs/warnings"
 }
