@@ -13,7 +13,7 @@ internal static class Probe
   var project=Path.Combine(dir,"作品 アーカイブ 🚀 [長い名前].ymmp");var mt=model.GetType();(mt.GetMethod("SaveProject",[typeof(string)])??throw new MissingMethodException()).Invoke(model,[project]);
   var load=mt.GetMethod("LoadProjectFile",[typeof(string)])??throw new MissingMethodException("LoadProjectFile");var task=load.Invoke(model,[project]) as Task??throw new Exception("load task");await task;var p=task.GetType().GetProperty("Result")?.GetValue(task) as YmmProject??throw new Exception("project result");
   var tp=p.GetType().GetProperty("Timelines",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)??throw new Exception("Timelines");var tls=(tp.GetValue(p) as IEnumerable<Timeline>)!.ToArray();var loaded=tls.SelectMany(x=>x.Items).OfType<VideoItem>().Single(x=>x.Remark=="CNWL_UNICODE_LONG");await Idle();
-  File.WriteAllLines(Path.Combine(output,"result.txt"),["status=PASS_UNICODE_LONG_PATH","media_path_chars="+media.Length,"project_path_chars="+project.Length,"content_length_positive="+(loaded.ContentLength>TimeSpan.Zero),"exact_path_preserved="+string.Equals(Path.GetFullPath(media),Path.GetFullPath(loaded.FilePath),StringComparison.OrdinalIgnoreCase)],new UTF8Encoding(false));
+  File.WriteAllLines(Path.Combine(output,"result.txt"),["status=PASS_UNICODE_LONG_PATH","media_path_chars="+media.Length,"project_path_chars="+project.Length,"content_length_positive="+(loaded.ContentLength>TimeSpan.Zero),"exact_path_preserved="+string.Equals(Path.GetFullPath(media),Path.GetFullPath(loaded.FilePath ?? ""),StringComparison.OrdinalIgnoreCase)],new UTF8Encoding(false));
  }
  static async Task Idle()=>await Application.Current.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle).Task;
 }
