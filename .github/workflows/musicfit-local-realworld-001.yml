@@ -24,6 +24,8 @@ jobs:
     env:
       OPENBLAS_NUM_THREADS: 1
       OMP_NUM_THREADS: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -164,23 +166,9 @@ jobs:
         run: |
           $src = "experiments/audio/musicfit-local-realworld-001"
           $core = "experiments/audio/music-fit-core-001"
-          $dst = "package/MusicFit_Local_RealWorld_Test_v0.1.1"
+          $dst = "package/MusicFit_Local_RealWorld_Test_v0.2.0a1"
           New-Item -ItemType Directory -Force -Path $dst | Out-Null
           New-Item -ItemType Directory -Force -Path "$dst/input" | Out-Null
           Copy-Item "$src/README_JA.md" $dst
           Copy-Item "$src/settings.json" $dst
-          Copy-Item "$src/setup_windows.bat" $dst
-          Copy-Item "$src/run_windows.bat" $dst
-          Copy-Item "$src/run_local_test.py" $dst
-          Copy-Item "$src/score_local_ratings.py" $dst
-          Copy-Item "$src/requirements.txt" $dst
-          Copy-Item "$src/input/ã“ã“ã«BGMã‚’å…¥ã‚Œã‚‹.txt" "$dst/input/"
-          Copy-Item -Recurse "$core/musicfit" "$dst/musicfit"
-
-      - name: Upload Windows local test package
-        uses: actions/upload-artifact@v4
-        with:
-          name: MusicFit-Local-RealWorld-Test-v0.1.1
-          path: package/MusicFit_Local_RealWorld_Test_v0.1.1
-          if-no-files-found: error
-          retention-days: 14
+         ÛÜKR][H‰Ü˜ËÜÙ][™ÜËœ\ÙMKšœÛÛˆˆ	ÝˆÛÜKR][H‰Ü˜ËÜÙ]\ÝÚ[™ÝÜË˜˜]ˆ	ÝˆÛÜKR][H‰Ü˜ËÜ[—ÝÚ[™ÝÜË˜˜]ˆ	ÝˆÛÜKR][H‰Ü˜ËÜ[—Ü\ÙMWÝÚ[™ÝÜË˜˜]ˆ	ÝˆÛÜKR][H‰Ü˜ËÜ[—ÛØØ[Ý\ÝœHˆ	ÝˆÛÜKR][H‰Ü˜ËÜØÛÜ™WÛØØ[Ü˜][™ÜËœHˆ	ÝˆÛÜKR][H‰Ü˜ËÜ™\]Z\™[Y[Ëˆ	Ýˆ6÷’Ô—FVÒ"G7&2ö–çWBþ8>8>8´$tÞ8).XZ^8(Î8(²çG‡B""FG7Bö–çWBò ¢æWrÔ—FVÒÔ—FVÕG—RF—&V7F÷'’Ôf÷&6RÕF‚"FG7Bö×W6–6f—B"Â÷WBÔçVÆÀ¢6÷’Ô—FVÒ"F6÷&Rö×W6–6f—Bò¢ç’""FG7Bö×W6–6f—Bò  ¢ÒæÖS¢FW7BF†R76VÖ&ÆVB†6RR6¶vRæB&V6÷&B–FVçF—G¢'Vã¢—F†öâW‡W&–ÖVçG2öVF–òö×W6–6f—BÖÆö6Â×&VÇv÷&ÆBÓ÷†6SU÷6¶vU÷6Öö¶Rç’Ò×6¶vR6¶vRô×W6–4f—EôÆö6Åõ&VÅv÷&ÆEõFW7E÷cã"ã ¢ÒæÖS¢WÆöBv–æF÷w2Æö6ÂFW7B6¶vP¢W6W3¢7F–öç2÷WÆöBÖ'F–f7Dc@¢v—Fƒ ¢æÖS¢×W6–4f—BÔÆö6ÂÕ&VÅv÷&ÆBÕFW7B×cã"ã¢Fƒ¢6¶vRô×W6–4f—EôÆö6Åõ&VÅv÷&ÆEõFW7E÷cã"ã¢–bÖæòÖf–ÆW2Öf÷VæC¢W'&÷ ¢&WFVçF–öâÖF—3¢@ ¢ÒæÖS¢WÆöB†6RR76W'F–öâWf–FVæ6P¢W6W3¢7F–öç2÷WÆöBÖ'F–f7Dc@¢v—Fƒ ¢æÖS¢×W6–6f—B×†6SRÖ6†V6·ö–çBÖÖWf–FVæ6P¢Fƒ¢W‡W&–ÖVçG2öVF–òö×W6–6f—BÖÆö6Â×&VÇv÷&ÆBÓ÷†6SR×6¶vRÖWf–FVæ6Ræ§6öà¢–bÖæòÖf–ÆW2Öf÷VæC¢W'&÷ ¢&WFVçF–öâÖF—3¢@

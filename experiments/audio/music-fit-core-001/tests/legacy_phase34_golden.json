@@ -1,0 +1,49 @@
+{
+  "baseline_commit": "eb301419efceb8df5cac77ad8012603d95c1c8ae",
+  "baseline_blob": "9a73c5bc1c29196df594e20b8b25fd8d6ab41c95",
+  "oracle": "unmodified v0.1.1 core from SHA256-verified Windows artifact 10558097162",
+  "fixture": "test_phase5.legacy_fixture",
+  "round_float_decimals": 9,
+  "cases": [
+    {
+      "phase": 3,
+      "seconds": 8.125,
+      "plan_sha256": "054bb182201dfc2d506c57de22743e2fa3b0b56ed258bf06a1d8cdec13b05d2a"
+    },
+    {
+      "phase": 3,
+      "seconds": 26.7,
+      "plan_sha256": "dfb7658f63484ae67a40c702e4fd217947d8f2532585347da740d5a7fb370905"
+    },
+    {
+      "phase": 3,
+      "seconds": 49.35,
+      "plan_sha256": "670063b849a6727be4b40e4921e2239cc9f35df4e6d20ad6b5a7fb87fb79aede"
+    },
+    {
+      "phase": 3,
+      "seconds": 84.02,
+      "plan_sha256": "ec0ccaa55b03ce86bcb2326b2bbf374ec47439690428cbfb4bf9985a1bf8d8af"
+    },
+    {
+      "phase": 4,
+      "seconds": 8.125,
+      "plan_sha256": "f3a5bbb6b9d9c0ec8c1adf849f4b3e53bfb063bf0f6e39862d2b50079db1fca4"
+    },
+    {
+      "phase": 4,
+      "seconds": 26.7,
+      "plan_sha256": "5ce0b079cd422fed5aeace28485a53f8e16ca31daf0b8ac2ac0d3ca470588d3d"
+    },
+    {
+      "phase": 4,
+      "seconds": 49.35,
+      "plan_sha256": "9900000c52cd120d3a0c52966991368cb9464f6d185ad4bef96dd7f70ba43af9"
+    },
+    {
+      "phase": 4,
+      "seconds": 84.02,
+      "plan_sha256": "9b610b21d4216627d66eb5cd5a745dd9e5e009ee02f913b27ec44a367cc2c181"
+    }
+  ]
+}
