@@ -1,0 +1,5 @@
+param([Parameter(Mandatory=$true)][string]$Ymm4Dir,[Parameter(Mandatory=$true)][string]$OutputDir,[Parameter(Mandatory=$true)][string]$Fixture)
+$ErrorActionPreference='Stop';New-Item -ItemType Directory -Force $OutputDir|Out-Null;$r=Join-Path $OutputDir 'result.txt';Remove-Item $r -Force -ErrorAction SilentlyContinue
+$env:CNWL_YMM4_UNICODE_LONG_DIR=$OutputDir;$env:CNWL_YMM4_UNICODE_LONG_FIXTURE=(Resolve-Path $Fixture).Path
+$p=Start-Process -FilePath (Join-Path $Ymm4Dir 'YukkuriMovieMaker.exe') -WorkingDirectory $Ymm4Dir -PassThru
+try{for($i=0;$i -lt 180;$i++){if(Test-Path $r){break};if($p.HasExited){break};Start-Sleep -Milliseconds 500};if(-not(Test-Path $r)){throw 'Unicode path probe did not report'};$rows=Get-Content $r;if($rows -notcontains 'status=PASS_UNICODE_LONG_PATH'){throw "Probe failed.`n$($rows -join "`n")"}}finally{if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue};Remove-Item Env:CNWL_YMM4_UNICODE_LONG_DIR,Env:CNWL_YMM4_UNICODE_LONG_FIXTURE -ErrorAction SilentlyContinue}

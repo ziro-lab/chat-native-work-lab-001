@@ -1,0 +1,248 @@
+name: YMM4 Recording Archive boundaries round 3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/recording-archive-boundaries-round3]
+    paths:
+      - 'experiments/ymm4/recording-archive-relative-path-portability/**'
+      - 'experiments/ymm4/recording-archive-zero-eof-boundary/**'
+      - 'experiments/ymm4/recording-archive-loop-surface/**'
+      - 'experiments/ymm4/recording-archive-map-validation-perf/**'
+      - 'experiments/ymm4/recording-archive-relative-path-live-open/**'
+      - 'experiments/ymm4/recording-archive-unicode-long-path/**'
+      - 'experiments/ymm4/recording-archive-nonzero-timestamp/**'
+      - 'experiments/ymm4/recording-archive-sceneitem-time-surface/**'
+      - 'experiments/ymm4/recording-archive-sceneitem-time-behavior/**'
+      - '.github/workflows/ymm4-recording-archive-boundaries-round3.yml'
+  pull_request:
+    paths:
+      - 'experiments/ymm4/recording-archive-relative-path-portability/**'
+      - 'experiments/ymm4/recording-archive-zero-eof-boundary/**'
+      - 'experiments/ymm4/recording-archive-loop-surface/**'
+      - 'experiments/ymm4/recording-archive-map-validation-perf/**'
+      - 'experiments/ymm4/recording-archive-relative-path-live-open/**'
+      - 'experiments/ymm4/recording-archive-unicode-long-path/**'
+      - 'experiments/ymm4/recording-archive-nonzero-timestamp/**'
+      - 'experiments/ymm4/recording-archive-sceneitem-time-surface/**'
+      - 'experiments/ymm4/recording-archive-sceneitem-time-behavior/**'
+      - '.github/workflows/ymm4-recording-archive-boundaries-round3.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-recording-archive-boundaries-r3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-boundaries:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK missing' }
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 exe missing.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate safe synthetic media fixture with bundled FFmpeg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/fixture | Out-Null
+          $ff=Get-ChildItem $env:YMM4_DIR -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if(-not $ff){throw 'Bundled ffmpeg missing'}
+          & $ff.FullName -hide_banner -loglevel error -f lavfi -i "testsrc2=size=320x180:rate=60" -f lavfi -i "sine=frequency=997:sample_rate=48000" -t 3 -c:v mpeg4 -g 60 -q:v 4 -pix_fmt yuv420p -c:a aac -shortest out/fixture/clock.mp4
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path out/fixture/clock.mp4)){throw 'Fixture generation failed'}
+          $probe=Join-Path $ff.Directory.FullName 'ffprobe.exe'
+          & $ff.FullName -hide_banner -loglevel error -i out/fixture/clock.mp4 -map 0 -c copy -output_ts_offset 5 out/fixture/nonzero.mkv
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path out/fixture/nonzero.mkv)){throw 'Nonzero timestamp fixture generation failed'}
+          $start=& $probe -v error -show_entries format=start_time -of default=noprint_wrappers=1:nokey=1 out/fixture/nonzero.mkv
+          $startValue=[double]::Parse(($start|Select-Object -First 1),[Globalization.CultureInfo]::InvariantCulture)
+          if($startValue -lt 4.9){throw "Nonzero timestamp fixture did not preserve offset: $startValue"}
+      - name: Build and install probes
+        shell: pwsh
+        run: |
+          $cases=@(
+            @('relative','experiments/ymm4/recording-archive-relative-path-portability/src/Ymm4RelativePathPortabilityProbe/Ymm4RelativePathPortabilityProbe.csproj','Ymm4RelativePathPortabilityProbe'),
+            @('eof','experiments/ymm4/recording-archive-zero-eof-boundary/src/Ymm4ZeroEofProbe/Ymm4ZeroEofProbe.csproj','Ymm4ZeroEofProbe'),
+            @('loop','experiments/ymm4/recording-archive-loop-surface/src/Ymm4LoopSurfaceProbe/Ymm4LoopSurfaceProbe.csproj','Ymm4LoopSurfaceProbe'),
+            @('perf','experiments/ymm4/recording-archive-map-validation-perf/src/Ymm4MapValidationPerfProbe/Ymm4MapValidationPerfProbe.csproj','Ymm4MapValidationPerfProbe'),
+            @('relative-live','experiments/ymm4/recording-archive-relative-path-live-open/src/Ymm4RelativeLiveOpenProbe/Ymm4RelativeLiveOpenProbe.csproj','Ymm4RelativeLiveOpenProbe'),
+            @('unicode','experiments/ymm4/recording-archive-unicode-long-path/src/Ymm4UnicodeLongPathProbe/Ymm4UnicodeLongPathProbe.csproj','Ymm4UnicodeLongPathProbe'),
+            @('nonzero-ts','experiments/ymm4/recording-archive-nonzero-timestamp/src/Ymm4NonzeroTimestampProbe/Ymm4NonzeroTimestampProbe.csproj','Ymm4NonzeroTimestampProbe'),
+            @('sceneitem-time','experiments/ymm4/recording-archive-sceneitem-time-surface/src/Ymm4SceneItemTimeProbe/Ymm4SceneItemTimeProbe.csproj','Ymm4SceneItemTimeProbe')
+          )
+          foreach($c in $cases){
+            $out="out/build-$($c[0])";New-Item -ItemType Directory -Force $out|Out-Null
+            dotnet build $c[1] -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o $out --nologo -warnaserror 2>&1 | Tee-Object "$out/build.txt"
+            if($LASTEXITCODE -ne 0){throw "Build failed: $($c[0])"}
+            $dest=Join-Path $env:YMM4_DIR ("user\plugin\"+$c[2]);New-Item -ItemType Directory -Force $dest|Out-Null
+            Copy-Item (Join-Path $out ($c[2]+'.dll')) $dest
+          }
+
+      - id: relative
+        name: Relative-path portability observation
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-relative-path-portability/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-relative') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
+      - id: relative_live
+        name: Relative-path live OpenProject observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-relative-path-live-open/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-relative-live') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
+      - id: unicode
+        name: Unicode and long absolute path observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-unicode-long-path/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-unicode') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
+      - id: nonzero
+        name: Non-zero container timestamp observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-nonzero-timestamp/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-nonzero-ts') -Fixture (Join-Path $PWD 'out/fixture/nonzero.mkv')
+      - id: sceneitem
+        name: SceneItem child-time surface observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-sceneitem-time-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-sceneitem-time')
+      - id: eof
+        name: Zero-percent EOF boundary observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-zero-eof-boundary/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-eof') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
+      - id: loop
+        name: Loop playback surface observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-loop-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-loop')
+      - id: perf
+        name: All-frame map-validation cost observation
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-map-validation-perf/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-perf')
+
+      - name: Print bounded evidence
+        if: always()
+        shell: pwsh
+        run: |
+          foreach($dir in @('out/evidence-relative','out/evidence-relative-live','out/evidence-unicode','out/evidence-nonzero-ts','out/evidence-sceneitem-time','out/evidence-eof','out/evidence-loop','out/evidence-perf')){
+            if(Test-Path $dir){Write-Host "=== $dir ===";Get-ChildItem $dir -File|ForEach-Object{Write-Host "--- $($_.Name) ---";Get-Content $_.FullName|Select-Object -First 300}}
+          }
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-recording-archive-boundaries-round3
+          path: |
+            out/evidence-*/
+            out/build-*/build.txt
+            out/fixture/clock.mp4
+            out/fixture/nonzero.mkv
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Fail only after all observations have run
+        if: always()
+        shell: pwsh
+        run: |
+          $failed=@()
+          foreach($pair in @(
+            @('relative','${{ steps.relative.outcome }}'),
+            @('relative-live','${{ steps.relative_live.outcome }}'),
+            @('unicode','${{ steps.unicode.outcome }}'),
+            @('nonzero','${{ steps.nonzero.outcome }}'),
+            @('sceneitem','${{ steps.sceneitem.outcome }}'),
+            @('eof','${{ steps.eof.outcome }}'),
+            @('loop','${{ steps.loop.outcome }}'),
+            @('perf','${{ steps.perf.outcome }}')
+          )){
+            Write-Host "$($pair[0])=$($pair[1])"
+            if($pair[1] -ne 'success'){$failed += $pair[0]}
+          }
+          if($failed.Count -gt 0){throw "Round 3 observations failed: $($failed -join ', ')"}
+
+
+  sceneitem-behavior:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks-sceneitem.txt
+          if (-not (Select-String -Path dotnet-sdks-sceneitem.txt -Pattern '^10\.')) { throw '.NET 10 SDK missing' }
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4-sceneitem.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash=(Get-FileHash ymm4-sceneitem.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4-sceneitem.zip -DestinationPath ymm4-sceneitem
+          $exe=Get-ChildItem ymm4-sceneitem -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 exe missing.' }
+          "SCENEITEM_YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate sceneitem synthetic media fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/sceneitem-fixture | Out-Null
+          $ff=Get-ChildItem $env:SCENEITEM_YMM4_DIR -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if(-not $ff){throw 'Bundled ffmpeg missing'}
+          & $ff.FullName -hide_banner -loglevel error -f lavfi -i "testsrc2=size=320x180:rate=60" -f lavfi -i "sine=frequency=997:sample_rate=48000" -t 3 -c:v mpeg4 -g 60 -q:v 4 -pix_fmt yuv420p -c:a aac -shortest out/sceneitem-fixture/clock.mp4
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path out/sceneitem-fixture/clock.mp4)){throw 'Fixture generation failed'}
+      - name: Build and install SceneItem behavior probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/build-sceneitem-behavior | Out-Null
+          dotnet build experiments/ymm4/recording-archive-sceneitem-time-behavior/src/Ymm4SceneItemBehaviorProbe/Ymm4SceneItemBehaviorProbe.csproj -c Release "-p:YMM4DirPath=$env:SCENEITEM_YMM4_DIR" -o out/build-sceneitem-behavior --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'SceneItem behavior build failed'}
+          $dest=Join-Path $env:SCENEITEM_YMM4_DIR 'user\plugin\Ymm4SceneItemBehaviorProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/build-sceneitem-behavior/Ymm4SceneItemBehaviorProbe.dll $dest
+      - name: Observe SceneItem parent-to-child time behavior
+        shell: pwsh
+        run: ./experiments/ymm4/recording-archive-sceneitem-time-behavior/RunNative.ps1 -Ymm4Dir $env:SCENEITEM_YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-sceneitem-behavior') -Fixture (Join-Path $PWD 'out/sceneitem-fixture/clock.mp4')
+      - name: Print SceneItem behavior evidence
+        if: always()
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence-sceneitem-behavior){
+            Get-ChildItem out/evidence-sceneitem-behavior -File | ForEach-Object { Write-Host "=== $($_.Name) ==="; Get-Content $_.FullName | Select-Object -First 300 }
+          }
+      - name: Upload SceneItem behavior evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-recording-archive-sceneitem-behavior
+          path: |
+            out/evidence-sceneitem-behavior/
+            out/build-sceneitem-behavior/
+            dotnet-sdks-sceneitem.txt
+          if-no-files-found: warn
+          retention-days: 14
