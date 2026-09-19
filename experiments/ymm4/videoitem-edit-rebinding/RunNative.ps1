@@ -18,7 +18,7 @@ try{
  'tail_trim_insert','tail_trim_same_reference','tail_trim_timeline','tail_trim_source',
  'move_insert','move_split_two','move_same_reference','move_timeline_changed','move_source_unchanged',
  'duplicate_insert','duplicate_two_occurrences','duplicate_same_source_range','duplicate_different_timeline_positions',
- 'undo_insert','keyboard_split_created','keyboard_undo_restores_one_piece','keyboard_redo_restores_two_pieces'
+ 'undo_insert','undo_split_created','split_emits_undo_command','undo_restores_one_piece','redo_restores_two_pieces'
  )
  if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count) != $($req.Count)"}
  foreach($id in $req){
