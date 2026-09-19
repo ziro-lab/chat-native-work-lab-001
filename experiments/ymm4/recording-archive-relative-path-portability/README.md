@@ -21,3 +21,18 @@ This experiment is observational. Unsupported relative paths are a valid result;
 ## PASS boundary
 
 A PASS means the exact host behavior was observed and recorded. It does not assume relative-path portability unless the evidence says the moved media is actually resolved.
+
+## Result
+
+YMM4 preserves the relative string `recordings\clip.mp4`, but does **not** resolve it against the moved project directory in the tested paths. After copying A → B, deleting A's media, and loading B's project, the VideoItem still carried the relative string but `ContentLength` remained zero. The live OpenProject companion observation produced the same result.
+
+Therefore simple relative-FilePath rewriting is not a proven portable-archive mechanism on v4.56.1.0.
+
+## Evidence
+
+- Exact host: YMM4 Lite 4.56.1.0
+- Official ZIP SHA256: `49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a`
+- Final workflow run: `35431031566`
+- Native boundaries job: `105865515319`
+- Native boundaries artifact: `10580747697`
+- Artifact SHA256: `ef5a33b26b5a5f88d922b563aadbf89ad5d8897662e5b984e3da7e4066b0f2e4`
