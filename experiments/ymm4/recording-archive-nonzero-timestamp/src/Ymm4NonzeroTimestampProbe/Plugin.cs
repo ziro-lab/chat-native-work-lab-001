@@ -1,11 +1,9 @@
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
-using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4NonzeroTimestampProbe;
@@ -34,79 +32,37 @@ internal static class Probe
         Application.Current.Dispatcher.BeginInvoke(new Action(Start), DispatcherPriority.ApplicationIdle);
     }
 
-    private static void Start()
+    private static async void Start()
     {
-        var ticks = 0;
-        var lastCreateAttempt = -100;
-        var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(400) };
-        timer.Tick += async (_, _) =>
+        try
         {
-            try
-            {
-                ticks++;
-                foreach (Window window in Application.Current.Windows)
-                {
-                    var root = window.DataContext;
-                    if (root?.GetType().FullName != "YukkuriMovieMaker.ViewModels.MainViewModel") continue;
+            if (!File.Exists(fixture)) throw new FileNotFoundException("fixture missing", fixture);
+            var item = new VideoItem(fixture) { Length = 120, Frame = 0, Layer = 10, Remark = "CNWL_NONZERO_TS" };
 
-                    var active = root.GetType().GetProperty("ActiveTimelineViewModel")?.GetValue(root);
-                    if (active == null)
-                    {
-                        // Startup can expose MainViewModel before its first Timeline is ready.
-                        // Retry CreateProject at a bounded cadence rather than assuming one early call must succeed.
-                        if (ticks - lastCreateAttempt >= 8)
-                        {
-                            lastCreateAttempt = ticks;
-                            root.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(root, null);
-                            Append($"CREATE_PROJECT_RETRY tick={ticks}");
-                        }
-                        break;
-                    }
+            // Content metadata is populated asynchronously by the real host. No Timeline is needed
+            // for this question; avoiding project creation keeps startup state out of the observation.
+            for (var i = 0; i < 120 && item.ContentLength <= TimeSpan.Zero; i++)
+                await Task.Delay(100);
 
-                    var timeline = active.GetType().GetField("timeline", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(active) as Timeline;
-                    if (timeline == null) continue;
-                    timer.Stop();
-                    await RunAsync(timeline);
-                    return;
-                }
+            Append("FILEPATH=" + item.FilePath);
+            Append("CONTENT_LENGTH=" + item.ContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture));
+            Append("ORIGINAL_CONTENT_LENGTH=" + item.OriginalContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture));
 
-                if (ticks >= 180) throw new TimeoutException("YMM4 timeline did not become ready after bounded CreateProject retries.");
-            }
-            catch (Exception ex)
-            {
-                timer.Stop();
-                Append("ERROR " + ex);
-                File.WriteAllLines(Path.Combine(output, "result.txt"),
-                    ["status=FAIL_EXCEPTION", "detail=" + ex.GetBaseException().Message],
-                    new UTF8Encoding(false));
-            }
-        };
-        timer.Start();
-    }
-
-    private static async Task RunAsync(Timeline timeline)
-    {
-        if (!File.Exists(fixture)) throw new FileNotFoundException("fixture missing", fixture);
-
-        var item = new VideoItem(fixture) { Frame = 0, Layer = 10, Remark = "CNWL_NONZERO_TS" };
-        if (!timeline.TryAddItems([item], 0, 10)) throw new InvalidOperationException("VideoItem add failed");
-
-        // Let the host media loader run without blocking the dispatcher. This is an observation:
-        // zero length is a valid measured result, but the probe itself must not hang forever.
-        for (var i = 0; i < 80 && item.ContentLength <= TimeSpan.Zero; i++)
-            await Task.Delay(100);
-
-        Append("FILEPATH=" + item.FilePath);
-        Append("CONTENT_LENGTH=" + item.ContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture));
-        Append("ORIGINAL_CONTENT_LENGTH=" + item.OriginalContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture));
-
-        File.WriteAllLines(Path.Combine(output, "result.txt"),
-        [
-            "status=PASS_NONZERO_TIMESTAMP_OBSERVATION",
-            "content_length=" + item.ContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture),
-            "original_content_length=" + item.OriginalContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture),
-            "content_length_positive=" + (item.ContentLength > TimeSpan.Zero)
-        ], new UTF8Encoding(false));
+            File.WriteAllLines(Path.Combine(output, "result.txt"),
+            [
+                "status=PASS_NONZERO_TIMESTAMP_OBSERVATION",
+                "content_length=" + item.ContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture),
+                "original_content_length=" + item.OriginalContentLength.TotalSeconds.ToString("R", CultureInfo.InvariantCulture),
+                "content_length_positive=" + (item.ContentLength > TimeSpan.Zero)
+            ], new UTF8Encoding(false));
+        }
+        catch (Exception ex)
+        {
+            Append("ERROR " + ex);
+            File.WriteAllLines(Path.Combine(output, "result.txt"),
+                ["status=FAIL_EXCEPTION", "detail=" + ex.GetBaseException().Message],
+                new UTF8Encoding(false));
+        }
     }
 
     private static void Append(string line) =>
