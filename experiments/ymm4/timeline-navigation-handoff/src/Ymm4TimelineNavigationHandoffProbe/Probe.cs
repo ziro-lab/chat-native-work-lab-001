@@ -188,6 +188,9 @@ internal static class NavigationProbe
             var scrollToItem=active.GetType().GetMethods(BindingFlags.Instance|BindingFlags.Public).FirstOrDefault(m=>m.Name=="ScrollToItem"&&m.GetParameters().Length==1);
             var publicSurface=PublicSurface(active).ToArray();
             var visibleCount=publicSurface.Count(x=>x.Contains("VISIBLE_RANGE_CANDIDATE",StringComparison.Ordinal)||x.Contains("VIEWPORT_CANDIDATE",StringComparison.Ordinal));
+            var focusService=active.GetType().GetProperty("FocusService",BindingFlags.Instance|BindingFlags.Public)?.GetValue(active);
+            var focusServiceSurface=focusService==null?[]:DescribePublicMembers(focusService.GetType()).ToArray();
+            File.WriteAllLines(Path.Combine(OutDir,"focus-service.txt"),focusServiceSurface,new UTF8Encoding(false));
 
             if(scrollFrame!=null)scrollFrame.Invoke(active,[redFrame]); else scrollToItem?.Invoke(active,[video]);
             await Task.Delay(600);
@@ -229,6 +232,27 @@ internal static class NavigationProbe
             }
             var afterProgramFocus=CapturePreview(preview);
             var programFocusUpdates=reset.IsRed&&!afterDirect2.IsGreen&&programFocus&&afterProgramFocus.IsGreen;
+
+            var focusServiceCandidate=focusService?.GetType().GetMethods(BindingFlags.Instance|BindingFlags.Public)
+                .Where(m=>m.GetParameters().Length==0&&
+                    (m.Name.Equals("Focus",StringComparison.OrdinalIgnoreCase)||
+                     m.Name.Equals("RequestFocus",StringComparison.OrdinalIgnoreCase)||
+                     m.Name.Equals("SetFocus",StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(m=>m.Name,StringComparer.Ordinal).FirstOrDefault();
+            var focusServiceInvoked=false;var focusServiceKeyboardTarget="<not-invoked>";
+            if(focusServiceCandidate!=null){
+                Window.GetWindow(button)?.Activate();button.Focus();Keyboard.Focus(button);await Task.Delay(150);
+                t.CurrentFrame=greenFrame;t.SelectItem(video);await Task.Delay(250);
+                try{
+                    focusServiceCandidate.Invoke(focusService,null);focusServiceInvoked=true;await Task.Delay(600);
+                    focusServiceKeyboardTarget=Keyboard.FocusedElement?.GetType().FullName??"<null>";
+                }catch(Exception ex){focusServiceKeyboardTarget="THROW:"+ex.GetBaseException().GetType().FullName+":"+ex.GetBaseException().Message;}
+            }
+            File.AppendAllLines(Path.Combine(OutDir,"focus-service.txt"),[
+                $"candidate={focusServiceCandidate?.Name??"<none>"}",
+                $"invoked={focusServiceInvoked}",
+                $"keyboard_target_after_invoke={focusServiceKeyboardTarget}"
+            ],new UTF8Encoding(false));
 
             if(scrollFrame!=null)scrollFrame.Invoke(active,[redFrame]);await Task.Delay(500);
             var nearContainsNear=InvokeBool(containFrame,active,redFrame);
@@ -309,6 +333,16 @@ internal static class NavigationProbe
         }
     }
     static string DescribeColor(string name,ColorSample c)=>$"{name} avg=({c.R},{c.G},{c.B}) red_pixels={c.RedPixels}/{c.PixelCount} green_pixels={c.GreenPixels}/{c.PixelCount} red={c.IsRed} green={c.IsGreen}";
+
+    static IEnumerable<string> DescribePublicMembers(Type t)
+    {
+        foreach(var p in t.GetProperties(BindingFlags.Instance|BindingFlags.Public).OrderBy(p=>p.Name))
+            yield return $"PROPERTY {t.FullName}.{p.Name}:{p.PropertyType.FullName} read={p.CanRead} write={p.CanWrite}";
+        foreach(var m in t.GetMethods(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly).OrderBy(m=>m.Name))
+            yield return $"METHOD {t.FullName}.{m.Name}({string.Join(",",m.GetParameters().Select(p=>p.ParameterType.FullName))}):{m.ReturnType.FullName}";
+        foreach(var e in t.GetEvents(BindingFlags.Instance|BindingFlags.Public).OrderBy(e=>e.Name))
+            yield return $"EVENT {t.FullName}.{e.Name}:{e.EventHandlerType?.FullName}";
+    }
 
     static IEnumerable<string> PublicSurface(object active)
     {
