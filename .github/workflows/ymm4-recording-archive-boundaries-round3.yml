@@ -36,7 +36,7 @@ concurrency:
 jobs:
   native-boundaries:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -92,30 +92,55 @@ jobs:
             $dest=Join-Path $env:YMM4_DIR ("user\plugin\"+$c[2]);New-Item -ItemType Directory -Force $dest|Out-Null
             Copy-Item (Join-Path $out ($c[2]+'.dll')) $dest
           }
-      - name: Relative-path portability observation
+
+      - id: relative
+        name: Relative-path portability observation
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-relative-path-portability/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-relative') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
-      - name: Relative-path live OpenProject observation
+      - id: relative_live
+        name: Relative-path live OpenProject observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-relative-path-live-open/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-relative-live') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
-      - name: Unicode and long absolute path observation
+      - id: unicode
+        name: Unicode and long absolute path observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-unicode-long-path/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-unicode') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
-      - name: Non-zero container timestamp observation
+      - id: nonzero
+        name: Non-zero container timestamp observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-nonzero-timestamp/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-nonzero-ts') -Fixture (Join-Path $PWD 'out/fixture/nonzero.mkv')
-      - name: SceneItem child-time surface observation
+      - id: sceneitem
+        name: SceneItem child-time surface observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-sceneitem-time-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-sceneitem-time')
-      - name: Zero-percent EOF boundary observation
+      - id: eof
+        name: Zero-percent EOF boundary observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-zero-eof-boundary/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-eof') -Fixture (Join-Path $PWD 'out/fixture/clock.mp4')
-      - name: Loop playback surface observation
+      - id: loop
+        name: Loop playback surface observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-loop-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-loop')
-      - name: All-frame map-validation cost observation
+      - id: perf
+        name: All-frame map-validation cost observation
+        if: always()
+        continue-on-error: true
         shell: pwsh
         run: ./experiments/ymm4/recording-archive-map-validation-perf/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence-perf')
+
       - name: Print bounded evidence
         if: always()
         shell: pwsh
@@ -136,3 +161,22 @@ jobs:
             dotnet-sdks.txt
           if-no-files-found: warn
           retention-days: 14
+      - name: Fail only after all observations have run
+        if: always()
+        shell: pwsh
+        run: |
+          $failed=@()
+          foreach($pair in @(
+            @('relative','${{ steps.relative.outcome }}'),
+            @('relative-live','${{ steps.relative_live.outcome }}'),
+            @('unicode','${{ steps.unicode.outcome }}'),
+            @('nonzero','${{ steps.nonzero.outcome }}'),
+            @('sceneitem','${{ steps.sceneitem.outcome }}'),
+            @('eof','${{ steps.eof.outcome }}'),
+            @('loop','${{ steps.loop.outcome }}'),
+            @('perf','${{ steps.perf.outcome }}')
+          )){
+            Write-Host "$($pair[0])=$($pair[1])"
+            if($pair[1] -ne 'success'){$failed += $pair[0]}
+          }
+          if($failed.Count -gt 0){throw "Round 3 observations failed: $($failed -join ', ')"}
