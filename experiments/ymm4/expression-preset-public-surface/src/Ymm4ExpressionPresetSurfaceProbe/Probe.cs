@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
@@ -10,6 +11,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Plugin.Tachie;
+using YukkuriMovieMaker.Plugin.Tachie.Psd;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
@@ -119,6 +121,26 @@ internal static class Bootstrap
         return false;
     }
 }
+
+internal sealed record BoundaryResult(
+    string schema,
+    string status,
+    string host,
+    bool tachiePluginRegistryPublic,
+    bool bareFaceItemPublicConstruction,
+    bool publicPluginFaceParameterFactory,
+    bool publicFaceCompositionSucceeded,
+    bool psdPresetDataPublic,
+    bool psdPresetFileSettingsPublic,
+    bool psdPresetLoaderPublic,
+    string psdFaceParameterRuntimeType,
+    bool psdFaceParameterRuntimeTypePublic,
+    bool publicPsdPresetToFaceParameterBridge,
+    bool psdPresetEditorApplyPublic,
+    bool animationPresetDataTypePublic,
+    bool animationPresetParameterBindingPublic,
+    bool safeGeneralExpressionPresetMode,
+    string decision);
 
 internal sealed record Result(
     string schema,
@@ -283,6 +305,73 @@ internal static class Probe
                 }
             }
             File.WriteAllLines(Path.Combine(OutDir, "preset-editor-declared-surface.txt"), presetEditorSurface, new UTF8Encoding(false));
+
+            var registryProperty = typeof(PluginLoader).GetProperty("TachiePlugins", BindingFlags.Public | BindingFlags.Static);
+            var registryPublic = registryProperty?.CanRead == true;
+            var psdPlugin = new PsdTachiePlugin();
+            var psdFaceParameter = psdPlugin.CreateFaceParameter();
+            var character = new Character { Name = "CNWL_Boundary", TachieType = psdPlugin.GetType(), TachieDefaultFaceParameter = psdFaceParameter };
+            var bareFace = new TachieFaceItem(character);
+            bareFace.TachieFaceParameter = psdFaceParameter;
+            var faceComposition = ReferenceEquals(bareFace.Character, character) && ReferenceEquals(bareFace.TachieFaceParameter, psdFaceParameter);
+
+            var psdPresetLoader = typeof(PsdFileSettings).GetMethod("LoadFromPsdFilePath",
+                BindingFlags.Public | BindingFlags.Static, null, [typeof(string)], null);
+            var psdPreset = new PsdPreset("CNWL", ImmutableList<string>.Empty, ImmutableList<string>.Empty);
+            var psdSettings = new PsdFileSettings { Presets = [psdPreset] };
+            var presetDataPublic = typeof(PsdPreset).IsPublic && psdSettings.Presets.Count == 1 && ReferenceEquals(psdSettings.Presets[0], psdPreset);
+
+            var runtimeFaceType = psdFaceParameter.GetType();
+            bool IsPsdPresetToFaceBridge(MethodInfo m)
+            {
+                var sigTypes = m.GetParameters().Select(p => p.ParameterType).Append(m.ReturnType).ToArray();
+                var hasPreset = sigTypes.Any(t => t == typeof(PsdPreset) || (t.IsGenericType && t.GetGenericArguments().Contains(typeof(PsdPreset))));
+                var hasFace = sigTypes.Any(t => t == typeof(ITachieFaceParameter) || typeof(ITachieFaceParameter).IsAssignableFrom(t));
+                return hasPreset && hasFace;
+            }
+            var publicBridge = exported.SelectMany(t =>
+            {
+                try { return t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static); }
+                catch { return []; }
+            }).Any(IsPsdPresetToFaceBridge);
+
+            var psdEditorApplyPublic = typeof(PsdPresetEditor)
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                .Any(m => m.Name.Contains("Apply", StringComparison.OrdinalIgnoreCase) ||
+                          m.Name.Contains("Set", StringComparison.OrdinalIgnoreCase) ||
+                          IsPsdPresetToFaceBridge(m));
+
+            var animationPresetType = allTypes.FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Plugin.Tachie.AnimationTachie.Preset");
+            var animationCombo = allTypes.FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Plugin.Tachie.AnimationTachie.PresetComboBox");
+            var animationParameter = animationCombo?.GetProperty("TachieParameter", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            var animationBindingPublic = animationParameter?.GetMethod?.IsPublic == true && animationParameter?.SetMethod?.IsPublic == true;
+            var safeGeneral = registryPublic && faceComposition && presetDataPublic && publicBridge && psdEditorApplyPublic &&
+                              animationPresetType?.IsPublic == true && animationBindingPublic;
+
+            var boundary = new BoundaryResult(
+                "cnwl.expression-preset-public-boundary.v1",
+                "PASS_EXPRESSION_PRESET_PUBLIC_BOUNDARY",
+                "4.55.1.1 Lite",
+                registryPublic,
+                true,
+                psdFaceParameter != null,
+                faceComposition,
+                presetDataPublic,
+                typeof(PsdFileSettings).IsPublic,
+                psdPresetLoader != null,
+                runtimeFaceType.FullName ?? runtimeFaceType.Name,
+                runtimeFaceType.IsPublic || runtimeFaceType.IsNestedPublic,
+                publicBridge,
+                psdEditorApplyPublic,
+                animationPresetType?.IsPublic == true || animationPresetType?.IsNestedPublic == true,
+                animationBindingPublic,
+                safeGeneral,
+                safeGeneral
+                    ? "A public end-to-end preset route is available."
+                    : "Bare expression items and plugin face-parameter factories are public, but saved expression preset enumeration/application is not exposed as one public end-to-end contract. Do not implement general preset mode without widening the safety boundary.");
+
+            File.WriteAllText(Path.Combine(OutDir, "boundary.json"),
+                JsonSerializer.Serialize(boundary, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
 
             var result = new Result(
                 "cnwl.expression-preset-surface.v1",
