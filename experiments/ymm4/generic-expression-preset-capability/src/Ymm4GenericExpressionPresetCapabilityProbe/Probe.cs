@@ -489,11 +489,10 @@ internal static class Probe
                 continue;
             }
 
-            foreach (var editor in attrs.OfType<PropertyEditorForTachieParameterAttribute>())
+            var display = p.GetCustomAttributes(typeof(DisplayAttribute), true).OfType<DisplayAttribute>().FirstOrDefault()?.Name ?? "";
+            foreach (var editor in attrs)
             {
-                var display = p.GetCustomAttributes(typeof(DisplayAttribute), true).OfType<DisplayAttribute>().FirstOrDefault()?.Name ?? "";
-                if (!ContainsPresetToken(p.Name) && !ContainsPresetToken(editor.GetType().Name) && !ContainsPresetToken(display))
-                    continue;
+                if (!LooksLikePresetEditor(editor, p, display)) continue;
                 try
                 {
                     editorAttempts.Add(await TryEditorAsync(characterParameter, faceParameter, p, editor));
@@ -505,6 +504,13 @@ internal static class Probe
                         false, false, [], ex.GetType().Name + ": " + ex.Message));
                     errors.Add($"editor {p.Name}: {ex.GetType().Name}: {ex.Message}");
                 }
+            }
+
+            if ((ContainsPresetToken(p.Name) || ContainsPresetToken(display)) && editorAttempts.Count == 0)
+            {
+                var attrNames = attrs.Select(x => x.GetType().FullName ?? x.GetType().Name).ToArray();
+                if (attrNames.Length > 0)
+                    errors.Add($"preset-property-attributes {p.Name}: [{string.Join(",", attrNames)}]");
             }
         }
 
@@ -569,7 +575,7 @@ internal static class Probe
         object characterParameter,
         object faceParameter,
         PropertyInfo property,
-        PropertyEditorForTachieParameterAttribute editor)
+        object editor)
     {
         var attrType = editor.GetType();
         var cpAssigned = false;
@@ -584,15 +590,17 @@ internal static class Probe
 
         try
         {
-            var cpProp = attrType.GetProperty("CharacterParameter", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                ?? typeof(PropertyEditorForTachieParameterAttribute).GetProperty("CharacterParameter", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var cpProp = attrType.GetProperty("CharacterParameter", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (cpProp?.SetMethod != null)
             {
                 cpProp.SetValue(editor, characterParameter);
                 cpAssigned = true;
             }
 
-            control = editor.Create();
+            var create = attrType.GetMethod("Create", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null)
+                ?? throw new MissingMethodException(attrType.FullName, "Create()");
+            control = create.Invoke(editor, null) as FrameworkElement
+                ?? throw new InvalidOperationException("Preset editor Create() did not return FrameworkElement.");
             created = true;
             control.Opacity = 0.01;
             control.IsHitTestVisible = false;
@@ -600,8 +608,31 @@ internal static class Probe
             control.MinWidth = 120;
             ProbeView.Current?.Host.Children.Add(control);
 
-            editor.SetBindings(control, faceParameter, faceParameter, property);
-            bound = true;
+            var setBindings = attrType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(m => m.Name == "SetBindings").ToArray();
+            var legacy = setBindings.FirstOrDefault(m =>
+            {
+                var ps = m.GetParameters();
+                return ps.Length == 4 && typeof(FrameworkElement).IsAssignableFrom(ps[0].ParameterType) &&
+                       ps[3].ParameterType == typeof(PropertyInfo);
+            });
+            if (legacy != null)
+            {
+                legacy.Invoke(editor, [control, faceParameter, faceParameter, property]);
+                bound = true;
+            }
+            else
+            {
+                var modern = setBindings.FirstOrDefault(m =>
+                {
+                    var ps = m.GetParameters();
+                    return ps.Length == 2 && typeof(FrameworkElement).IsAssignableFrom(ps[0].ParameterType) && ps[1].ParameterType.IsArray;
+                });
+                if (modern == null)
+                    throw new MissingMethodException(attrType.FullName, "SetBindings");
+
+                throw new NotSupportedException("Modern ItemProperty[] binding contract discovered; object construction is a separate compatibility route.");
+            }
 
             await SettleAsync(control);
 
@@ -621,7 +652,8 @@ internal static class Probe
 
             foreach (var selector in selectors)
             {
-                var target = selector.Items.Cast<object?>().FirstOrDefault(x => Label(x).StartsWith("CNWL_", StringComparison.Ordinal));
+                var target = selector.Items.Cast<object?>()
+                    .FirstOrDefault(x => !ReferenceEquals(x, selector.SelectedItem) && Label(x).StartsWith("CNWL_", StringComparison.Ordinal));
                 if (target == null && selector.Items.Count > 1)
                     target = selector.Items.Cast<object?>().FirstOrDefault(x => !ReferenceEquals(x, selector.SelectedItem));
                 if (target == null) continue;
@@ -654,7 +686,13 @@ internal static class Probe
         {
             if (control != null)
             {
-                try { editor.ClearBindings(control); } catch { }
+                try
+                {
+                    var clear = attrType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        .FirstOrDefault(m => m.Name == "ClearBindings" && m.GetParameters().Length == 1);
+                    clear?.Invoke(editor, [control]);
+                }
+                catch { }
                 try { ProbeView.Current?.Host.Children.Remove(control); } catch { }
             }
         }
@@ -725,13 +763,14 @@ internal static class Probe
             try { value = cp.GetValue(context); } catch { continue; }
             if (value is string || value is not IEnumerable items) continue;
             var list = items.Cast<object?>().Where(x => x != null).Cast<object>().ToArray();
-            var target = list.FirstOrDefault(x => Label(x).StartsWith("CNWL_", StringComparison.Ordinal))
-                ?? (list.Length > 1 ? list[1] : list.FirstOrDefault());
-            if (target == null) continue;
-
             foreach (var sp in selectionProps)
             {
-                if (!sp.PropertyType.IsAssignableFrom(target.GetType())) continue;
+                object? current = null;
+                try { if (sp.CanRead) current = sp.GetValue(context); } catch { }
+                var target = list.FirstOrDefault(x => !ReferenceEquals(x, current) && Label(x).StartsWith("CNWL_", StringComparison.Ordinal))
+                    ?? list.FirstOrDefault(x => !ReferenceEquals(x, current))
+                    ?? list.FirstOrDefault();
+                if (target == null || !sp.PropertyType.IsAssignableFrom(target.GetType())) continue;
                 try
                 {
                     sp.SetValue(context, target);
@@ -844,6 +883,22 @@ internal static class Probe
             .Where(k => !before.TryGetValue(k, out var a) || !after.TryGetValue(k, out var b) || a != b)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
+
+    private static bool LooksLikePresetEditor(object attribute, PropertyInfo property, string displayName)
+    {
+        var t = attribute.GetType();
+        if (!ContainsPresetToken(property.Name) && !ContainsPresetToken(displayName) && !ContainsPresetToken(t.Name))
+            return false;
+
+        var create = t.GetMethod("Create", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+        var sets = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Where(m => m.Name == "SetBindings").ToArray();
+        var clear = t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Any(m => m.Name == "ClearBindings");
+        var tachieInterface = t.GetInterfaces().Any(i =>
+            i.FullName == "YukkuriMovieMaker.Commons.IPropertyEditorForTachieParameterAttribute");
+        var legacy = typeof(PropertyEditorForTachieParameterAttribute).IsAssignableFrom(t);
+
+        return create != null && sets.Length > 0 && clear && (tachieInterface || legacy || t.Name.Contains("Preset", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static bool ContainsPresetToken(string value) =>
         value.Contains("Preset", StringComparison.OrdinalIgnoreCase) ||
