@@ -62,6 +62,23 @@ Each YMM4 observation/experiment should contain:
 9. **Evidence identity** — source commit, workflow run, artifact and digest when available.
 10. **Downstream impact** — which plugin/product decision relies on the result.
 
+
+## Reference implementations
+
+Public sample repositories, plugin templates and third-party implementations may be used to identify likely API entry points before writing a probe.
+
+They are **reference material, not YMM4 behavior evidence**.
+
+When a reference materially shapes a Lab experiment:
+
+- record the repository and exact commit when practical;
+- distinguish the reference author's claims from Lab observations;
+- do not promote a sample implementation into a host guarantee without the evidence type required by this policy;
+- prefer the least invasive public surface that satisfies the requirement;
+- if reference code conflicts with a version-pinned Lab observation, keep both facts visible and use the pinned Lab result for that tested host version.
+
+See [`YMM4_PLUGIN_SURFACE_GUIDE.md`](YMM4_PLUGIN_SURFACE_GUIDE.md) for the current discovery/escalation policy and the inspected `YMM4plugin_template` reference.
+
 ## Version drift
 
 Do not write undocumented YMM4 behavior as timeless fact.
