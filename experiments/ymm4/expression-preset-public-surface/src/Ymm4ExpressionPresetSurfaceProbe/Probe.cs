@@ -1,10 +1,12 @@
 using System.Collections;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -18,9 +20,36 @@ public sealed class PluginEntry : ILocalizePlugin
     public void SetCulture(CultureInfo cultureInfo) => Bootstrap.Schedule();
 }
 
+public sealed class ProbeTool : IToolPlugin
+{
+    public string Name => "CNWL Expression Preset Surface Probe";
+    public Type ViewModelType => typeof(ProbeVm);
+    public Type ViewType => typeof(ProbeView);
+    public bool AllowMultipleInstances => false;
+}
+public sealed class ProbeView : UserControl
+{
+    internal static ProbeView? Current;
+    public ProbeView()
+    {
+        Current = this;
+        Content = new TextBlock { Text = "CNWL Expression Preset Surface Probe", Margin = new Thickness(8) };
+    }
+}
+public sealed class ProbeVm : ITimelineToolViewModel, IToolViewModel
+{
+    public string Title => "CNWL Expression Preset Surface Probe";
+    public bool CanSuspend => false;
+    public void SetTimelineToolInfo(TimelineToolInfo info) => Probe.Run();
+    public ToolState SaveState() => new() { Title = Title };
+    public void LoadState(ToolState stateData) { }
+    public event PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested { add { } remove { } }
+}
+
 internal static class Bootstrap
 {
-    private static bool scheduled;
+    private static bool scheduled, created, opened;
     public static void Schedule()
     {
         if (scheduled || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CNWL_YMM4_EXPRESSION_PRESET_DIR"))) return;
@@ -34,20 +63,59 @@ internal static class Bootstrap
                 ticks++;
                 try
                 {
-                    var main = Application.Current.Windows.Cast<Window>()
-                        .FirstOrDefault(w => w.DataContext?.GetType().FullName == "YukkuriMovieMaker.ViewModels.MainViewModel");
-                    if (main == null)
+                    foreach (Window w in Application.Current.Windows)
                     {
-                        if (ticks > 120) { timer.Stop(); Probe.Fail("Main window timeout"); }
-                        return;
+                        var main = w.DataContext;
+                        if (main?.GetType().FullName != "YukkuriMovieMaker.ViewModels.MainViewModel") continue;
+                        var active = main.GetType().GetProperty("ActiveTimelineViewModel", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(main);
+                        if (active == null && !created)
+                        {
+                            created = true;
+                            main.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(main, null);
+                            return;
+                        }
+                        if (active != null && !opened) opened = OpenTool(main);
+                        if (opened && ProbeView.Current != null) { timer.Stop(); return; }
                     }
-                    timer.Stop();
-                    Probe.Run();
+                    if (ticks > 120) { timer.Stop(); Probe.Fail("Tool open/bootstrap timeout"); }
                 }
                 catch (Exception ex) { timer.Stop(); Probe.Fail(ex.ToString()); }
             };
             timer.Start();
         }));
+    }
+
+    private static bool OpenTool(object main)
+    {
+        if (main.GetType().GetProperty("ToolMenuItems")?.GetValue(main) is not IEnumerable items) return false;
+        bool Visit(object x, int depth)
+        {
+            if (depth > 8) return false;
+            var t = x.GetType();
+            var label = t.GetProperty("Header")?.GetValue(x)?.ToString()
+                ?? t.GetProperty("Title")?.GetValue(x)?.ToString()
+                ?? t.GetProperty("Name")?.GetValue(x)?.ToString()
+                ?? "";
+            if (label.Contains("CNWL Expression Preset Surface Probe", StringComparison.Ordinal))
+            {
+                if (t.GetProperty("Command")?.GetValue(x) is System.Windows.Input.ICommand c)
+                {
+                    var p = t.GetProperty("CommandParameter")?.GetValue(x);
+                    if (c.CanExecute(p)) { c.Execute(p); return true; }
+                }
+                foreach (var n in new[] { "IsVisible", "IsSelected", "IsActive" })
+                    try { t.GetProperty(n)?.SetValue(x, true); } catch { }
+                return true;
+            }
+            var children = (t.GetProperty("Children")?.GetValue(x) ?? t.GetProperty("Items")?.GetValue(x)) as IEnumerable;
+            if (children != null)
+                foreach (var y in children)
+                    if (y != null && Visit(y, depth + 1)) return true;
+            return false;
+        }
+        foreach (var x in items)
+            if (x != null && Visit(x, 0)) return true;
+        return false;
     }
 }
 
@@ -82,8 +150,11 @@ internal static class Probe
         catch { }
     }
 
+    private static bool started;
     public static void Run()
     {
+        if (started) return;
+        started = true;
         try
         {
             Directory.CreateDirectory(OutDir);
