@@ -6,6 +6,8 @@ These experiments do not redistribute YMM4. Workflows fetch an exact public rele
 
 YMM4 host-behavior observations used by downstream plugins should be recorded here rather than living only in product repositories. See [`../../docs/YMM4_OBSERVATION_POLICY.md`](../../docs/YMM4_OBSERVATION_POLICY.md) and [`../../docs/YMM4_OBSERVATION_TEMPLATE.md`](../../docs/YMM4_OBSERVATION_TEMPLATE.md).
 
+Before creating a new probe, also check [`../../docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](../../docs/YMM4_PLUGIN_SURFACE_GUIDE.md). The guide records the current reference-first discovery rule, the public `leftcontroller0518/YMM4plugin_template` reference inspected on 2026-09-20, and the S1-S4 dependency escalation ladder.
+
 ## Current experiments
 
 - [`plugin-host-validation/`](plugin-host-validation/) — minimal real-host plugin-load proof.
@@ -54,6 +56,14 @@ These experiments were later used to guide larger YMM4 implementations. Product-
 See [`../../docs/DOWNSTREAM_FEEDBACK.md`](../../docs/DOWNSTREAM_FEEDBACK.md) for lessons fed back into this lab.
 
 Small plugin prototypes currently consume YMM4 host observations through [`ziro-lab/ymm4-plugin-garage`](https://github.com/ziro-lab/ymm4-plugin-garage).
+
+## Candidate host questions
+
+These are intentionally **not** experiments yet. Promote one into an isolated experiment only when a downstream plugin needs the answer.
+
+- **ToolState lifecycle** — exact `SaveState` / `LoadState` invocation and persistence boundaries across panel/lifecycle transitions.
+- **SettingsBase persistence** — minimal persistence lifecycle for `SettingsBase<T>` on an exact YMM4 build.
+- **Specific Harmony target compatibility** — only when a real feature cannot be implemented through lower-risk public surfaces; test the exact target/semantic claim rather than Harmony generically.
 
 ## Scope boundary
 
