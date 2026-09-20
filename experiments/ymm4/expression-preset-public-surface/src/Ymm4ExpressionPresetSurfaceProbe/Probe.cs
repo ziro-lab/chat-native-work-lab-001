@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Plugin.Tachie;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
@@ -220,6 +221,51 @@ internal static class Probe
                 targeted.Add($"PROPERTY {typeof(Character).FullName}.{p.Name}:{TypeName(p.PropertyType)} read={p.CanRead} write={p.CanWrite}");
             File.WriteAllLines(Path.Combine(OutDir, "targeted-preset-surface.txt"), targeted, new UTF8Encoding(false));
 
+            var pluginSurface = new List<string>();
+            DescribeContract(typeof(ITachiePlugin), pluginSurface);
+            DescribeContract(typeof(ITachieFaceParameter), pluginSurface);
+            DescribeContract(typeof(TachieFaceParameterBase), pluginSurface);
+
+            var allTypes = assemblies.SelectMany(GetTypesSafe).Distinct().ToArray();
+            var pluginTypes = allTypes.Where(t => typeof(ITachiePlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+                .OrderBy(t => t.FullName, StringComparer.Ordinal).ToArray();
+            foreach (var pt in pluginTypes)
+            {
+                pluginSurface.Add($"=== IMPLEMENTATION {pt.FullName} public={pt.IsPublic || pt.IsNestedPublic} ===");
+                var ctor = pt.GetConstructor(BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+                pluginSurface.Add($"PUBLIC_PARAMETERLESS_CTOR={ctor != null}");
+                if (ctor != null)
+                {
+                    try
+                    {
+                        var plugin = (ITachiePlugin)ctor.Invoke([]);
+                        pluginSurface.Add($"PLUGIN_NAME={plugin.Name}");
+                        var fp = plugin.CreateFaceParameter();
+                        pluginSurface.Add($"FACE_PARAMETER_RUNTIME_TYPE={fp?.GetType().FullName ?? "<null>"} public={(fp?.GetType().IsPublic == true || fp?.GetType().IsNestedPublic == true)}");
+                        if (fp != null) DescribeRuntimeObject(fp, pluginSurface);
+                    }
+                    catch (Exception ex) { pluginSurface.Add($"CREATE_FACE_PARAMETER_THROW={ex.GetType().Name}:{ex.Message}"); }
+                }
+                pluginSurface.Add("");
+            }
+
+            pluginSurface.Add("=== PUBLIC PLUGIN CONTAINER CANDIDATES ===");
+            foreach (var t in exported.OrderBy(t => t.FullName, StringComparer.Ordinal))
+            {
+                foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Static))
+                {
+                    if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
+                    if (ContainsTachiePlugin(p.PropertyType))
+                        pluginSurface.Add($"PROPERTY {t.FullName}.{p.Name}:{TypeName(p.PropertyType)}");
+                }
+                foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Static).Where(m => !m.IsSpecialName))
+                {
+                    if (ContainsTachiePlugin(m.ReturnType))
+                        pluginSurface.Add($"METHOD {t.FullName}.{Signature(m)}");
+                }
+            }
+            File.WriteAllLines(Path.Combine(OutDir, "tachie-plugin-surface.txt"), pluginSurface, new UTF8Encoding(false));
+
             var result = new Result(
                 "cnwl.expression-preset-surface.v1",
                 "PASS_EXPRESSION_PRESET_PUBLIC_SURFACE_DISCOVERY",
@@ -291,6 +337,59 @@ internal static class Probe
             catch { }
         }
         return (false, null);
+    }
+
+    private static IEnumerable<Type> GetTypesSafe(Assembly a)
+    {
+        try { return a.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.OfType<Type>(); }
+        catch { return []; }
+    }
+
+    private static bool ContainsTachiePlugin(Type t)
+    {
+        if (t == typeof(ITachiePlugin)) return true;
+        if (t.IsArray) return ContainsTachiePlugin(t.GetElementType()!);
+        if (t.IsGenericType) return t.GetGenericArguments().Any(ContainsTachiePlugin);
+        return false;
+    }
+
+    private static void DescribeContract(Type t, List<string> output)
+    {
+        output.Add($"=== CONTRACT {t.FullName} ===");
+        foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public).OrderBy(p => p.Name, StringComparer.Ordinal))
+            output.Add($"PROPERTY {p.Name}:{TypeName(p.PropertyType)} read={p.CanRead} write={p.CanWrite}");
+        foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public).Where(m => !m.IsSpecialName).OrderBy(m => m.Name, StringComparer.Ordinal))
+            output.Add("METHOD " + Signature(m));
+        output.Add("");
+    }
+
+    private static void DescribeRuntimeObject(object value, List<string> output)
+    {
+        var t = value.GetType();
+        foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public).OrderBy(p => p.Name, StringComparer.Ordinal))
+        {
+            string rendered = "<unread>";
+            if (p.CanRead && p.GetIndexParameters().Length == 0)
+            {
+                try
+                {
+                    var v = p.GetValue(value);
+                    rendered = v switch
+                    {
+                        null => "<null>",
+                        string s => s,
+                        ICollection c => $"collection:{c.Count}",
+                        IEnumerable => "enumerable",
+                        _ => Convert.ToString(v, CultureInfo.InvariantCulture) ?? "<null>"
+                    };
+                }
+                catch (Exception ex) { rendered = $"<throw:{ex.GetType().Name}>"; }
+            }
+            output.Add($"RUNTIME_PROPERTY {p.Name}:{TypeName(p.PropertyType)} read={p.CanRead} write={p.CanWrite} value={rendered}");
+        }
+        foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public).Where(m => !m.IsSpecialName).OrderBy(m => m.Name, StringComparer.Ordinal))
+            output.Add("RUNTIME_METHOD " + Signature(m));
     }
 
     private static bool RelatedName(string value) =>
