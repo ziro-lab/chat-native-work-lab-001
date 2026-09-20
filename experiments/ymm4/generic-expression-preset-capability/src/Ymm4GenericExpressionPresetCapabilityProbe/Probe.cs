@@ -241,7 +241,7 @@ public sealed class SyntheticModernFaceParameter : TachieFaceParameterBase
 
 internal sealed class SyntheticModernPresetEditorAttribute : PropertyEditorAttribute2, IPropertyEditorForTachieParameterAttribute
 {
-    public object CharacterParameter { get; set; } = new();
+    public object? CharacterParameter { get; set; }
 
     public override FrameworkElement Create() => new ComboBox
     {
