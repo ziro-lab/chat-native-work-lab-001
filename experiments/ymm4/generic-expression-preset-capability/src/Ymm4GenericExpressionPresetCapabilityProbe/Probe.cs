@@ -1,7 +1,9 @@
+#pragma warning disable CS0618
 using System.Collections;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
