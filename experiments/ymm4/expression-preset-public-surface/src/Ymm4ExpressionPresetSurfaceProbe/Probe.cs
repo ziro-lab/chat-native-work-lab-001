@@ -210,6 +210,16 @@ internal static class Probe
             apply = apply.Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
             var complete = constructed.Ok && containers.Count > 0 && apply.Count > 0;
 
+            var targeted = new List<string>();
+            foreach (var t in exported.Where(IsTargetedPresetType).OrderBy(t => t.FullName, StringComparer.Ordinal))
+                DescribeType(t, targeted);
+            targeted.Add("");
+            targeted.Add("=== CHARACTER TACHIE/PRESET RELATED PUBLIC PROPERTIES ===");
+            foreach (var p in typeof(Character).GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(p => RelatedName(p.Name) || RelatedName(TypeName(p.PropertyType))).OrderBy(p => p.Name, StringComparer.Ordinal))
+                targeted.Add($"PROPERTY {typeof(Character).FullName}.{p.Name}:{TypeName(p.PropertyType)} read={p.CanRead} write={p.CanWrite}");
+            File.WriteAllLines(Path.Combine(OutDir, "targeted-preset-surface.txt"), targeted, new UTF8Encoding(false));
+
             var result = new Result(
                 "cnwl.expression-preset-surface.v1",
                 "PASS_EXPRESSION_PRESET_PUBLIC_SURFACE_DISCOVERY",
@@ -281,6 +291,34 @@ internal static class Probe
             catch { }
         }
         return (false, null);
+    }
+
+    private static bool RelatedName(string value) =>
+        value.Contains("Preset", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("Psd", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("Tachie", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("Face", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTargetedPresetType(Type t)
+    {
+        var n = t.FullName ?? t.Name;
+        return n.Contains("YukkuriMovieMaker.Plugin.Tachie.Psd", StringComparison.Ordinal) &&
+               (n.Contains("Preset", StringComparison.OrdinalIgnoreCase) || n.Contains("FileSettings", StringComparison.OrdinalIgnoreCase) || n.Contains("FaceParameter", StringComparison.OrdinalIgnoreCase)) ||
+               n.Contains("YukkuriMovieMaker.Plugin.Tachie.AnimationTachie.Preset", StringComparison.Ordinal);
+    }
+
+    private static void DescribeType(Type t, List<string> output)
+    {
+        output.Add($"=== TYPE {t.FullName} ===");
+        foreach (var c in t.GetConstructors(BindingFlags.Instance | BindingFlags.Public).OrderBy(Signature, StringComparer.Ordinal))
+            output.Add("CTOR " + Signature(c));
+        foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public).OrderBy(p => p.Name, StringComparer.Ordinal))
+            output.Add($"PROPERTY {p.Name}:{TypeName(p.PropertyType)} static={IsStatic(p)} read={p.CanRead} write={p.CanWrite}");
+        foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public).OrderBy(f => f.Name, StringComparer.Ordinal))
+            output.Add($"FIELD {f.Name}:{TypeName(f.FieldType)} static={f.IsStatic}");
+        foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public).Where(m => !m.IsSpecialName).OrderBy(m => m.Name, StringComparer.Ordinal))
+            output.Add("METHOD " + Signature(m));
+        output.Add("");
     }
 
     private static void InspectPublicContainers(Type t, List<string> output)
