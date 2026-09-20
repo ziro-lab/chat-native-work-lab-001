@@ -266,6 +266,24 @@ internal static class Probe
             }
             File.WriteAllLines(Path.Combine(OutDir, "tachie-plugin-surface.txt"), pluginSurface, new UTF8Encoding(false));
 
+            var presetEditorSurface = new List<string>();
+            foreach (var t in allTypes.Where(t =>
+                (t.FullName ?? "").Contains("YukkuriMovieMaker.Plugin.Tachie.Psd", StringComparison.Ordinal) &&
+                ((t.FullName ?? "").Contains("Preset", StringComparison.OrdinalIgnoreCase) ||
+                 (t.FullName ?? "").Contains("FaceParameter", StringComparison.OrdinalIgnoreCase)) ||
+                (t.FullName ?? "").Contains("YukkuriMovieMaker.Plugin.Tachie.AnimationTachie.Preset", StringComparison.Ordinal))
+                .OrderBy(t => t.FullName, StringComparer.Ordinal))
+            {
+                DescribeDeclaredType(t, presetEditorSurface);
+                foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                    .Where(p => p.Name.Contains("Preset", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Layer", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var attrs = p.GetCustomAttributesData().Select(a => a.AttributeType.FullName ?? a.AttributeType.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                    presetEditorSurface.Add($"ATTRIBUTES {t.FullName}.{p.Name}=[{string.Join(",", attrs)}]");
+                }
+            }
+            File.WriteAllLines(Path.Combine(OutDir, "preset-editor-declared-surface.txt"), presetEditorSurface, new UTF8Encoding(false));
+
             var result = new Result(
                 "cnwl.expression-preset-surface.v1",
                 "PASS_EXPRESSION_PRESET_PUBLIC_SURFACE_DISCOVERY",
@@ -390,6 +408,24 @@ internal static class Probe
         }
         foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public).Where(m => !m.IsSpecialName).OrderBy(m => m.Name, StringComparer.Ordinal))
             output.Add("RUNTIME_METHOD " + Signature(m));
+    }
+
+    private static void DescribeDeclaredType(Type t, List<string> output)
+    {
+        output.Add($"=== DECLARED TYPE {t.FullName} public={t.IsPublic || t.IsNestedPublic} ===");
+        foreach (var c in t.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            output.Add($"CTOR {Signature(c)} public={c.IsPublic}");
+        foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).OrderBy(p => p.Name, StringComparer.Ordinal))
+        {
+            var gm = p.GetMethod; var sm = p.SetMethod;
+            output.Add($"PROPERTY {p.Name}:{TypeName(p.PropertyType)} getPublic={gm?.IsPublic == true} setPublic={sm?.IsPublic == true}");
+        }
+        foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).OrderBy(f => f.Name, StringComparer.Ordinal))
+            output.Add($"FIELD {f.Name}:{TypeName(f.FieldType)} public={f.IsPublic} static={f.IsStatic}");
+        foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Where(m => !m.IsSpecialName).OrderBy(m => m.Name, StringComparer.Ordinal))
+            output.Add($"METHOD {Signature(m)} public={m.IsPublic}");
+        output.Add("");
     }
 
     private static bool RelatedName(string value) =>

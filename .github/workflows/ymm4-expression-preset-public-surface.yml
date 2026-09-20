@@ -58,7 +58,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          foreach($f in @('result.json','preset-surface.txt','targeted-preset-surface.txt','tachie-plugin-surface.txt','provenance.json')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+          foreach($f in @('result.json','preset-surface.txt','targeted-preset-surface.txt','tachie-plugin-surface.txt','preset-editor-declared-surface.txt','provenance.json')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
