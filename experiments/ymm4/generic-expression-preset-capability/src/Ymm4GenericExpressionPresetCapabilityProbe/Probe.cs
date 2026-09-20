@@ -345,6 +345,17 @@ internal static class Probe
 
             var baseType = typeof(PropertyEditorForTachieParameterAttribute);
             var cpProperty = baseType.GetProperty("CharacterParameter", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var loadedTypes = AppDomain.CurrentDomain.GetAssemblies().SelectMany(GetTypesSafe).Distinct().ToArray();
+            var modernTachieEditorInterface = loadedTypes.FirstOrDefault(t =>
+                t.FullName == "YukkuriMovieMaker.Commons.IPropertyEditorForTachieParameterAttribute");
+            var itemPropertyType = loadedTypes.FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Commons.ItemProperty");
+            var propertyEditor2Type = loadedTypes.FirstOrDefault(t => t.FullName == "YukkuriMovieMaker.Commons.PropertyEditorAttribute2");
+
+            var modernContractLines = new List<string>();
+            DescribeReflectionType(modernTachieEditorInterface, modernContractLines);
+            DescribeReflectionType(propertyEditor2Type, modernContractLines);
+            DescribeReflectionType(itemPropertyType, modernContractLines);
+            File.WriteAllLines(Path.Combine(OutDir, "modern-editor-contract.txt"), modernContractLines, new UTF8Encoding(false));
 
             var assertions = new
             {
@@ -378,12 +389,24 @@ internal static class Probe
                 },
                 editorContract = new
                 {
-                    type = baseType.FullName,
-                    isPublic = baseType.IsPublic || baseType.IsNestedPublic,
-                    characterParameterProperty = cpProperty?.ToString(),
-                    create = baseType.GetMethod("Create", BindingFlags.Instance | BindingFlags.Public)?.ToString(),
-                    setBindings = baseType.GetMethod("SetBindings", BindingFlags.Instance | BindingFlags.Public)?.ToString(),
-                    clearBindings = baseType.GetMethod("ClearBindings", BindingFlags.Instance | BindingFlags.Public)?.ToString()
+                    legacy = new
+                    {
+                        type = baseType.FullName,
+                        isPublic = baseType.IsPublic || baseType.IsNestedPublic,
+                        characterParameterProperty = cpProperty?.ToString(),
+                        create = baseType.GetMethod("Create", BindingFlags.Instance | BindingFlags.Public)?.ToString(),
+                        setBindings = baseType.GetMethod("SetBindings", BindingFlags.Instance | BindingFlags.Public)?.ToString(),
+                        clearBindings = baseType.GetMethod("ClearBindings", BindingFlags.Instance | BindingFlags.Public)?.ToString()
+                    },
+                    modern = new
+                    {
+                        interfaceType = modernTachieEditorInterface?.FullName,
+                        interfacePublic = modernTachieEditorInterface?.IsPublic == true || modernTachieEditorInterface?.IsNestedPublic == true,
+                        itemPropertyType = itemPropertyType?.FullName,
+                        itemPropertyPublic = itemPropertyType?.IsPublic == true || itemPropertyType?.IsNestedPublic == true,
+                        propertyEditor2Type = propertyEditor2Type?.FullName,
+                        propertyEditor2Public = propertyEditor2Type?.IsPublic == true || propertyEditor2Type?.IsNestedPublic == true
+                    }
                 },
                 assertions,
                 results
@@ -883,6 +906,35 @@ internal static class Probe
             .Where(k => !before.TryGetValue(k, out var a) || !after.TryGetValue(k, out var b) || a != b)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
+
+    private static IEnumerable<Type> GetTypesSafe(Assembly assembly)
+    {
+        try { return assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.OfType<Type>(); }
+        catch { return []; }
+    }
+
+    private static void DescribeReflectionType(Type? type, List<string> output)
+    {
+        if (type == null)
+        {
+            output.Add("<missing>");
+            output.Add("");
+            return;
+        }
+
+        output.Add($"=== {type.FullName} public={type.IsPublic || type.IsNestedPublic} interface={type.IsInterface} ===");
+        foreach (var c in type.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .OrderBy(x => x.ToString(), StringComparer.Ordinal))
+            output.Add($"CTOR public={c.IsPublic} {c}");
+        foreach (var p in type.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .OrderBy(x => x.Name, StringComparer.Ordinal))
+            output.Add($"PROPERTY {p.Name}:{p.PropertyType.FullName} getPublic={p.GetMethod?.IsPublic == true} setPublic={p.SetMethod?.IsPublic == true}");
+        foreach (var m in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(x => !x.IsSpecialName).OrderBy(x => x.Name, StringComparer.Ordinal))
+            output.Add($"METHOD public={m.IsPublic} {m}");
+        output.Add("");
+    }
 
     private static bool LooksLikePresetEditor(object attribute, PropertyInfo property, string displayName)
     {
