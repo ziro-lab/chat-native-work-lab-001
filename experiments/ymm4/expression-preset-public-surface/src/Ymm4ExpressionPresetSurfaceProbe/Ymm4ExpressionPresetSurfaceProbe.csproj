@@ -10,5 +10,6 @@
 <ItemGroup>
   <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
   <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
+  <Reference Include="YukkuriMovieMaker.Plugin.Tachie.Psd"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.Tachie.Psd.dll</HintPath><Private>false</Private></Reference>
 </ItemGroup>
 </Project>
