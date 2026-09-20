@@ -213,6 +213,65 @@ internal sealed class SyntheticResolvedPresetEditorAttribute : PropertyEditorFor
     public override void ClearBindings(FrameworkElement control) { }
 }
 
+
+public sealed class SyntheticModernCharacterParameter : TachieCharacterParameterBase { }
+
+public sealed class SyntheticModernFaceParameter : TachieFaceParameterBase
+{
+    [Display(Name = "Preset")]
+    [SyntheticModernPresetEditor]
+    public object PresetDummy { get; } = new();
+
+    public string Mood
+    {
+        get => mood;
+        set => Set(ref mood, value);
+    }
+    private string mood = "Neutral";
+
+    public int Level
+    {
+        get => level;
+        set => Set(ref level, value);
+    }
+    private int level = 1;
+
+    protected override IEnumerable<IAnimatable> GetAnimatables() => [];
+}
+
+internal sealed class SyntheticModernPresetEditorAttribute : PropertyEditorAttribute2, IPropertyEditorForTachieParameterAttribute
+{
+    public object CharacterParameter { get; set; } = new();
+
+    public override FrameworkElement Create() => new ComboBox
+    {
+        ItemsSource = new[] { "CNWL_MODERN_NEUTRAL", "CNWL_MODERN_HAPPY" },
+        SelectedIndex = 0,
+        MinWidth = 120
+    };
+
+    public override void SetBindings(FrameworkElement control, ItemProperty[] itemProperties)
+    {
+        var box = (ComboBox)control;
+        var owner = (SyntheticModernFaceParameter)itemProperties.Single().PropertyOwner;
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedItem?.ToString() == "CNWL_MODERN_HAPPY")
+            {
+                owner.Mood = "Happy";
+                owner.Level = 7;
+            }
+            else
+            {
+                owner.Mood = "Neutral";
+                owner.Level = 1;
+            }
+        };
+    }
+
+    public override void ClearBindings(FrameworkElement control) { }
+}
+
 public sealed class SyntheticNoiseFaceParameter : TachieFaceParameterBase
 {
     public string CompressionPreset
@@ -331,6 +390,9 @@ internal static class Probe
                 "synthetic", "editor-expanded",
                 new SyntheticResolvedCharacterParameter(), new SyntheticResolvedFaceParameter()));
             results.Add(await ProbeCapabilityAsync(
+                "synthetic", "editor-modern",
+                new SyntheticModernCharacterParameter(), new SyntheticModernFaceParameter()));
+            results.Add(await ProbeCapabilityAsync(
                 "synthetic", "noise",
                 new SyntheticResolvedCharacterParameter(), new SyntheticNoiseFaceParameter()));
             results.Add(await ProbeCapabilityAsync(
@@ -339,6 +401,7 @@ internal static class Probe
 
             var direct = results.Single(x => x.Origin == "synthetic" && x.Name == "direct-named");
             var editor = results.Single(x => x.Origin == "synthetic" && x.Name == "editor-expanded");
+            var modernEditor = results.Single(x => x.Origin == "synthetic" && x.Name == "editor-modern");
             var noise = results.Single(x => x.Origin == "synthetic" && x.Name == "noise");
             var broken = results.Single(x => x.Origin == "synthetic" && x.Name == "broken-editor");
             var hostWithEditors = results.Where(x => x.Origin == "host" && x.PresetEditorCandidateCount > 0).ToArray();
@@ -363,6 +426,7 @@ internal static class Probe
                 propertyEditorCharacterParameterSettable = cpProperty?.SetMethod != null,
                 syntheticDirectStrong = direct.Grade == "Strong" && direct.DirectMutationObserved,
                 syntheticEditorStrong = editor.Grade == "Strong" && editor.Editors.Any(x => x.MutationObserved),
+                syntheticModernEditorStrong = modernEditor.Grade == "Strong" && modernEditor.Editors.Any(x => x.MutationObserved),
                 syntheticNoiseRejected = noise.Grade == "None",
                 brokenEditorContained = broken.Errors.Length > 0 && results.Count >= 4,
                 hostPresetEditorsDiscovered = hostWithEditors.Length,
@@ -370,7 +434,7 @@ internal static class Probe
             };
 
             var status = assertions.syntheticDirectStrong && assertions.syntheticEditorStrong &&
-                         assertions.syntheticNoiseRejected && assertions.brokenEditorContained &&
+                         assertions.syntheticModernEditorStrong && assertions.syntheticNoiseRejected && assertions.brokenEditorContained &&
                          assertions.hostPresetEditorsDiscovered >= 2
                 ? "PASS_GENERIC_EXPRESSION_PRESET_CAPABILITY_SURVEY"
                 : "FAIL_GENERIC_EXPRESSION_PRESET_CAPABILITY_SURVEY";
