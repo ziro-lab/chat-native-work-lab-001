@@ -89,13 +89,17 @@ internal static class ProbeB
             var source = scroll.Content as FrameworkElement ?? throw new InvalidOperationException("Timeline content");
             var host = new Host(window, timeline, vm, view, source, scroll); host.Activate();
             var character = new Character { Name = "CNWL_TRACK_B" };
-            var fixtures = new[] { 0, 3, 7, 12, 20 }.Select((layer, i) => (IItem)new VoiceItem(character) { Frame = 40 + i * 110, Layer = layer, Length = 80, Serif = "display", Remark = "CNWL_B_" + layer }).ToArray();
+            // Keep every item horizontally inside the small native viewport. Only vertical
+            // realization is under test; the previous L20 at frame 480 was outside X=0..461.
+            var fixtures = new[] { 0, 3, 7, 12, 20 }.Select((layer, i) => (IItem)new VoiceItem(character) { Frame = 40 + i * 30, Layer = layer, Length = 80, Serif = "display", Remark = "CNWL_B_" + layer }).ToArray();
             foreach (var item in fixtures) if (!timeline.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             timeline.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
             var baseline = fixtures.Select(item => (Item: item, item.Layer, item.Frame)).ToArray();
             var low = fixtures[^1];
             Check("native_viewport_requires_virtualization", scroll.ViewportHeight < low.Layer * oldHeight);
             Log($"native extent={scroll.ExtentHeight} viewport={scroll.ViewportHeight} height={oldHeight}");
+            var lowVm = ((TimelineViewModel)vm).Items.Single(x => ReferenceEquals(x.Item, low));
+            Log($"low_native_rect left={Host.Get(lowVm, "Left")} width={Host.Get(lowVm, "Width")} top={Host.Get(lowVm, "Top")} viewport={Host.Reactive(vm, "Viewport")}");
             display = new DirectDisplay(host, Log);
             var a = new CollapsedSpan[] { new(2, 3), new(6, 8) };
             var b = new CollapsedSpan[] { new(1, 5), new(2, 3), new(6, 8) };
@@ -143,7 +147,6 @@ internal static class ProbeB
             Check("no_update_after_detach", display.Applications == stoppedApplications);
             Check("content_constraint_restored", double.IsPositiveInfinity(source.MaxHeight));
             Jump(host, low.Layer * settings.LayerHeight); await Task.Delay(400);
-            // Inspect VM geometry even for offscreen virtualized items, not only live visuals.
             Check("native_geometry_restored", ((TimelineViewModel)vm).Items.All(x => Math.Abs(Convert.ToDouble(Host.Get(x, "Top")) - x.Item.Layer * settings.LayerHeight) < 0.01));
             await Native.Click(host.Center(low));
             Check("native_click_after_detach", timeline.SelectedItems.Any(x => ReferenceEquals(x, low)));
