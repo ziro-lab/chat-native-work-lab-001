@@ -29,7 +29,7 @@ P0 passes only when all of these are true in the exact host:
 2. A real public YMM4 ItemProperty can be constructed through public surface and supplied to the modern PropertyEditorAttribute2 SetBindings(FrameworkElement, ItemProperty[]) route; the bound synthetic editor actually mutates its fresh FaceParameter.
 3. For built-in Animation Tachie and PSD Tachie, a bounded canonical fingerprint over public FaceParameter state is deterministic, changes when the selected preset changes semantic state, and is identical on two fresh FaceParameters after applying the same fixture preset.
 4. The applied fresh FaceParameter can be attached to a fresh TachieFaceItem for the Character and read back with the same bounded fingerprint.
-5. If cancellation is observed after temporary editor binding but before candidate application, ClearBindings is invoked successfully and the temporary staging visual is removed so the staging host returns to its prior child count.
+5. Temporary editor binding/staging cleanup is proved on successful application, an intentional post-bind failure, and cancellation before candidate application; ClearBindings succeeds and the bounded staging host returns to its prior child count.
 
 All editor/plugin work runs on the YMM4 UI thread. No Timeline mutation is performed.
 
