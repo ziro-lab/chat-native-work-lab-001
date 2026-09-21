@@ -428,16 +428,18 @@ internal static class Probe
             Math.Abs(a.X - b.X),
             Math.Abs(a.Y - b.Y));
 
-        var items = Elements(timelineView)
-            .Where(fe => fe.IsVisible && fe.GetType().Name == "TimelineItemView")
-            .Select(fe => (View: fe, Item: ItemOf(fe.DataContext)))
-            .Where(x => x.Item is not null && Box(x.View).Intersects(rect))
-            .Select(x => x.Item!)
-            .Distinct(ReferenceEqualityComparer.Instance)
-            .ToArray();
+        var unique = new HashSet<IItem>(ReferenceEqualityComparer.Instance);
+        foreach (var fe in Elements(timelineView)
+                     .Where(fe => fe.IsVisible && fe.GetType().Name == "TimelineItemView"))
+        {
+            var item = ItemOf(fe.DataContext);
+            if (item is not null && Box(fe).Intersects(rect))
+                unique.Add(item);
+        }
+        var items = unique.ToArray();
 
         timeline.SelectItems(items);
-        trace.Add($"marquee_select count={items.Length} items={string.Join("|", items.Select(i => i.Remark + "@L" + i.Layer))}");
+        trace.Add($"marquee_select count={items.Length} items={string.Join("|", items.Select(i => i.GetType().Name + "@L" + i.Layer))}");
     }
 
     private static void ApplyVisualFold()
