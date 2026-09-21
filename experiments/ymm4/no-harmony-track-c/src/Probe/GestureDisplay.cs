@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Project.Items;
@@ -12,11 +13,12 @@ using YukkuriMovieMaker.ViewModels;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
-// C candidate fork of the frozen B display. A/B source files remain unchanged.
-// Native geometry during a captured gesture avoids the Top/MouseMove feedback loop.
+// C candidate; frozen A/B sources remain unchanged. Direct layout while idle,
+// native VM geometry plus compensated visuals during actual drag only.
 internal sealed class DirectDisplay : IDisposable
 {
     private sealed record Slot(object Target, Func<int> Layer, bool Item, double HeightRatio, PropertyInfo Top, PropertyInfo Height);
+    private sealed record ViewportLease(FrameworkElement Canvas, DependencyProperty Property, object Local, BindingBase? Binding);
     private readonly Host host;
     private readonly TimelineViewModel vm;
     private readonly Action<string> log;
@@ -25,6 +27,7 @@ internal sealed class DirectDisplay : IDisposable
     private readonly HashSet<INotifyCollectionChanged> collections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IItem> gestureItems = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FrameworkElement, object> transforms = [];
+    private readonly Dictionary<FrameworkElement, ViewportLease> viewports = [];
     private readonly object oldMaxHeight;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private CollapsedSpan[] spans = [];
@@ -48,8 +51,7 @@ internal sealed class DirectDisplay : IDisposable
         this.host = host; this.log = log; vm = (TimelineViewModel)host.Vm;
         oldMaxHeight = host.Source.ReadLocalValue(FrameworkElement.MaxHeightProperty);
         Watch(vm); Watch(vm.Viewport); Watch(SettingsBase<YMMSettings>.Default);
-        WatchCollection(vm.Items); WatchCollection(vm.LayerLabels); WatchCollection(vm.LayerLines);
-        RefreshSlots();
+        WatchCollection(vm.Items); WatchCollection(vm.LayerLabels); WatchCollection(vm.LayerLines); RefreshSlots();
     }
     private void Watch(object value) { if (value is INotifyPropertyChanged n && watched.Add(n)) n.PropertyChanged += Changed; }
     private void WatchCollection(object value) { if (value is INotifyCollectionChanged n && collections.Add(n)) n.CollectionChanged += CollectionChanged; }
@@ -63,58 +65,99 @@ internal sealed class DirectDisplay : IDisposable
     }
     internal void BeginGesture(IEnumerable<IItem> items)
     {
-        ThrowIfFailed();
-        if (gesture || disposed) throw new InvalidOperationException("Invalid gesture lifecycle");
+        ThrowIfFailed(); if (gesture || disposed) throw new InvalidOperationException("Invalid gesture lifecycle");
         gesture = true; applying = true;
         try
         {
             foreach (var item in items) gestureItems.Add(item);
-            // Before the host's bubbling mouse-down observes Top, restore the exact
-            // native geometry of the selected items and preserve their visual locations.
+            foreach (var itemView in host.ItemViews().Where(x => Host.Item(x.DataContext) is IItem item && gestureItems.Contains(item)).ToArray())
+            {
+                DependencyObject? parent = itemView;
+                for (var depth = 0; parent is not null && depth < 64; depth++)
+                {
+                    if (parent is FrameworkElement canvas && canvas.GetType().Name == "FastCanvasItemsControl")
+                    {
+                        if (!viewports.ContainsKey(canvas))
+                        {
+                            var type = canvas.GetType();
+                            var field = type.GetField("ViewportProperty", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+                            if (field?.GetValue(null) is not DependencyProperty dp || dp.PropertyType != typeof(Rect))
+                                throw new InvalidOperationException("Expected bounded FastCanvas Viewport Rect dependency property: " + type.FullName);
+                            viewports[canvas] = new(canvas, dp, canvas.ReadLocalValue(dp), BindingOperations.GetBindingBase(canvas, dp));
+                            log("gesture_viewport_lease=" + type.FullName + " value=" + canvas.GetValue(dp));
+                        }
+                        break;
+                    }
+                    parent = VisualTreeHelper.GetParent(parent);
+                }
+            }
+            if (viewports.Count == 0) throw new InvalidOperationException("No item canvas viewport lease");
+            ExpandGestureViewport();
             foreach (var itemVm in vm.Items.Where(x => gestureItems.Contains(x.Item)))
             {
-                var slot = slots[itemVm];
-                Write(slot, slot.Top, itemVm.Item.Layer * (double)Height);
-                Write(slot, slot.Height, slot.HeightRatio * Height);
+                var slot = slots[itemVm]; Write(slot, slot.Top, itemVm.Item.Layer * (double)Height); Write(slot, slot.Height, slot.HeightRatio * Height);
             }
-            UpdateGestureVisuals(false);
+            // One transition refresh, never a full refresh on every MouseMove.
+            RefreshCanvases(); UpdateGestureVisuals(false);
             log("gesture_begin count=" + gestureItems.Count);
         }
         finally { applying = false; }
     }
+    private bool ExpandGestureViewport()
+    {
+        var rect = vm.Viewport.Value;
+        var lastDisplayRow = Math.Max(0, (int)Math.Floor((rect.Bottom - 1) / Height));
+        var logicalBottom = (Layout.DisplayRowToLogical(Math.Min(lastDisplayRow, Layout.VisibleLayers.Count - 1)) + 2) * (double)Height;
+        var selectedBottom = gestureItems.Count == 0 ? rect.Bottom : (gestureItems.Max(x => x.Layer) + 1) * (double)Height;
+        var expanded = new Rect(rect.X, rect.Y, rect.Width, Math.Max(rect.Bottom, Math.Max(logicalBottom, selectedBottom)) - rect.Y);
+        var changed = false;
+        foreach (var lease in viewports.Values)
+            if ((Rect)lease.Canvas.GetValue(lease.Property) != expanded)
+            {
+                log("gesture_viewport=" + expanded); lease.Canvas.SetCurrentValue(lease.Property, expanded); changed = true;
+            }
+        return changed;
+    }
     internal void EndGesture()
     {
-        if (!gesture) return;
-        gesture = false;
+        if (!gesture) return; gesture = false;
         foreach (var (view, original) in transforms)
         {
-            if (original == DependencyProperty.UnsetValue) view.ClearValue(UIElement.RenderTransformProperty);
-            else view.SetValue(UIElement.RenderTransformProperty, original);
+            if (original == DependencyProperty.UnsetValue) view.ClearValue(UIElement.RenderTransformProperty); else view.SetValue(UIElement.RenderTransformProperty, original);
         }
-        transforms.Clear(); gestureItems.Clear();
-        log("gesture_end samples=" + GestureSamples + " missing=" + MissingGestureViews);
-        Queue();
+        foreach (var lease in viewports.Values)
+        {
+            if (lease.Binding is not null) BindingOperations.SetBinding(lease.Canvas, lease.Property, lease.Binding);
+            else if (lease.Local == DependencyProperty.UnsetValue) lease.Canvas.ClearValue(lease.Property);
+            else lease.Canvas.SetValue(lease.Property, lease.Local);
+        }
+        transforms.Clear(); viewports.Clear(); gestureItems.Clear();
+        log("gesture_end samples=" + GestureSamples + " missing=" + MissingGestureViews); Queue();
     }
     private void UpdateGestureVisuals(bool sample = true)
     {
+        var viewportChanged = ExpandGestureViewport();
         var found = new HashSet<IItem>(ReferenceEqualityComparer.Instance);
         foreach (var view in host.ItemViews())
         {
-            var item = Host.Item(view.DataContext);
-            if (item is null || !gestureItems.Contains(item)) continue;
+            var item = Host.Item(view.DataContext); if (item is null || !gestureItems.Contains(item)) continue;
             found.Add(item);
             if (!transforms.ContainsKey(view)) transforms[view] = view.ReadLocalValue(UIElement.RenderTransformProperty);
-            var translation = Layout.TranslationY(item.Layer, Height);
-            if (view.RenderTransform is not TranslateTransform current || current.Y != translation || current.X != 0)
+            // Compensate the actual cached visual position, not an assumed VM Top.
+            // FastCanvas may retain its prior arranged position until native refresh.
+            var previousTranslation = view.RenderTransform is TranslateTransform prior ? prior.Y : 0.0;
+            var baseTop = view.TranslatePoint(new Point(), host.Source).Y - previousTranslation;
+            var translation = Layout.VisualRowOfLogical(item.Layer) * (double)Height - baseTop;
+            if (view.RenderTransform is not TranslateTransform current || Math.Abs(current.Y - translation) > 0.001 || current.X != 0)
                 view.SetCurrentValue(UIElement.RenderTransformProperty, new TranslateTransform(0, translation));
-            if (sample)
+            if (sample && !viewportChanged)
             {
-                var box = Host.ScreenRect(view);
-                var visible = box.Width > 2 && box.Height > 2 && Host.ScreenRect(host.Scroll).IntersectsWith(box);
+                var box = Host.ScreenRect(view); var visible = box.Width > 2 && box.Height > 2 && Host.ScreenRect(host.Scroll).IntersectsWith(box);
                 log($"gesture_visual item={item.Remark} layer={item.Layer} local_top={host.LocalTop(item)} expected={Layout.VisualRowOfLogical(item.Layer) * Height} visible={visible}");
                 if (!visible) MissingGestureViews++;
             }
         }
+        if (viewportChanged) { Queue(); return; }
         if (sample)
         {
             GestureSamples++; MissingGestureViews += gestureItems.Count(x => !found.Contains(x));
@@ -123,17 +166,12 @@ internal sealed class DirectDisplay : IDisposable
     }
     private void Queue()
     {
-        if (disposed || queued) return;
-        queued = true;
+        if (disposed || queued) return; queued = true;
         host.View.Dispatcher.BeginInvoke(new Action(() =>
         {
             queued = false; if (disposed) return;
             try { if (gesture) UpdateGestureVisuals(); else Apply(); }
-            catch (Exception ex)
-            {
-                Failure = ex; log("display_failure=" + ex);
-                try { Dispose(); } catch (Exception restore) { log("restore_failure=" + restore); }
-            }
+            catch (Exception ex) { Failure = ex; log("display_failure=" + ex); try { Dispose(); } catch (Exception restore) { log("restore_failure=" + restore); } }
         }), DispatcherPriority.ContextIdle);
     }
     internal void ThrowIfFailed() { if (Failure is not null) throw new InvalidOperationException("Display adapter failed", Failure); }
@@ -154,10 +192,7 @@ internal sealed class DirectDisplay : IDisposable
         foreach (var item in vm.Items) AddSlot(item, () => item.Item.Layer, true);
         AddRows((IList)vm.LayerLabels); AddRows((IList)vm.LayerLines);
     }
-    private void AddRows(IList rows)
-    {
-        for (var i = 0; i < rows.Count; i++) { var layer = i; AddSlot(rows[i] ?? throw new InvalidOperationException("Null row"), () => layer, false); }
-    }
+    private void AddRows(IList rows) { for (var i = 0; i < rows.Count; i++) { var layer = i; AddSlot(rows[i] ?? throw new InvalidOperationException("Null row"), () => layer, false); } }
     private void Apply()
     {
         if (applying) { Reentries++; throw new InvalidOperationException("Direct layout reentrancy"); }
@@ -167,8 +202,7 @@ internal sealed class DirectDisplay : IDisposable
         applying = true;
         try
         {
-            RefreshSlots();
-            var count = vm.LayerLabels.Count;
+            RefreshSlots(); var count = vm.LayerLabels.Count;
             if (count != vm.LayerLines.Count || count == 0) throw new InvalidOperationException("Row collections inconsistent");
             var maximum = Math.Max(count, Math.Max(host.Timeline.MaxLayer, spans.Length == 0 ? 0 : spans.Max(x => x.End))) + 8;
             if (maximum > 1024) throw new InvalidOperationException("Fixture layer budget exceeded");
@@ -196,8 +230,7 @@ internal sealed class DirectDisplay : IDisposable
     }
     private void Write(Slot slot, PropertyInfo property, double desired)
     {
-        var current = Convert.ToDouble(property.GetValue(slot.Target));
-        if (Math.Abs(current - desired) < 0.001) return;
+        var current = Convert.ToDouble(property.GetValue(slot.Target)); if (Math.Abs(current - desired) < 0.001) return;
         log($"write_before phase={Phase} type={slot.Target.GetType().Name} layer={slot.Layer()} property={property.Name} old_top={slot.Top.GetValue(slot.Target)} old_height={slot.Height.GetValue(slot.Target)} desired={desired} viewport={vm.Viewport.Value} applying={applying}");
         property.SetValue(slot.Target, desired); Mutations++; log("write_after " + property.Name);
     }
@@ -222,8 +255,7 @@ internal sealed class DirectDisplay : IDisposable
     }
     public void Dispose()
     {
-        if (disposed) return;
-        EndGesture(); disposed = true;
+        if (disposed) return; EndGesture(); disposed = true;
         foreach (var notify in watched) notify.PropertyChanged -= Changed;
         foreach (var notify in collections) notify.CollectionChanged -= CollectionChanged;
         watched.Clear(); collections.Clear(); Phase = "restore";
