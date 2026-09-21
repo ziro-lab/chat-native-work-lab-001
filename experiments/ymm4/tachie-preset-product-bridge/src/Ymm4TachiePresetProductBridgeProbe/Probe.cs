@@ -258,6 +258,8 @@ internal sealed record CaseResult(
     string RepeatFingerprint,
     bool FingerprintStable,
     bool ItemRoundtrip,
+    bool SuccessCleanup,
+    bool FailureCleanup,
     bool CancellationObserved,
     bool ClearBindingsSucceeded,
     bool StageRestored,
@@ -270,27 +272,15 @@ internal static class Probe
 
     private static string OutDir => Path.GetFullPath(Environment.GetEnvironmentVariable("CNWL_TACHIE_PRESET_BRIDGE_OUTPUT")!);
     private static string FixtureDir => Path.GetFullPath(Environment.GetEnvironmentVariable("CNWL_TACHIE_PRESET_BRIDGE_FIXTURE")!);
+    private static StackPanel StagingHost { get; } = new();
 
     public static void Start()
     {
         if (started) return;
         started = true;
-        Application.Current.Dispatcher.BeginInvoke(new Action(async () =>
-        {
-            for (var i = 0; i < 100 && ProbeView.Current == null; i++)
-            {
-                await Dispatcher.Yield(DispatcherPriority.Loaded);
-                await Task.Delay(50);
-            }
-
-            if (ProbeView.Current == null)
-            {
-                Fail("Probe View did not become ready.");
-                return;
-            }
-
-            await RunAsync();
-        }), DispatcherPriority.ApplicationIdle);
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(async () => await RunAsync()),
+            DispatcherPriority.ApplicationIdle);
     }
 
     public static void Fail(string error)
@@ -342,12 +332,16 @@ internal static class Probe
                 psdFingerprintStable = psdResult.FingerprintStable,
                 animationItemRoundtrip = animationResult.ItemRoundtrip,
                 psdItemRoundtrip = psdResult.ItemRoundtrip,
-                animationCleanupCancellation = animationResult.CancellationObserved &&
-                                               animationResult.ClearBindingsSucceeded &&
-                                               animationResult.StageRestored,
-                psdCleanupCancellation = psdResult.CancellationObserved &&
-                                         psdResult.ClearBindingsSucceeded &&
-                                         psdResult.StageRestored
+                animationEditorCleanup = animationResult.SuccessCleanup &&
+                                         animationResult.FailureCleanup &&
+                                         animationResult.CancellationObserved &&
+                                         animationResult.ClearBindingsSucceeded &&
+                                         animationResult.StageRestored,
+                psdEditorCleanup = psdResult.SuccessCleanup &&
+                                   psdResult.FailureCleanup &&
+                                   psdResult.CancellationObserved &&
+                                   psdResult.ClearBindingsSucceeded &&
+                                   psdResult.StageRestored
             };
 
             var allPassed = assertions.animationCharacterResolution &&
@@ -357,8 +351,8 @@ internal static class Probe
                             assertions.psdFingerprintStable &&
                             assertions.animationItemRoundtrip &&
                             assertions.psdItemRoundtrip &&
-                            assertions.animationCleanupCancellation &&
-                            assertions.psdCleanupCancellation;
+                            assertions.animationEditorCleanup &&
+                            assertions.psdEditorCleanup;
 
             var result = new
             {
@@ -388,7 +382,7 @@ internal static class Probe
                 report.Add($"  candidate={x.Candidate} bind={x.BindRoute} choices=[{string.Join(", ", x.Choices)}] mutation={x.MutationObserved}");
                 report.Add($"  fingerprint before={x.BeforeFingerprint} applied={x.AppliedFingerprint} repeat={x.RepeatFingerprint} stable={x.FingerprintStable}");
                 report.Add($"  item-roundtrip={x.ItemRoundtrip}");
-                report.Add($"  cancellation={x.CancellationObserved} clear={x.ClearBindingsSucceeded} stage-restored={x.StageRestored}");
+                report.Add($"  cleanup success={x.SuccessCleanup} failure={x.FailureCleanup} cancellation={x.CancellationObserved} clear={x.ClearBindingsSucceeded} stage-restored={x.StageRestored}");
                 if (x.Error != null) report.Add($"  error={x.Error}");
             }
 
@@ -401,7 +395,7 @@ internal static class Probe
     }
 
     private static CaseResult FailedCase(string name, string error) => new(
-        name, "<missing>", false, error, "", "", [], false, "", "", "", false, false, false, false, false, error);
+        name, "<missing>", false, error, "", "", [], false, "", "", "", false, false, false, false, false, false, false, false, error);
 
     private static async Task<CaseResult> RunBuiltInCaseAsync(string name, ITachiePlugin plugin, string targetCandidate)
     {
@@ -450,6 +444,9 @@ internal static class Probe
             var roundtrip = item.TachieFaceParameter != null &&
                             Fingerprint(item.TachieFaceParameter) == appliedFingerprint;
 
+            var successCleanup = applied1.ClearSucceeded && applied1.StageRestored &&
+                                 applied2.ClearSucceeded && applied2.StageRestored;
+            var failureCleanup = await TestFailureCleanupAsync(characterParameter, plugin.CreateFaceParameter());
             var cleanup = await TestCancellationCleanupAsync(characterParameter, plugin.CreateFaceParameter());
 
             return new CaseResult(
@@ -466,6 +463,8 @@ internal static class Probe
                 repeatFingerprint,
                 fingerprintStable,
                 roundtrip,
+                successCleanup,
+                failureCleanup,
                 cleanup.CancellationObserved,
                 cleanup.ClearSucceeded,
                 cleanup.StageRestored,
@@ -508,27 +507,73 @@ internal static class Probe
             $"exact plugin={matches[0].GetType().FullName}; parameter={activeType.FullName}");
     }
 
-    private sealed record ApplyResult(bool MutationObserved, string BindRoute, string[] Choices);
+    private sealed record ApplyResult(
+        bool MutationObserved,
+        string BindRoute,
+        string[] Choices,
+        bool ClearSucceeded,
+        bool StageRestored);
 
     private static async Task<ApplyResult> ApplyNamedPresetAsync(
         object characterParameter,
         object faceParameter,
         string targetCandidate)
     {
+        var baseline = StagingHost.Children.Count;
         var opened = await OpenPresetEditorAsync(characterParameter, faceParameter);
+        var before = Fingerprint(faceParameter);
+        var choices = Array.Empty<string>();
+        var selected = false;
+        var after = before;
+        var clear = false;
+
         try
         {
-            var before = Fingerprint(faceParameter);
-            var choices = EnumerateChoices(opened.Control).Distinct(StringComparer.Ordinal).ToArray();
-            var selected = await SelectNamedChoiceAsync(opened.Control, targetCandidate);
-            var after = Fingerprint(faceParameter);
-
-            return new(selected && before != after, opened.BindRoute, choices);
+            choices = EnumerateChoices(opened.Control).Distinct(StringComparer.Ordinal).ToArray();
+            selected = await SelectNamedChoiceAsync(opened.Control, targetCandidate);
+            after = Fingerprint(faceParameter);
         }
         finally
         {
-            ClearEditor(opened.Editor, opened.Control);
+            clear = ClearEditor(opened.Editor, opened.Control);
         }
+
+        return new(
+            selected && before != after,
+            opened.BindRoute,
+            choices,
+            clear,
+            StagingHost.Children.Count == baseline);
+    }
+
+    private static async Task<bool> TestFailureCleanupAsync(object characterParameter, object faceParameter)
+    {
+        ConfigureFixturePaths(characterParameter, faceParameter);
+        var host = StagingHost;
+        var baseline = host.Children.Count;
+        object? editor = null;
+        FrameworkElement? control = null;
+        var failureObserved = false;
+        var clear = false;
+
+        try
+        {
+            var opened = await OpenPresetEditorAsync(characterParameter, faceParameter);
+            editor = opened.Editor;
+            control = opened.Control;
+            throw new InvalidOperationException("CNWL intentional post-bind failure");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "CNWL intentional post-bind failure")
+        {
+            failureObserved = true;
+        }
+        finally
+        {
+            if (editor != null && control != null)
+                clear = ClearEditor(editor, control);
+        }
+
+        return failureObserved && clear && host.Children.Count == baseline;
     }
 
     private sealed record CleanupResult(bool CancellationObserved, bool ClearSucceeded, bool StageRestored);
@@ -536,7 +581,7 @@ internal static class Probe
     private static async Task<CleanupResult> TestCancellationCleanupAsync(object characterParameter, object faceParameter)
     {
         ConfigureFixturePaths(characterParameter, faceParameter);
-        var host = ProbeView.Current?.Host ?? throw new InvalidOperationException("Probe staging host unavailable.");
+        var host = StagingHost;
         var baseline = host.Children.Count;
         object? editor = null;
         FrameworkElement? control = null;
@@ -574,7 +619,7 @@ internal static class Probe
 
     private static async Task<OpenedEditor> OpenPresetEditorAsync(object characterParameter, object faceParameter)
     {
-        var host = ProbeView.Current?.Host ?? throw new InvalidOperationException("Probe staging host unavailable.");
+        var host = StagingHost;
 
         foreach (var property in faceParameter.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public))
         {
@@ -685,7 +730,7 @@ internal static class Probe
         }
         finally
         {
-            try { ProbeView.Current?.Host.Children.Remove(control); } catch { }
+            try { StagingHost.Children.Remove(control); } catch { }
         }
 
         return clearSucceeded;
@@ -929,7 +974,7 @@ internal static class Probe
 
     private static async Task<ModernBindingResult> TestModernItemPropertyBindingAsync()
     {
-        var host = ProbeView.Current?.Host ?? throw new InvalidOperationException("Probe staging host unavailable.");
+        var host = StagingHost;
         var baseline = host.Children.Count;
         var character = new SyntheticModernCharacterParameter();
         var face = new SyntheticModernFaceParameter();
