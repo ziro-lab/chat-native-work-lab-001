@@ -113,7 +113,7 @@ internal sealed class IntegratedDropAdapter : IDisposable
         }
 
         host.View.Dispatcher.BeginInvoke(
-            new Action(() => FinalizeDrop(before, logicalLayer, paths[0], executed)),
+            new Action(() => _ = FinalizeDropAsync(before, logicalLayer, paths[0], executed)),
             DispatcherPriority.ContextIdle);
     }
 
@@ -143,13 +143,24 @@ internal sealed class IntegratedDropAdapter : IDisposable
         return true;
     }
 
-    private void FinalizeDrop(HashSet<IItem> before, int logicalLayer, string filePath, bool executed)
+    private async Task FinalizeDropAsync(HashSet<IItem> before, int logicalLayer, string filePath, bool executed)
     {
         try
         {
-            display.ThrowIfFailed();
+            IItem[] added = [];
+            for (var attempt = 0; attempt < 30; attempt++)
+            {
+                display.ThrowIfFailed();
+                added = host.Timeline.Items.Where(x => !before.Contains(x)).ToArray();
+                if (added.Length > 0)
+                {
+                    log($"drop_items_observed attempt={attempt + 1} count={added.Length}");
+                    break;
+                }
 
-            var added = host.Timeline.Items.Where(x => !before.Contains(x)).ToArray();
+                await Task.Delay(100);
+            }
+
             var beforeLayers = added.Select(x => x.Layer).ToArray();
 
             foreach (var item in added)
@@ -160,6 +171,11 @@ internal sealed class IntegratedDropAdapter : IDisposable
                 item.Layer = logicalLayer;
                 PostCorrections++;
             }
+
+            if (added.Length > 0)
+                await Task.Delay(150);
+
+            display.ThrowIfFailed();
 
             log(
                 $"drop_finalize added={added.Length} before_layers={string.Join(",", beforeLayers)} " +
