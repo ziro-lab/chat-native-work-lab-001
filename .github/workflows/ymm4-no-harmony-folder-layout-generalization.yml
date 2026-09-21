@@ -1,10 +1,10 @@
-name: YMM4 no-Harmony file drop correction
+name: YMM4 no-Harmony FolderLayout generalization
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'experiments/ymm4/no-harmony-file-drop-correction/**'
-      - '.github/workflows/ymm4-no-harmony-file-drop-correction.yml'
+      - 'experiments/ymm4/no-harmony-folder-layout-generalization/**'
+      - '.github/workflows/ymm4-no-harmony-folder-layout-generalization.yml'
 permissions: { contents: read }
 jobs:
   native:
@@ -26,25 +26,26 @@ jobs:
         env: { VER: '${{ matrix.version }}', ASSET: '${{ matrix.asset }}', EXPECTED: '${{ matrix.sha256 }}' }
         run: |
           curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:VER/$env:ASSET"
-          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:EXPECTED){throw'hash'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:EXPECTED){throw 'hash mismatch'}
           Expand-Archive ymm4.zip ymm4
-          $e=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
-          "YMM4_DIR=$($e.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - shell: pwsh
         run: |
-          dotnet build experiments/ymm4/no-harmony-file-drop-correction/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
-          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_NoHarmonyFileDrop'
+          dotnet build experiments/ymm4/no-harmony-folder-layout-generalization/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_FolderLayoutGeneralization'
           New-Item -ItemType Directory -Force $d|Out-Null
-          Copy-Item out/probe/Ymm4NoHarmonyFileDropCorrectionProbe.dll $d
-          if(Test-Path out/probe/0Harmony.dll){throw'unexpected Harmony'}
+          Copy-Item out/probe/Ymm4NoHarmonyFolderLayoutProbe.dll $d
+          if(Test-Path out/probe/0Harmony.dll){throw 'Probe unexpectedly contains Harmony'}
       - shell: pwsh
-        run: ./experiments/ymm4/no-harmony-file-drop-correction/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+        run: ./experiments/ymm4/no-harmony-folder-layout-generalization/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
       - if: always()
         shell: pwsh
-        run: foreach($f in @('result.txt','trace.txt','error.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+        run: |
+          foreach($f in @('result.txt','trace.txt','error.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ymm4-no-harmony-file-drop-correction-${{ matrix.version }}
+          name: ymm4-no-harmony-folder-layout-generalization-${{ matrix.version }}
           path: out/evidence/
           retention-days: 14

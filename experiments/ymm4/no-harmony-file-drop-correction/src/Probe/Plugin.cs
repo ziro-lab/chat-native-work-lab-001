@@ -46,7 +46,9 @@ internal readonly record struct DropObservation(
     bool Added,
     int Count,
     string Layers,
-    string Frames);
+    string Frames,
+    string FilePath,
+    IItem[] AddedItems);
 
 internal static class Probe
 {
@@ -54,10 +56,13 @@ internal static class Probe
     static string output="";
     static Timeline? timeline;
     static object? timelineVm;
+    static Window? hostWindow;
     static FrameworkElement? timelineView,cursorSource;
     static int h;
     static bool correctionEnabled;
     static bool dragEnterObserved,dragOverObserved,dropObserved;
+    static bool customAddFileCommandExecuted;
+    static int pendingDropLogicalLayer=-1;
     static readonly List<string> trace=[];
 
     public static void Schedule()
@@ -70,7 +75,8 @@ internal static class Probe
 
     static void Bootstrap()
     {
-        var ticks=0,created=0;
+        var ticks=0;
+        var created=0;
         var timer=new DispatcherTimer(DispatcherPriority.ApplicationIdle){Interval=TimeSpan.FromMilliseconds(400)};
         timer.Tick+=(_,_)=>{
             try{
@@ -93,6 +99,7 @@ internal static class Probe
     static async Task RunAsync(Window mainWindow,Timeline t)
     {
         try{
+            hostWindow=mainWindow;
             mainWindow.WindowState=System.Windows.WindowState.Maximized;
             mainWindow.Activate();Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
             await Task.Delay(900);
@@ -132,6 +139,24 @@ internal static class Probe
             var correctedLayers=corrected.Layers.Split(',',StringSplitOptions.RemoveEmptyEntries);
             var correctedMatchesFold=correctedLayers.Contains("3");
 
+            // Validate that the post-corrected YMM4-owned add operation survives real user history.
+            var correctedPath=corrected.FilePath;
+            var correctedRef=corrected.AddedItems.FirstOrDefault();
+            await Shortcut(0x5A); // Ctrl+Z
+            await Task.Delay(700);
+            var undoRemovedCorrected = !t.Items.Any(x =>
+                ReferenceEquals(x, correctedRef) ||
+                string.Equals(FilePathOf(x), correctedPath, StringComparison.OrdinalIgnoreCase));
+
+            await Shortcut(0x59); // Ctrl+Y
+            await Task.Delay(700);
+            var redoItem=t.Items.FirstOrDefault(x =>
+                ReferenceEquals(x, correctedRef) ||
+                string.Equals(FilePathOf(x), correctedPath, StringComparison.OrdinalIgnoreCase));
+            var redoRestoredCorrected=redoItem is not null;
+            var redoLayer=redoItem?.Layer ?? -1;
+            var redoPreservedFoldLayer=redoLayer==3;
+
             File.WriteAllLines(Path.Combine(output,"trace.txt"),trace,new UTF8Encoding(false));
             WriteResult("PASS_NO_HARMONY_FILEDROP_OBSERVATION",[
                 "harmony_reference_present=False",
@@ -142,6 +167,12 @@ internal static class Probe
                 $"corrected_layers={corrected.Layers}",
                 $"corrected_frames={corrected.Frames}",
                 $"corrected_matches_fold_layer={correctedMatchesFold}",
+                $"custom_add_file_command_executed={customAddFileCommandExecuted}",
+                $"post_corrected_layer={corrected.AddedItems.FirstOrDefault()?.Layer ?? -1}",
+                $"undo_removed_corrected_item={undoRemovedCorrected}",
+                $"redo_restored_corrected_item={redoRestoredCorrected}",
+                $"redo_layer={redoLayer}",
+                $"redo_preserved_fold_layer={redoPreservedFoldLayer}",
                 $"drag_enter_observed={dragEnterObserved}",
                 $"drag_over_observed={dragOverObserved}",
                 $"drop_observed={dropObserved}"
@@ -149,7 +180,7 @@ internal static class Probe
         }catch(Exception ex){Fail(ex);}
     }
 
-    static void ResetRouteFlags(){dragEnterObserved=dragOverObserved=dropObserved=false;}
+    static void ResetRouteFlags(){dragEnterObserved=dragOverObserved=dropObserved=false;customAddFileCommandExecuted=false;pendingDropLogicalLayer=-1;}
 
     static void OnPreviewDragEnter(object sender,DragEventArgs e)
     {
@@ -165,6 +196,51 @@ internal static class Probe
     {
         dropObserved=true;
         CorrectCursor(e,"drop");
+
+        if (!correctionEnabled)
+            return;
+
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop) ||
+            e.Data.GetData(DataFormats.FileDrop) is not string[] paths ||
+            paths.Length == 0)
+            return;
+
+        if (cursorSource is null)
+            return;
+
+        var raw=e.GetPosition(cursorSource);
+        var mapped=MapDisplayPointToLogical(raw);
+        pendingDropLogicalLayer=(int)Math.Floor(mapped.Y/h);
+        SetReactivePoint(timelineVm,"TimelineCursorPosition",mapped);
+        SetReactivePoint(timelineVm,"TimelineCursorPositionWhenRightClick",mapped);
+
+        ICommand? command=CommandSettings.Default[CommandType.AddFileItem];
+        IInputElement? executedTarget=null;
+
+        if (command is RoutedCommand routed)
+        {
+            foreach (var target in new IInputElement?[] { cursorSource, Keyboard.FocusedElement, hostWindow })
+            {
+                if (target is null)
+                    continue;
+                if (!routed.CanExecute(paths,target))
+                    continue;
+
+                e.Handled=true;
+                routed.Execute(paths,target);
+                executedTarget=target;
+                customAddFileCommandExecuted=true;
+                break;
+            }
+        }
+        else if (command?.CanExecute(paths) == true)
+        {
+            e.Handled=true;
+            command.Execute(paths);
+            customAddFileCommandExecuted=true;
+        }
+
+        trace.Add($"custom_add_file_command executed={customAddFileCommandExecuted} target={executedTarget?.GetType().Name ?? "<none>"} raw={Fmt(raw)} mapped={Fmt(mapped)} paths={paths.Length}");
     }
 
     static void CorrectCursor(DragEventArgs e,string phase)
@@ -241,10 +317,42 @@ internal static class Probe
         await Task.Delay(1400);
 
         var added=t.Items.Where(x=>!before.Any(b=>ReferenceEquals(b,x))).ToArray();
-        trace.Add($"{label}_result effect={effect} added={string.Join("|",added.Select(x=>x.GetType().Name+"@L"+x.Layer+":F"+x.Frame))}");
+        var beforeCorrection=string.Join("|",added.Select(x=>x.GetType().Name+"@L"+x.Layer+":F"+x.Frame));
+
+        if(correctionEnabled && pendingDropLogicalLayer>=0)
+        {
+            foreach(var item in added)
+                item.Layer=pendingDropLogicalLayer;
+            ApplyFold();
+        }
+
+        var afterCorrection=string.Join("|",added.Select(x=>x.GetType().Name+"@L"+x.Layer+":F"+x.Frame));
+        trace.Add($"{label}_result effect={effect} before={beforeCorrection} after={afterCorrection} pending_logical={pendingDropLogicalLayer}");
         return new(true,effect.ToString(),added.Length>0,added.Length,
             string.Join(",",added.Select(x=>x.Layer).OrderBy(x=>x)),
-            string.Join(",",added.Select(x=>x.Frame).OrderBy(x=>x)));
+            string.Join(",",added.Select(x=>x.Frame).OrderBy(x=>x)),
+            png,
+            added);
+    }
+
+    static async Task Shortcut(byte key)
+    {
+        const byte ctrl=0x11;
+        Native.keybd_event(ctrl,0,0,0);
+        await Task.Delay(60);
+        Native.keybd_event(key,0,0,0);
+        await Task.Delay(60);
+        Native.keybd_event(key,0,Native.KEYUP,0);
+        Native.keybd_event(ctrl,0,Native.KEYUP,0);
+    }
+
+    static string? FilePathOf(IItem item)
+    {
+        try
+        {
+            return item.GetType().GetProperty("FilePath",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)?.GetValue(item) as string;
+        }
+        catch{return null;}
     }
 
     static void ApplyFold()
