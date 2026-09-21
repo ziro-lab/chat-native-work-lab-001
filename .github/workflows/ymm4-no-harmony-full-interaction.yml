@@ -8,15 +8,28 @@ on:
 permissions: { contents: read }
 jobs:
   native:
+    strategy:
+      matrix:
+        include:
+          - version: '4.55.1.1'
+            asset: 'YukkuriMovieMaker_v4.55.1.1_Lite.zip'
+            sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+          - version: '4.56.1.0'
+            asset: 'YukkuriMovieMaker_v4.56.1.0_Lite.zip'
+            sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { persist-credentials: false, fetch-depth: 1 }
       - shell: pwsh
+        env:
+          VER: ${{ matrix.version }}
+          ASSET: ${{ matrix.asset }}
+          EXPECTED: ${{ matrix.sha256 }}
         run: |
-          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip
-          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'){throw 'hash mismatch'}
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:VER/$env:ASSET"
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:EXPECTED){throw 'hash mismatch'}
           Expand-Archive ymm4.zip ymm4
           $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
           "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
@@ -36,6 +49,6 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ymm4-no-harmony-full-interaction
+          name: ymm4-no-harmony-full-interaction-${{ matrix.version }}
           path: out/evidence/
           retention-days: 14
