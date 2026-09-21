@@ -7,6 +7,7 @@
     <AssemblyName>Ymm4TrackAProbe</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="System.Windows.WindowState" Alias="WindowState" />
     <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
     <Compile Include="../../../no-harmony-folder-layout-generalization/src/Probe/FolderLayout.cs" Link="FolderLayout.cs" />
