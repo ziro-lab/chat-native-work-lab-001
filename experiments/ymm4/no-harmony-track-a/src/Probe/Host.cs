@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -61,10 +60,11 @@ internal sealed record Host(Window Window, Timeline Timeline, object Vm, Framewo
     internal double LocalTop(IItem item) => ItemView(item).TranslatePoint(new Point(), Source).Y;
     internal double ModelTop(IItem item)
     {
-        if (Get(Vm, "Items") is not IEnumerable items) throw new MissingMemberException("TimelineViewModel.Items");
-        foreach (var vm in items)
-            if (ReferenceEquals(Item(vm), item)) return Convert.ToDouble(Get(vm, "Top"));
-        throw new InvalidOperationException("VM missing: " + item.Remark);
+        // Use the actual rendered item's exact DataContext, not a possibly stale host collection.
+        var context = ItemView(item).DataContext;
+        if (!ReferenceEquals(Item(context), item)) throw new InvalidOperationException("View/model identity mismatch");
+        var top = Get(context, "Top") ?? throw new MissingMemberException(context.GetType().FullName, "Top");
+        return Convert.ToDouble(top);
     }
     internal Point OffsetScreen(Point start, double dx, double dy)
     {
