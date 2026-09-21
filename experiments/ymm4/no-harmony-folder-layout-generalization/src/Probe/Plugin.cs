@@ -266,8 +266,11 @@ internal static class Probe
             // Shift-marquee around the visually shifted L9 item.
             t.SelectedItems = ImmutableList<IItem>.Empty;
             var frameBeforeMarquee = t.CurrentFrame;
+            Checkpoint($"before_marquee box={targetA.Left:F0},{targetA.Top:F0},{targetA.Width:F0},{targetA.Height:F0}");
             await ShiftDragAround(targetA);
+            Checkpoint("after_marquee_input");
             await Task.Delay(650);
+            Checkpoint("after_marquee_settle");
             var marqueeSelected = t.SelectedItems.Any(x => ReferenceEquals(x, target));
             var marqueeSuppressedSeek = t.CurrentFrame == frameBeforeMarquee;
 
@@ -277,8 +280,11 @@ internal static class Probe
             dragView = FindItemView(timelineView, dragSource) ?? dragView;
             dragA = Box(dragView);
             var dragOriginal = (Layer: dragSource.Layer, Frame: dragSource.Frame);
+            Checkpoint($"before_drag box={dragA.Left:F0},{dragA.Top:F0},{dragA.Width:F0},{dragA.Height:F0}");
             await Drag(dragA.Center, new Point(dragA.Center.X + 64, dragA.Center.Y + h));
+            Checkpoint("after_drag_input");
             await Task.Delay(850);
+            Checkpoint("after_drag_settle");
             var dragFinal = (Layer: dragSource.Layer, Frame: dragSource.Frame);
             var dragMatchesNonUniformJump = dragFinal.Layer == 9;
             var nativeFramePreserved = dragFinal.Frame != dragOriginal.Frame;
@@ -299,7 +305,9 @@ internal static class Probe
             targetA = Box(targetView);
             var tvBox = Box(timelineView);
             var rightA = new Point(Math.Min(tvBox.Right - 40, targetA.Right + 90), targetA.Center.Y);
+            Checkpoint("before_right_a");
             await RightClick(rightA);
+            Checkpoint("after_right_a_input");
             await Task.Delay(300);
             var rightAPoint = ReadReactivePoint(timelineVm, "TimelineCursorPositionWhenRightClick");
             var rightALayer = rightAPoint is null ? -1 : (int)Math.Floor(rightAPoint.Value.Y / h);
@@ -330,7 +338,9 @@ internal static class Probe
             var geometryBMatches = Near(targetTopB, layoutB.VisualRowOfLogical(9) * h);
 
             t.SelectedItems = ImmutableList<IItem>.Empty;
+            Checkpoint("before_click_b");
             await Click(targetB.Center);
+            Checkpoint("after_click_b_input");
             await Task.Delay(350);
             var clickBSelected = t.SelectedItems.Any(x => ReferenceEquals(x, target));
 
@@ -493,7 +503,7 @@ internal static class Probe
         if (activeDrag.Layer != desired)
         {
             activeDrag.Layer = desired;
-            ApplyLayout();
+            ApplyItemTopOnly(activeDrag);
         }
 
         trace.Add($"drag_move native={nativeLayer} desired={desired} final={activeDrag.Layer} frame={activeDrag.Frame} raw={Fmt(raw)}");
@@ -506,7 +516,9 @@ internal static class Probe
 
         trace.Add($"drag_up original={activeDragOriginalLayer} final={activeDrag.Layer} frame={activeDrag.Frame}");
         activeDrag = null;
-        ApplyLayout();
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(ApplyLayout),
+            DispatcherPriority.Background);
     }
 
     private static void ApplyMarquee()
@@ -532,6 +544,40 @@ internal static class Probe
 
         timeline.SelectItems(selected);
         trace.Add($"marquee_select={string.Join("|", selected.Select(x => x.Remark + "@L" + x.Layer))}");
+    }
+
+    private static void ApplyItemTopOnly(IItem item)
+    {
+        if (timelineVm is null || layout is null || item.Layer > layout.MaxLayer)
+            return;
+
+        var itemsHolder = timelineVm.GetType()
+            .GetProperty("Items", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(timelineVm);
+
+        if (itemsHolder is not IEnumerable itemVms)
+            return;
+
+        foreach (var itemVm in itemVms)
+        {
+            if (itemVm is null)
+                continue;
+
+            var model = itemVm.GetType()
+                .GetProperty("Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(itemVm) as IItem;
+            if (!ReferenceEquals(model, item))
+                continue;
+
+            var hidden = layout.IsHidden(item.Layer);
+            var top = hidden
+                ? -100000.0 - item.Layer * h
+                : layout.VisualRowOfLogical(item.Layer) * (double)h;
+            SetPrivateProperty(itemVm, "Top", top);
+            if (hidden)
+                SetPrivateProperty(itemVm, "Height", 6.0);
+            return;
+        }
     }
 
     private static void ApplyLayout()
