@@ -296,6 +296,16 @@ internal static class FoldProbe
             await Task.Delay(650);
             var marqueeTransformedSelected = t.SelectedItems.Any(x => ReferenceEquals(x, marqueeTarget));
 
+            // Try a real WPF/OLE FileDrop with a tiny generated PNG onto the displayed
+            // Layer 3 row. The source is this process, but the target receives the normal
+            // FileDrop data format and routed drag/drop path.
+            var timelineBoxForDrop = Box(timelineView);
+            var fileDropPoint = new Point(
+                Math.Min(timelineBoxForDrop.Right - 80, Math.Max(marqueeTargetAfter.Right + 160, 520)),
+                marqueeTargetAfter.Center.Y);
+            action = "file-drop-folded-row";
+            var fileDrop = await TryFileDropAsync(mainWindow, t, fileDropPoint);
+
             // Capture a blank right-click on the displayed Layer 3 row after the other
             // decisive pointer tests, so the context menu cannot steal their input.
             var timelineBox = Box(timelineView);
@@ -330,6 +340,13 @@ internal static class FoldProbe
                     $"drag_matches_native_one_row={dragMatchesNativeOneRow}",
                     $"marquee_baseline_selected={marqueeBaselineSelected}",
                     $"marquee_transformed_selected={marqueeTransformedSelected}",
+                    $"file_drop_attempted={fileDrop.Attempted}",
+                    $"file_drop_effect={fileDrop.Effect}",
+                    $"file_drop_added={fileDrop.Added}",
+                    $"file_drop_added_count={fileDrop.Count}",
+                    $"file_drop_layers={fileDrop.Layers}",
+                    $"file_drop_matches_fold_layer={fileDrop.MatchesFoldLayer}",
+                    $"file_drop_matches_native_row={fileDrop.MatchesNativeRow}",
                     $"right_click_cursor_observed={rightClickCursor is not null}",
                     $"right_click_cursor_y={(rightClickCursor?.Y.ToString("F2", CultureInfo.InvariantCulture) ?? "<none>")}",
                     $"right_click_native_layer={rightClickNativeLayer}",
@@ -392,6 +409,97 @@ internal static class FoldProbe
             await Task.Delay(65);
         }
         Native.mouse_event(Native.LU, 0, 0, 0, 0);
+    }
+
+    private readonly record struct FileDropObservation(
+        bool Attempted,
+        string Effect,
+        bool Added,
+        int Count,
+        string Layers,
+        bool MatchesFoldLayer,
+        bool MatchesNativeRow);
+
+    private static async Task<FileDropObservation> TryFileDropAsync(Window mainWindow, Timeline timeline, Point targetPoint)
+    {
+        var pngPath = Path.Combine(output, "fold-drop-1x1.png");
+        File.WriteAllBytes(
+            pngPath,
+            Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQ1sAAAAASUVORK5CYII="));
+
+        var before = timeline.Items.ToArray();
+        var data = new DataObject();
+        data.SetData(DataFormats.FileDrop, new[] { pngPath });
+
+        var start = new Point(Math.Max(40, targetPoint.X - 160), Math.Max(40, targetPoint.Y - 120));
+        Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
+        await Task.Delay(100);
+        Native.mouse_event(Native.LD, 0, 0, 0, 0);
+        await Task.Delay(80);
+
+        using var cancel = new CancellationTokenSource();
+        var mover = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(250, cancel.Token);
+                for (var i = 1; i <= 10; i++)
+                {
+                    var x = start.X + (targetPoint.X - start.X) * i / 10.0;
+                    var y = start.Y + (targetPoint.Y - start.Y) * i / 10.0;
+                    Native.SetCursorPos((int)Math.Round(x), (int)Math.Round(y));
+                    await Task.Delay(70, cancel.Token);
+                }
+                await Task.Delay(180, cancel.Token);
+                Native.mouse_event(Native.LU, 0, 0, 0, 0);
+                await Task.Delay(1800, cancel.Token);
+                // Escape is only a safety valve if OLE drag did not terminate after release.
+                Native.keybd_event(0x1B, 0, 0, 0);
+                Native.keybd_event(0x1B, 0, Native.KEYUP, 0);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+
+        DragDropEffects effect;
+        try
+        {
+            effect = System.Windows.DragDrop.DoDragDrop(mainWindow, data, DragDropEffects.Copy);
+        }
+        finally
+        {
+            cancel.Cancel();
+            Native.mouse_event(Native.LU, 0, 0, 0, 0);
+        }
+
+        try { await mover; } catch (OperationCanceledException) { }
+        await Task.Delay(1400);
+
+        var added = timeline.Items
+            .Where(x => !before.Any(b => ReferenceEquals(b, x)))
+            .ToArray();
+        var layers = added.Select(x => x.Layer).OrderBy(x => x).ToArray();
+
+        File.WriteAllLines(
+            Path.Combine(output, "file-drop.txt"),
+            new[]
+            {
+                "effect=" + effect,
+                "added_count=" + added.Length,
+                "added=" + string.Join("|", added.Select(x => $"{x.GetType().FullName}@L{x.Layer}:F{x.Frame}:Len{x.Length}")),
+                "target_screen=" + targetPoint.X.ToString("F2", CultureInfo.InvariantCulture) + "," + targetPoint.Y.ToString("F2", CultureInfo.InvariantCulture)
+            },
+            new UTF8Encoding(false));
+
+        return new FileDropObservation(
+            true,
+            effect.ToString(),
+            added.Length > 0,
+            added.Length,
+            string.Join(",", layers),
+            layers.Contains(3),
+            layers.Contains(2));
     }
 
     private static async Task MarqueeAround(ScreenBox box)
