@@ -72,35 +72,22 @@ internal static class Probe
         Check(phase + "_live_identity", valid);
         if (!valid) throw new InvalidOperationException(phase + ": Undo/Redo changed fixture membership; retained object fields are not evidence");
     }
-    private static async Task SaveFixture(Window window)
+    private static void RecordFixture(Window window)
     {
-        // This is a fresh synthetic project on the disposable runner, not a user project.
-        // Exact public SaveProject(string) was observed in project-save-copy-roundtrip.
+        // Harness preparation only. No Record/Clear is injected into gestures or the adapter.
+        // MainViewModel.model is a known exact harness bridge; products should obtain
+        // the manager from public TimelineToolInfo.UndoRedoManager instead.
         var main = window.DataContext;
-        var model = main.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(main);
-        if (model is not null)
-        {
-            Log("main_model=" + model.GetType().FullName);
-            foreach (var property in model.GetType().GetProperties(Host.Flags).Where(p => p.Name.Contains("Undo", StringComparison.OrdinalIgnoreCase) && p.GetIndexParameters().Length == 0).Take(12))
-            {
-                Log("history_property=" + property);
-                var value = property.GetValue(model);
-                if (value is null) continue;
-                Log("history_type=" + value.GetType().FullName);
-                foreach (var method in value.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly).Take(60))
-                    Log("history_method=" + method);
-            }
-        }
-        var save = main.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
-            .Single(m => m.Name == "SaveProject" && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(string));
-        var path = Path.Combine(output, "synthetic-baseline.ymmp");
-        if (File.Exists(path)) throw new InvalidOperationException("Refuse stale synthetic project");
-        Log("phase=save_fixture_before");
-        if (save.Invoke(main, [path]) is Task task) await task;
-        Check("fixture_saved", File.Exists(path));
-        if (!File.Exists(path)) throw new InvalidOperationException("Synthetic save did not complete");
-        Log("phase=save_fixture_after");
-        await Task.Delay(500);
+        var model = main.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(main)
+            ?? throw new MissingMemberException("MainViewModel.model");
+        var manager = Host.Get(model, "UndoRedoManager") ?? throw new MissingMemberException("MainModel.UndoRedoManager");
+        if (manager.GetType().FullName != "YukkuriMovieMaker.UndoRedo.UndoRedoManager") throw new InvalidOperationException("Unexpected history manager");
+        var record = manager.GetType().GetMethod("Record", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null)
+            ?? throw new MissingMethodException("UndoRedoManager.Record()");
+        Log("phase=fixture_record_before");
+        record.Invoke(manager, null);
+        Log("phase=fixture_record_after undoable=" + Host.Get(manager, "IsUndoable"));
+        Check("fixture_record_boundary", true);
     }
     private static async Task Run(Window window, object vm, Timeline t)
     {
@@ -135,7 +122,7 @@ internal static class Probe
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add " + item.Remark);
             t.CurrentFrame = 0; t.SelectedItems = ImmutableList<IItem>.Empty;
             await Task.Delay(1400);
-            await SaveFixture(window);
+            RecordFixture(window);
             Live("fixture", t, fixtures);
             host.Activate();
             var original = (drag.Layer, drag.Frame);
