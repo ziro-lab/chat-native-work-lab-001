@@ -275,7 +275,22 @@ internal static class Probe
     {
         if (started) return;
         started = true;
-        Application.Current.Dispatcher.BeginInvoke(new Action(async () => await RunAsync()));
+        Application.Current.Dispatcher.BeginInvoke(new Action(async () =>
+        {
+            for (var i = 0; i < 100 && ProbeView.Current == null; i++)
+            {
+                await Dispatcher.Yield(DispatcherPriority.Loaded);
+                await Task.Delay(50);
+            }
+
+            if (ProbeView.Current == null)
+            {
+                Fail("Probe View did not become ready.");
+                return;
+            }
+
+            await RunAsync();
+        }), DispatcherPriority.ApplicationIdle);
     }
 
     public static void Fail(string error)
