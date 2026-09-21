@@ -29,8 +29,10 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] internal static extern void mouse_event(uint flags, uint dx, uint dy, uint data, nuint extra);
+    [DllImport("user32.dll")] internal static extern void keybd_event(byte vk, byte scan, uint flags, nuint extra);
     internal const uint LD = 0x0002;
     internal const uint LU = 0x0004;
+    internal const uint KEYUP = 0x0002;
 }
 
 internal readonly record struct ScreenBox(double Left,double Top,double Width,double Height)
@@ -145,18 +147,19 @@ internal static class Probe
             var undoLayer=-1; var undoFrame=-1; var redoLayer=-1; var redoFrame=-1;
             var undoOk=false; var redoOk=false;
 
-            if(manager is not null)
-            {
-                await InvokeTask(manager,"UndoAsync");
-                await Task.Delay(550);
-                undoLayer=item.Layer; undoFrame=item.Frame;
-                undoOk=undoLayer==originalLayer && undoFrame==originalFrame;
+            // Test the history exactly as a user would, without needing internal manager access.
+            mainWindow.Activate();
+            Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
+            await Task.Delay(150);
+            await Shortcut(0x5A); // Ctrl+Z
+            await Task.Delay(700);
+            undoLayer=item.Layer; undoFrame=item.Frame;
+            undoOk=undoLayer==originalLayer && undoFrame==originalFrame;
 
-                await InvokeTask(manager,"RedoAsync");
-                await Task.Delay(550);
-                redoLayer=item.Layer; redoFrame=item.Frame;
-                redoOk=redoLayer==finalLayer && redoFrame==finalFrame;
-            }
+            await Shortcut(0x59); // Ctrl+Y
+            await Task.Delay(700);
+            redoLayer=item.Layer; redoFrame=item.Frame;
+            redoOk=redoLayer==finalLayer && redoFrame==finalFrame;
 
             File.WriteAllLines(Path.Combine(output,"trace.txt"),trace,new UTF8Encoding(false));
             WriteResult("PASS_NO_HARMONY_NATIVE_DRAG_OBSERVATION",[
@@ -261,6 +264,17 @@ internal static class Probe
         var m=instance.GetType().GetMethod(name,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,Type.EmptyTypes)
             ?? throw new MissingMethodException(instance.GetType().FullName,name);
         if(m.Invoke(instance,null) is Task task) await task;
+    }
+
+    static async Task Shortcut(byte key)
+    {
+        const byte ctrl=0x11;
+        Native.keybd_event(ctrl,0,0,0);
+        await Task.Delay(60);
+        Native.keybd_event(key,0,0,0);
+        await Task.Delay(60);
+        Native.keybd_event(key,0,Native.KEYUP,0);
+        Native.keybd_event(ctrl,0,Native.KEYUP,0);
     }
 
     static async Task Drag(Point a,Point b)
