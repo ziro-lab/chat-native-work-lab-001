@@ -6,7 +6,7 @@ These experiments do not redistribute YMM4. Workflows fetch an exact public rele
 
 YMM4 host-behavior observations used by downstream plugins should be recorded here rather than living only in product repositories. See [`../../docs/YMM4_OBSERVATION_POLICY.md`](../../docs/YMM4_OBSERVATION_POLICY.md) and [`../../docs/YMM4_OBSERVATION_TEMPLATE.md`](../../docs/YMM4_OBSERVATION_TEMPLATE.md).
 
-Before creating a new probe, also check [`../../docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](../../docs/YMM4_PLUGIN_SURFACE_GUIDE.md). The guide records the current reference-first discovery rule, the public `leftcontroller0518/YMM4plugin_template` reference inspected on 2026-09-20, and the S1-S4 dependency escalation ladder.
+Before creating a new probe, check [`../../docs/YMM4_REFERENCE_SOURCES.md`](../../docs/YMM4_REFERENCE_SOURCES.md) first, then [`../../docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](../../docs/YMM4_PLUGIN_SURFACE_GUIDE.md). The registry covers official documentation/samples, shipped community source, API indexes, community notes and existing implementations; the surface guide records the S1-S4 dependency escalation ladder.
 
 ## Current experiments
 
