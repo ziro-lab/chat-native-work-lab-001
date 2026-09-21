@@ -216,7 +216,7 @@ internal sealed class DirectDisplay : IDisposable
             if (item is null || !gestureItems.Contains(item) || !targetLayers.TryGetValue(item, out var target))
                 continue;
 
-            ApplyGestureVisual(view, item, target, false, true);
+            ApplyGestureVisual(view, item, target, false, item.Layer != target);
         }
     }
 
