@@ -183,9 +183,18 @@ internal sealed class InputMapAdapter : IDisposable
         }
 
         var before = string.Join("|", group.Keys.Select(x => $"L{x.Layer}:F{x.Frame}"));
+        var targets = new Dictionary<IItem, int>(ReferenceEqualityComparer.Instance);
         foreach (var (item, layer) in group)
+            targets[item] = layer + delta;
+
+        // Put the folded visual compensation in place BEFORE changing Layer.
+        // If the host immediately moves Top to the native logical row, the selected
+        // view does not flash/jump outside the visible folded row. The widened
+        // FastCanvas virtualization lease keeps non-active selected views realized.
+        display.PrepareGestureVisuals(targets);
+
+        foreach (var (item, target) in targets)
         {
-            var target = layer + delta;
             if (item.Layer != target)
             {
                 item.Layer = target;
