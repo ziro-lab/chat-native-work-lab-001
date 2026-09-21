@@ -156,11 +156,31 @@ internal static class FoldProbe
                 Serif = "fold target",
                 Remark = "CNWL_FOLD_TARGET"
             };
+            var marqueeBaseline = new VoiceItem(character)
+            {
+                Frame = 180,
+                Length = 40,
+                Layer = 1,
+                Serif = "marquee baseline",
+                Remark = "CNWL_MARQUEE_BASELINE"
+            };
+            var marqueeTarget = new VoiceItem(character)
+            {
+                Frame = 180,
+                Length = 40,
+                Layer = 3,
+                Serif = "marquee target",
+                Remark = "CNWL_MARQUEE_TARGET"
+            };
 
             if (!t.TryAddItems([head], head.Frame, head.Layer))
                 throw new InvalidOperationException("Could not insert Layer 1 fixture.");
             if (!t.TryAddItems([target], target.Frame, target.Layer))
                 throw new InvalidOperationException("Could not insert Layer 3 fixture.");
+            if (!t.TryAddItems([marqueeBaseline], marqueeBaseline.Frame, marqueeBaseline.Layer))
+                throw new InvalidOperationException("Could not insert marquee baseline fixture.");
+            if (!t.TryAddItems([marqueeTarget], marqueeTarget.Frame, marqueeTarget.Layer))
+                throw new InvalidOperationException("Could not insert marquee target fixture.");
 
             t.CurrentFrame = 0;
             t.SelectedItems = ImmutableList<IItem>.Empty;
@@ -174,6 +194,10 @@ internal static class FoldProbe
                 ?? throw new InvalidOperationException("Layer 1 TimelineItemView not found.");
             var targetView = FindTimelineItemView(timelineView, target)
                 ?? throw new InvalidOperationException("Layer 3 TimelineItemView not found.");
+            var marqueeBaselineView = FindTimelineItemView(timelineView, marqueeBaseline)
+                ?? throw new InvalidOperationException("Marquee baseline TimelineItemView not found.");
+            var marqueeTargetView = FindTimelineItemView(timelineView, marqueeTarget)
+                ?? throw new InvalidOperationException("Marquee target TimelineItemView not found.");
 
             var layerHeight = SettingsBase<YMMSettings>.Default.LayerHeight;
             if (layerHeight <= 0)
@@ -183,7 +207,9 @@ internal static class FoldProbe
 
             var headBefore = Box(headView);
             var targetBefore = Box(targetView);
-            if (!headBefore.Valid || !targetBefore.Valid)
+            var marqueeBaselineBefore = Box(marqueeBaselineView);
+            var marqueeTargetBefore = Box(marqueeTargetView);
+            if (!headBefore.Valid || !targetBefore.Valid || !marqueeBaselineBefore.Valid || !marqueeTargetBefore.Valid)
                 throw new InvalidOperationException("Fixture geometry is invalid.");
 
             // Model a collapsed logical block [1..2]:
@@ -196,8 +222,15 @@ internal static class FoldProbe
             group.Children.Add(new TranslateTransform(0, shift));
             targetView.RenderTransform = group;
 
+            var marqueeGroup = new TransformGroup();
+            if (marqueeTargetView.RenderTransform is { } marqueeExisting && !ReferenceEquals(marqueeExisting, Transform.Identity))
+                marqueeGroup.Children.Add(marqueeExisting.CloneCurrentValue());
+            marqueeGroup.Children.Add(new TranslateTransform(0, shift));
+            marqueeTargetView.RenderTransform = marqueeGroup;
+
             await Task.Delay(500);
             var targetAfter = Box(targetView);
+            var marqueeTargetAfter = Box(marqueeTargetView);
             var visualGap = targetAfter.Top - headBefore.Top;
             var visualGapMatchesOneRow = Math.Abs(visualGap - layerHeight) <= Math.Max(3.0, layerHeight * 0.25);
 
@@ -208,6 +241,9 @@ internal static class FoldProbe
                     $"head_before={Format(headBefore)}",
                     $"target_before={Format(targetBefore)}",
                     $"target_after={Format(targetAfter)}",
+                    $"marquee_baseline={Format(marqueeBaselineBefore)}",
+                    $"marquee_target_before={Format(marqueeTargetBefore)}",
+                    $"marquee_target_after={Format(marqueeTargetAfter)}",
                     $"target_shift={shift:F2}",
                     $"visual_gap_after={visualGap:F2}",
                     $"expected_visual_gap={layerHeight:F2}"
@@ -242,12 +278,39 @@ internal static class FoldProbe
             var dragMatchesFoldSemantics = actualLayer == 3;
             var dragMatchesNativeOneRow = actualLayer == 2;
 
-            // Capture right-click cursor state only after the drag observation so an open
-            // context menu cannot steal the click/drag sequence.
-            action = "right-click-transformed-target";
-            await RightClick(targetAfter.Center);
+            // Validate that the same blank-drag gesture works on an untransformed row,
+            // then repeat it around the visually shifted Layer 3 item.
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            await Task.Delay(250);
+            action = "marquee-baseline";
+            await MarqueeAround(marqueeBaselineBefore);
+            await Task.Delay(650);
+            var marqueeBaselineSelected = t.SelectedItems.Any(x => ReferenceEquals(x, marqueeBaseline));
+
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            await Task.Delay(250);
+            action = "marquee-transformed-target";
+            await MarqueeAround(marqueeTargetAfter);
+            await Task.Delay(650);
+            var marqueeTransformedSelected = t.SelectedItems.Any(x => ReferenceEquals(x, marqueeTarget));
+
+            // Capture a blank right-click on the displayed Layer 3 row after the other
+            // decisive pointer tests, so the context menu cannot steal their input.
+            var timelineBox = Box(timelineView);
+            var blankX = Math.Min(timelineBox.Right - 40, Math.Max(targetAfter.Right + 80, targetAfter.Center.X + 120));
+            var rightClickPoint = new Point(blankX, targetAfter.Center.Y);
+
+            // Capture right-click cursor state only after the drag/marquee observations.
+            action = "right-click-folded-row-blank";
+            await RightClick(rightClickPoint);
             await Task.Delay(350);
             rightClickCursor = ReadReactivePoint(activeTimelineViewModel, "TimelineCursorPositionWhenRightClick");
+            var rightClickNativeLayer = rightClickCursor is { } rc && layerHeight > 0 ? (int)(rc.Y / layerHeight) : -1;
+            var rightClickMatchesFoldLayer = rightClickNativeLayer == 3;
+            var rightClickMatchesNativeRow = rightClickNativeLayer == 2;
+
+            var converterObservation = ObserveAddPositionConverter(rightClickCursor, layerHeight, activeTimelineViewModel);
+            File.WriteAllLines(Path.Combine(output, "converter.txt"), converterObservation.Details, new UTF8Encoding(false));
 
             lock (Events)
                 File.WriteAllLines(Path.Combine(output, "events.txt"), Events, new UTF8Encoding(false));
@@ -263,8 +326,16 @@ internal static class FoldProbe
                     $"drag_actual_layer={actualLayer}",
                     $"drag_matches_fold_semantics={dragMatchesFoldSemantics}",
                     $"drag_matches_native_one_row={dragMatchesNativeOneRow}",
+                    $"marquee_baseline_selected={marqueeBaselineSelected}",
+                    $"marquee_transformed_selected={marqueeTransformedSelected}",
                     $"right_click_cursor_observed={rightClickCursor is not null}",
-                    $"right_click_cursor_y={(rightClickCursor?.Y.ToString("F2", CultureInfo.InvariantCulture) ?? "<none>")}"
+                    $"right_click_cursor_y={(rightClickCursor?.Y.ToString("F2", CultureInfo.InvariantCulture) ?? "<none>")}",
+                    $"right_click_native_layer={rightClickNativeLayer}",
+                    $"right_click_matches_fold_layer={rightClickMatchesFoldLayer}",
+                    $"right_click_matches_native_row={rightClickMatchesNativeRow}",
+                    $"add_position_converter_found={converterObservation.Found}",
+                    $"add_position_converter_layer={converterObservation.Layer}",
+                    $"file_drop_converter_candidate_present={converterObservation.FileCandidate}"
                 ]);
         }
         catch (Exception ex)
@@ -319,6 +390,78 @@ internal static class FoldProbe
             await Task.Delay(65);
         }
         Native.mouse_event(Native.LU, 0, 0, 0, 0);
+    }
+
+    private static async Task MarqueeAround(ScreenBox box)
+    {
+        // Start just to the left of the item on blank Timeline space and sweep over it.
+        var start = new Point(box.Left - 14, box.Top + 5);
+        var end = new Point(box.Right + 14, box.Bottom - 5);
+        await Drag(start, end);
+    }
+
+    private readonly record struct ConverterObservation(bool Found, int Layer, bool FileCandidate, string[] Details);
+
+    private static ConverterObservation ObserveAddPositionConverter(Point? point, int layerHeight, object activeTimelineViewModel)
+    {
+        var details = new List<string>();
+        try
+        {
+            var assembly = typeof(Timeline).Assembly;
+            var baseType = assembly.GetType("YukkuriMovieMaker.Views.Converters.AddItemCommandParameterConverterBase");
+            if (baseType is null)
+                return new(false, -1, false, ["base_type=<missing>"]);
+
+            Type[] types;
+            try { types = assembly.GetTypes(); }
+            catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(x => x is not null).Cast<Type>().ToArray(); }
+
+            var derived = types
+                .Where(t => t != baseType && baseType.IsAssignableFrom(t))
+                .Select(t => t.FullName ?? t.Name)
+                .OrderBy(x => x, StringComparer.Ordinal)
+                .ToArray();
+            details.Add("derived_count=" + derived.Length);
+            foreach (var name in derived)
+                details.Add("derived=" + name);
+
+            var fileCandidate = derived.Any(x =>
+                x.Contains("File", StringComparison.OrdinalIgnoreCase) ||
+                x.Contains("Drop", StringComparison.OrdinalIgnoreCase) ||
+                x.Contains("Media", StringComparison.OrdinalIgnoreCase));
+
+            var method = baseType.GetMethod("GetTimelinePosition", BindingFlags.Static | BindingFlags.NonPublic);
+            if (method is null)
+                return new(false, -1, fileCandidate, [.. details, "method=<missing>"]);
+
+            details.Add("method=" + method);
+            if (point is null)
+                return new(true, -1, fileCandidate, [.. details, "invoke=point_missing"]);
+
+            var secondCandidates = new List<object?> { 1.0, 1, 100.0, 100, activeTimelineViewModel, null };
+            foreach (var second in secondCandidates)
+            {
+                try
+                {
+                    var values = new object?[] { point.Value, second, layerHeight };
+                    var result = method.Invoke(null, [values]);
+                    details.Add($"invoke_second={(second?.GetType().FullName ?? "<null>")} result={result}");
+                    if (result is ValueTuple<int, int> tuple)
+                        return new(true, tuple.Item2, fileCandidate, details.ToArray());
+                }
+                catch (Exception ex)
+                {
+                    details.Add($"invoke_second={(second?.GetType().FullName ?? "<null>")} error={ex.GetBaseException().GetType().Name}:{ex.GetBaseException().Message}");
+                }
+            }
+
+            return new(true, -1, fileCandidate, details.ToArray());
+        }
+        catch (Exception ex)
+        {
+            details.Add("observation_error=" + ex);
+            return new(false, -1, false, details.ToArray());
+        }
     }
 
     private static Point? ReadReactivePoint(object instance, string propertyName)
