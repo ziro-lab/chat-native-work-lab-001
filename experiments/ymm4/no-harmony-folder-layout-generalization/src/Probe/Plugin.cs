@@ -220,25 +220,42 @@ internal static class Probe
             var dragView = FindItemView(timelineView, dragSource)
                 ?? throw new InvalidOperationException("Drag view not found after viewport realization.");
 
-            var targetBefore = Box(targetView);
-            var dragBefore = Box(dragView);
-            if (!targetBefore.Valid || !dragBefore.Valid)
-                throw new InvalidOperationException("Fixture geometry invalid.");
+            var targetTopBefore = GetItemVmTop(target);
+            var dragTopBefore = GetItemVmTop(dragSource);
 
             layout = layoutA;
             ApplyLayout();
             await Task.Delay(450);
 
-            targetView = FindItemView(timelineView, target) ?? targetView;
-            dragView = FindItemView(timelineView, dragSource) ?? dragView;
+            // Use the compressed viewport coordinates now that item VM Top values are folded.
+            var foldedViewport = ReadReactiveRect(timelineVm, "Viewport");
+            if (foldedViewport is { } fvp)
+            {
+                SetReactiveRect(
+                    timelineVm,
+                    "Viewport",
+                    new Rect(new Point(fvp.X, 4 * h), fvp.Size));
+                ForceFastCanvasUpdateAll(timelineView);
+                await Task.Delay(450);
+            }
+
+            targetView = FindItemView(timelineView, target)
+                ?? throw new InvalidOperationException("Target view not realized at folded viewport.");
+            dragView = FindItemView(timelineView, dragSource)
+                ?? throw new InvalidOperationException("Drag view not realized at folded viewport.");
             var targetA = Box(targetView);
             var dragA = Box(dragView);
-            var targetShiftA = targetA.Top - targetBefore.Top;
-            var dragShiftA = dragA.Top - dragBefore.Top;
+            if (!targetA.Valid || !dragA.Valid)
+                throw new InvalidOperationException("Folded fixture geometry invalid.");
+
+            var targetTopA = GetItemVmTop(target);
+            var dragTopA = GetItemVmTop(dragSource);
+            var targetShiftA = targetTopA - targetTopBefore;
+            var dragShiftA = dragTopA - dragTopBefore;
             var geometryAMatches =
-                Near(targetShiftA, layoutA.TranslationY(9, h)) &&
-                Near(dragShiftA, layoutA.TranslationY(6, h)) &&
-                Near(targetA.Top - dragA.Top, h);
+                Near(targetTopA, layoutA.VisualRowOfLogical(9) * h) &&
+                Near(dragTopA, layoutA.VisualRowOfLogical(6) * h) &&
+                Near(targetTopA - dragTopA, h);
 
             InstallAdapters();
 
@@ -288,11 +305,23 @@ internal static class Probe
             // Dynamically collapse the parent too. Nested child head must now disappear into L1.
             layout = layoutB;
             ApplyLayout();
-            await Task.Delay(450);
-            targetView = FindItemView(timelineView, target) ?? targetView;
+            var parentFoldViewport = ReadReactiveRect(timelineVm, "Viewport");
+            if (parentFoldViewport is { } pvp)
+            {
+                SetReactiveRect(
+                    timelineVm,
+                    "Viewport",
+                    new Rect(new Point(pvp.X, 2 * h), pvp.Size));
+                ForceFastCanvasUpdateAll(timelineView);
+                await Task.Delay(450);
+            }
+
+            targetView = FindItemView(timelineView, target)
+                ?? throw new InvalidOperationException("Target view not realized after parent collapse.");
             var targetB = Box(targetView);
-            var targetShiftB = targetB.Top - targetBefore.Top;
-            var geometryBMatches = Near(targetShiftB, layoutB.TranslationY(9, h));
+            var targetTopB = GetItemVmTop(target);
+            var targetShiftB = targetTopB - targetTopBefore;
+            var geometryBMatches = Near(targetTopB, layoutB.VisualRowOfLogical(9) * h);
 
             t.SelectedItems = ImmutableList<IItem>.Empty;
             await Click(targetB.Center);
@@ -307,9 +336,27 @@ internal static class Probe
             var converterB = ObserveAddPositionConverter(rightBPoint, h);
             await Escape();
 
+            var criticalPass =
+                geometryAMatches &&
+                marqueeSelected &&
+                marqueeSuppressedSeek &&
+                bubbleMoveSeen &&
+                dragMatchesNonUniformJump &&
+                nativeFramePreserved &&
+                undoRestored &&
+                redoRestored &&
+                rightALayer == 9 &&
+                converterA == 9 &&
+                geometryBMatches &&
+                clickBSelected &&
+                rightBLayer == 9 &&
+                converterB == 9;
+
             File.WriteAllLines(Path.Combine(output, "trace.txt"), trace, new UTF8Encoding(false));
             WriteResult(
-                "PASS_NO_HARMONY_FOLDER_LAYOUT_GENERALIZATION",
+                criticalPass
+                    ? "PASS_NO_HARMONY_FOLDER_LAYOUT_GENERALIZATION"
+                    : "FAIL_NO_HARMONY_FOLDER_LAYOUT_GENERALIZATION",
                 [
                     "harmony_reference_present=False",
                     $"layout_a_visible={layoutA.VisibleCsv}",
@@ -483,18 +530,97 @@ internal static class Probe
 
     private static void ApplyLayout()
     {
-        if (timelineView is null || layout is null)
+        if (timelineView is null || layout is null || timelineVm is null)
             return;
 
-        foreach (var fe in Elements(timelineView).Where(x => x.GetType().Name == "TimelineItemView"))
+        var itemsHolder = timelineVm.GetType()
+            .GetProperty("Items", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(timelineVm);
+
+        if (itemsHolder is IEnumerable itemVms)
         {
-            var item = ItemOf(fe.DataContext);
-            if (item is null || item.Layer > layout.MaxLayer)
+            foreach (var itemVm in itemVms)
+            {
+                if (itemVm is null)
+                    continue;
+
+                var item = ItemOf(itemVm.GetType()
+                    .GetProperty("Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.GetValue(itemVm));
+
+                if (item is null || item.Layer > layout.MaxLayer)
+                    continue;
+
+                var hidden = layout.IsHidden(item.Layer);
+                var top = hidden
+                    ? -100000.0 - item.Layer * h
+                    : layout.VisualRowOfLogical(item.Layer) * (double)h;
+
+                SetPrivateProperty(itemVm, "Top", top);
+                SetPrivateProperty(itemVm, "Height", hidden ? 6.0 : (double)h);
+            }
+        }
+
+        ForceFastCanvasUpdateAll(timelineView);
+    }
+
+    private static double GetItemVmTop(IItem item)
+    {
+        if (timelineVm is null)
+            throw new InvalidOperationException("timelineVm missing.");
+
+        var itemsHolder = timelineVm.GetType()
+            .GetProperty("Items", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(timelineVm);
+
+        if (itemsHolder is not IEnumerable itemVms)
+            throw new MissingMemberException("TimelineViewModel.Items");
+
+        foreach (var itemVm in itemVms)
+        {
+            if (itemVm is null)
                 continue;
 
-            var shift = layout.TranslationY(item.Layer, h);
-            fe.RenderTransform = Math.Abs(shift) < 0.01 ? Transform.Identity : new TranslateTransform(0, shift);
+            var model = itemVm.GetType()
+                .GetProperty("Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(itemVm) as IItem;
+
+            if (!ReferenceEquals(model, item))
+                continue;
+
+            var top = itemVm.GetType()
+                .GetProperty("Top", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(itemVm);
+
+            return Convert.ToDouble(top, CultureInfo.InvariantCulture);
         }
+
+        throw new InvalidOperationException("Item VM not found for " + item.Remark);
+    }
+
+    private static void SetPrivateProperty(object instance, string name, object value)
+    {
+        var property = instance.GetType()
+            .GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?? throw new MissingMemberException(instance.GetType().FullName, name);
+        property.SetValue(instance, value);
+    }
+
+    private static int ForceFastCanvasUpdateAll(DependencyObject root)
+    {
+        var count = 0;
+        foreach (var fe in Elements(root))
+        {
+            if (fe.GetType().Name != "FastCanvasItemsControl")
+                continue;
+            var method = fe.GetType()
+                .GetMethod("UpdateAll", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (method is null)
+                continue;
+            method.Invoke(fe, null);
+            count++;
+        }
+        return count;
     }
 
     private static bool SetReactivePoint(object? instance, string propertyName, Point value)
