@@ -45,6 +45,8 @@ internal sealed class DirectDisplay : IDisposable
     internal int GestureSamples { get; private set; }
     internal int MissingGestureViews { get; private set; }
     internal int DeferredApplies { get; private set; }
+    internal int RenderAudits { get; private set; }
+    internal int PendingRenderAudits { get; private set; }
     internal Exception? Failure { get; private set; }
     internal string Phase { get; set; } = "attach";
     internal int Height => SettingsBase<YMMSettings>.Default.LayerHeight;
@@ -169,13 +171,17 @@ internal sealed class DirectDisplay : IDisposable
         log("gesture_viewport_restored=" + original);
     }
 
-    private bool ApplyGestureVisual(FrameworkElement view, IItem item, int logicalLayer, bool countVisibility)
+    private bool ApplyGestureVisual(FrameworkElement view, IItem item, int logicalLayer, bool countVisibility, bool anticipateNativeTop = false)
     {
         if (!gestureTransforms.ContainsKey(view))
             gestureTransforms[view] = view.ReadLocalValue(UIElement.RenderTransformProperty);
 
         var previousTranslation = view.RenderTransform is TranslateTransform prior ? prior.Y : 0.0;
-        var baseTop = view.TranslatePoint(new Point(), host.Source).Y - previousTranslation;
+        var measuredBaseTop = view.TranslatePoint(new Point(), host.Source).Y - previousTranslation;
+        // PrepareGestureVisuals runs immediately before the Layer setter in the
+        // same UI input stack. Anticipate YMM4's native logical Top so the final
+        // pre-render state already contains the correct folded translation.
+        var baseTop = anticipateNativeTop ? logicalLayer * (double)Height : measuredBaseTop;
         var desiredTop = Layout.VisualRowOfLogical(logicalLayer) * (double)Height;
         var translation = desiredTop - baseTop;
 
@@ -191,9 +197,9 @@ internal sealed class DirectDisplay : IDisposable
 
         var box = Host.ScreenRect(view);
         var visible = box.Width > 2 && box.Height > 2 && Host.ScreenRect(host.Scroll).IntersectsWith(box);
-        log($"gesture_visual item={item.Remark} layer={item.Layer} target_layer={logicalLayer} local_top={host.LocalTop(item):F2} desired_top={desiredTop:F2} translation={translation:F2} visible={visible}");
-        if (!visible)
-            MissingGestureViews++;
+        log($"gesture_visual_immediate item={item.Remark} layer={item.Layer} target_layer={logicalLayer} local_top={host.LocalTop(item):F2} desired_top={desiredTop:F2} translation={translation:F2} visible={visible}");
+        // Do not treat same-stack TranslatePoint as rendered evidence. WPF applies
+        // the final DP state at render/layout priority after this mouse route.
         return visible;
     }
 
@@ -210,7 +216,7 @@ internal sealed class DirectDisplay : IDisposable
             if (item is null || !gestureItems.Contains(item) || !targetLayers.TryGetValue(item, out var target))
                 continue;
 
-            ApplyGestureVisual(view, item, target, false);
+            ApplyGestureVisual(view, item, target, false, true);
         }
     }
 
@@ -233,9 +239,53 @@ internal sealed class DirectDisplay : IDisposable
         }
 
         GestureSamples++;
-        MissingGestureViews += gestureItems.Count(x => !found.Contains(x));
+        ScheduleRenderAudit(gestureItems.Select(x => (Item: x, Layer: x.Layer)).ToArray());
         if (GestureSamples > 2000)
             throw new InvalidOperationException("Gesture visual update budget exceeded");
+    }
+
+    private void ScheduleRenderAudit((IItem Item, int Layer)[] expected)
+    {
+        PendingRenderAudits++;
+        host.View.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                RenderAudits++;
+                foreach (var (item, layer) in expected)
+                {
+                    var view = host.ItemViews().FirstOrDefault(x => ReferenceEquals(Host.Item(x.DataContext), item));
+                    if (view is null)
+                    {
+                        MissingGestureViews++;
+                        log($"gesture_render_audit item={item.Remark} layer={layer} realized=False visible=False");
+                        continue;
+                    }
+
+                    var expectedTop = Layout.VisualRowOfLogical(layer) * (double)Height;
+                    var actualTop = view.TranslatePoint(new Point(), host.Source).Y;
+                    var box = Host.ScreenRect(view);
+                    var visible =
+                        Math.Abs(actualTop - expectedTop) < 2.0 &&
+                        box.Width > 2 &&
+                        box.Height > 2 &&
+                        Host.ScreenRect(host.Scroll).IntersectsWith(box);
+
+                    log($"gesture_render_audit item={item.Remark} layer={layer} realized=True actual_top={actualTop:F2} expected_top={expectedTop:F2} visible={visible}");
+                    if (!visible)
+                        MissingGestureViews++;
+                }
+            }
+            catch (Exception ex)
+            {
+                MissingGestureViews += Math.Max(1, expected.Length);
+                log("gesture_render_audit_failure=" + ex);
+            }
+            finally
+            {
+                PendingRenderAudits--;
+            }
+        }), DispatcherPriority.Render);
     }
 
     internal void EndGesture()
@@ -256,7 +306,7 @@ internal sealed class DirectDisplay : IDisposable
         gestureTransforms.Clear();
         RestoreGestureViewport();
         gestureItems.Clear();
-        log($"gesture_end samples={GestureSamples} missing={MissingGestureViews} deferred={DeferredApplies}");
+        log($"gesture_end samples={GestureSamples} render_audits={RenderAudits} pending_render_audits={PendingRenderAudits} missing={MissingGestureViews} deferred={DeferredApplies}");
         Queue();
     }
 
@@ -484,6 +534,6 @@ internal sealed class DirectDisplay : IDisposable
         RefreshCanvases();
         slots.Clear();
 
-        log($"display_detached applications={Applications} writes={Mutations} canvas_refreshes={CanvasRefreshes} subscriptions={SubscriptionCount} gesture_samples={GestureSamples} missing_gesture_views={MissingGestureViews} deferred={DeferredApplies}");
+        log($"display_detached applications={Applications} writes={Mutations} canvas_refreshes={CanvasRefreshes} subscriptions={SubscriptionCount} gesture_samples={GestureSamples} render_audits={RenderAudits} pending_render_audits={PendingRenderAudits} missing_gesture_views={MissingGestureViews} deferred={DeferredApplies}");
     }
 }
