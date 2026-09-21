@@ -4,7 +4,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
-using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Project.Items;
@@ -21,7 +20,6 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 internal sealed class DirectDisplay : IDisposable
 {
     private sealed record Slot(object Target, Func<int> Layer, bool Item, double HeightRatio, PropertyInfo Top, PropertyInfo Height);
-    private sealed record ViewportLease(FrameworkElement Canvas, DependencyProperty Property, object Local, BindingBase? Binding);
 
     private readonly Host host;
     private readonly TimelineViewModel vm;
@@ -31,8 +29,8 @@ internal sealed class DirectDisplay : IDisposable
     private readonly HashSet<INotifyCollectionChanged> collections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IItem> gestureItems = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FrameworkElement, object> gestureTransforms = [];
-    private readonly Dictionary<FrameworkElement, ViewportLease> gestureViewports = [];
     private readonly object oldMaxHeight;
+    private Rect? gestureViewportOriginal;
     private readonly Stopwatch clock = Stopwatch.StartNew();
 
     private CollapsedSpan[] spans = [];
@@ -121,69 +119,54 @@ internal sealed class DirectDisplay : IDisposable
             throw new InvalidOperationException("Empty gesture selection");
         }
 
-        LeaseGestureViewports();
-        log("gesture_begin_frozen count=" + gestureItems.Count + " viewport_leases=" + gestureViewports.Count);
+        LeaseGestureViewport();
+        log("gesture_begin_frozen count=" + gestureItems.Count + " viewport=" + vm.Viewport.Value);
     }
 
-    private void LeaseGestureViewports()
+    private void LeaseGestureViewport()
     {
-        var candidates = Host.Elements(host.View)
-            .Where(x => x.GetType().Name == "FastCanvasItemsControl")
-            .ToArray();
+        var current = vm.Viewport.Value;
+        if (gestureViewportOriginal is not null)
+            throw new InvalidOperationException("Viewport lease already active");
 
-        foreach (var canvas in candidates)
-        {
-            var field = canvas.GetType().GetField(
-                "ViewportProperty",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+        gestureViewportOriginal = current;
 
-            if (field?.GetValue(null) is not DependencyProperty property || property.PropertyType != typeof(Rect))
-                continue;
+        var displayBottomRow = Math.Max(
+            0,
+            (int)Math.Floor(Math.Max(current.Y, current.Bottom - 1) / Height));
 
-            if (!gestureViewports.ContainsKey(canvas))
-            {
-                gestureViewports[canvas] = new(
-                    canvas,
-                    property,
-                    canvas.ReadLocalValue(property),
-                    BindingOperations.GetBindingBase(canvas, property));
-            }
+        displayBottomRow = Math.Min(
+            displayBottomRow,
+            Math.Max(0, Layout.VisibleLayers.Count - 1));
 
-            var current = (Rect)canvas.GetValue(property);
-            var nativeBottom = Math.Max(
-                current.Bottom,
-                Math.Max(
-                    (Layout.VisibleLayers.Count == 0 ? 0 : Layout.VisibleLayers.Max() + 2) * (double)Height,
-                    (gestureItems.Max(x => x.Layer) + 4) * (double)Height));
+        var logicalVisibleBottom =
+            (Layout.DisplayRowToLogical(displayBottomRow) + 2) * (double)Height;
 
-            var expanded = new Rect(
-                current.X,
-                Math.Min(current.Y, 0),
-                current.Width,
-                nativeBottom - Math.Min(current.Y, 0));
+        var selectedNativeBottom =
+            (gestureItems.Max(x => x.Layer) + 4) * (double)Height;
 
-            canvas.SetCurrentValue(property, expanded);
-        }
+        var expandedBottom = Math.Max(
+            current.Bottom,
+            Math.Max(logicalVisibleBottom, selectedNativeBottom));
 
-        if (gestureViewports.Count == 0)
-            throw new InvalidOperationException("No FastCanvas viewport surface found for gesture virtualization");
+        var expanded = new Rect(
+            current.X,
+            current.Y,
+            current.Width,
+            Math.Max(current.Height, expandedBottom - current.Y));
 
-        log("gesture_viewports_leased=" + gestureViewports.Count);
+        vm.Viewport.Value = expanded;
+        log($"gesture_viewport_lease old={current} expanded={expanded}");
     }
 
-    private void RestoreGestureViewports()
+    private void RestoreGestureViewport()
     {
-        foreach (var lease in gestureViewports.Values)
-        {
-            if (lease.Binding is not null)
-                BindingOperations.SetBinding(lease.Canvas, lease.Property, lease.Binding);
-            else if (lease.Local == DependencyProperty.UnsetValue)
-                lease.Canvas.ClearValue(lease.Property);
-            else
-                lease.Canvas.SetValue(lease.Property, lease.Local);
-        }
+        if (gestureViewportOriginal is not { } original)
+            return;
 
-        gestureViewports.Clear();
+        vm.Viewport.Value = original;
+        gestureViewportOriginal = null;
+        log("gesture_viewport_restored=" + original);
     }
 
     private bool ApplyGestureVisual(FrameworkElement view, IItem item, int logicalLayer, bool countVisibility)
@@ -271,7 +254,7 @@ internal sealed class DirectDisplay : IDisposable
         }
 
         gestureTransforms.Clear();
-        RestoreGestureViewports();
+        RestoreGestureViewport();
         gestureItems.Clear();
         log($"gesture_end samples={GestureSamples} missing={MissingGestureViews} deferred={DeferredApplies}");
         Queue();
