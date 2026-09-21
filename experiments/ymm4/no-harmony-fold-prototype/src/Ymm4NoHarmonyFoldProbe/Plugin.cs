@@ -134,7 +134,7 @@ internal static class FoldProbe
     {
         try
         {
-            mainWindow.WindowState = WindowState.Maximized;
+            mainWindow.WindowState = System.Windows.WindowState.Maximized;
             mainWindow.Activate();
             Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
             await Task.Delay(900);
