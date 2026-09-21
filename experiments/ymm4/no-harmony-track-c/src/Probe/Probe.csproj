@@ -6,6 +6,5 @@
 <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
 <Reference Include="ReactiveProperty.Core"><HintPath>$(YMM4DirPath)ReactiveProperty.Core.dll</HintPath><Private>false</Private></Reference>
 <Compile Include="../../../no-harmony-track-a/src/Probe/Host.cs" Link="Host.cs" />
-<Compile Include="../../../no-harmony-track-b/src/Probe/DirectDisplay.cs" Link="DirectDisplay.cs" />
 <Compile Include="../../../no-harmony-folder-layout-generalization/src/Probe/FolderLayout.cs" Link="FolderLayout.cs" />
 </ItemGroup></Project>

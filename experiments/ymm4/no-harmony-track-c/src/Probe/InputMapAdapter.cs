@@ -4,8 +4,7 @@ using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
-// Input only. Shared display.Layout is the sole mapping authority.
-// Native Frame/snap/history remain host-owned; no geometry refresh from MouseMove.
+// Input only; the display owns gesture transitions and the sole FolderLayout.
 internal sealed class InputMapAdapter : IDisposable
 {
     private readonly Host host;
@@ -32,8 +31,7 @@ internal sealed class InputMapAdapter : IDisposable
     private void Down(object sender, MouseButtonEventArgs e)
     {
         if (disposed) return;
-        display.ThrowIfFailed();
-        var p = Mouse.GetPosition(host.Source);
+        display.ThrowIfFailed(); var p = Mouse.GetPosition(host.Source);
         if (e.ChangedButton == MouseButton.Right)
         {
             var logical = display.Layout.MapDisplayPointToLogical(p, display.Height);
@@ -42,17 +40,16 @@ internal sealed class InputMapAdapter : IDisposable
             RightMaps++; log("right_after"); return;
         }
         if (e.ChangedButton != MouseButton.Left) return;
-        var view = Host.AncestorItem(e.OriginalSource as DependencyObject);
-        down = p;
+        var view = Host.AncestorItem(e.OriginalSource as DependencyObject); down = p;
         if (view is null && (Keyboard.Modifiers & ModifierKeys.Shift) != 0)
         {
             marquee = true; e.Handled = true; Mouse.Capture(host.Source, CaptureMode.SubTree); log("marquee_down"); return;
         }
-        var item = Host.Item(view?.DataContext);
-        if (item is null) return;
+        var item = Host.Item(view?.DataContext); if (item is null) return;
         anchor = item; originalLayer = item.Layer; group.Clear();
         IEnumerable<IItem> selected = host.Timeline.SelectedItems.Any(x => ReferenceEquals(x, item)) ? host.Timeline.SelectedItems : new[] { item };
         foreach (var member in selected) group[member] = member.Layer;
+        display.BeginGesture(group.Keys);
         log($"down L{originalLayer} F{item.Frame} group={group.Count} point={p}");
     }
     private void PreviewMove(object sender, MouseEventArgs e) { if (marquee) e.Handled = true; }
@@ -74,18 +71,16 @@ internal sealed class InputMapAdapter : IDisposable
         var layout = display.Layout; var height = display.Height;
         var desired = layout.DisplayYToLogical(layout.VisualRowOfLogical(originalLayer) * height + p.Y - down.Y + height / 2.0, height);
         var delta = desired - originalLayer;
-        // Whole group is rejected at the boundary, not independently clamped/distorted.
         if (group.Values.Any(layer => layer + delta < 0 || layer + delta > layout.MaxLayer)) return;
         var before = string.Join("|", group.Keys.Select(x => $"L{x.Layer}:F{x.Frame}"));
-        foreach (var (item, layer) in group)
-            if (item.Layer != layer + delta) { item.Layer = layer + delta; Corrections++; }
+        foreach (var (item, layer) in group) if (item.Layer != layer + delta) { item.Layer = layer + delta; Corrections++; }
         log($"move desired={desired} before={before} after={string.Join("|", group.Keys.Select(x => $"L{x.Layer}:F{x.Frame}"))}");
     }
     private void Up(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
         if (anchor is not null) log($"up L{anchor.Layer} F{anchor.Frame}");
-        anchor = null; group.Clear();
+        anchor = null; group.Clear(); display.EndGesture();
     }
     public void Dispose()
     {
@@ -97,6 +92,6 @@ internal sealed class InputMapAdapter : IDisposable
         host.Source.RemoveHandler(Mouse.MouseMoveEvent, new MouseEventHandler(Move));
         host.Source.RemoveHandler(Mouse.MouseUpEvent, new MouseButtonEventHandler(Up));
         if (marquee && ReferenceEquals(Mouse.Captured, host.Source)) Mouse.Capture(null);
-        marquee = false; anchor = null; group.Clear(); log("input_detached");
+        marquee = false; anchor = null; group.Clear(); display.EndGesture(); log("input_detached");
     }
 }
