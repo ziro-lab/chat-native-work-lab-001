@@ -64,6 +64,44 @@ internal static class Probe
         checks.Add(name + "=" + pass); Log("assert " + checks[^1]); failed |= !pass;
     }
     private static void Log(string message) => File.AppendAllText(Path.Combine(output, "progress.txt"), DateTime.UtcNow.ToString("O") + " " + message + Environment.NewLine);
+    private static void Live(string phase, Timeline timeline, IItem[] fixtures)
+    {
+        var items = timeline.Items.ToArray();
+        var valid = items.Length == fixtures.Length && fixtures.All(expected => items.Any(actual => ReferenceEquals(expected, actual)));
+        Log(phase + " live=" + string.Join("|", items.Select(x => $"{x.Remark}:L{x.Layer}:F{x.Frame}")));
+        Check(phase + "_live_identity", valid);
+        if (!valid) throw new InvalidOperationException(phase + ": Undo/Redo changed fixture membership; retained object fields are not evidence");
+    }
+    private static async Task SaveFixture(Window window)
+    {
+        // This is a fresh synthetic project on the disposable runner, not a user project.
+        // Exact public SaveProject(string) was observed in project-save-copy-roundtrip.
+        var main = window.DataContext;
+        var model = main.GetType().GetField("model", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(main);
+        if (model is not null)
+        {
+            Log("main_model=" + model.GetType().FullName);
+            foreach (var property in model.GetType().GetProperties(Host.Flags).Where(p => p.Name.Contains("Undo", StringComparison.OrdinalIgnoreCase) && p.GetIndexParameters().Length == 0).Take(12))
+            {
+                Log("history_property=" + property);
+                var value = property.GetValue(model);
+                if (value is null) continue;
+                Log("history_type=" + value.GetType().FullName);
+                foreach (var method in value.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly).Take(60))
+                    Log("history_method=" + method);
+            }
+        }
+        var save = main.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .Single(m => m.Name == "SaveProject" && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(string));
+        var path = Path.Combine(output, "synthetic-baseline.ymmp");
+        if (File.Exists(path)) throw new InvalidOperationException("Refuse stale synthetic project");
+        Log("phase=save_fixture_before");
+        if (save.Invoke(main, [path]) is Task task) await task;
+        Check("fixture_saved", File.Exists(path));
+        if (!File.Exists(path)) throw new InvalidOperationException("Synthetic save did not complete");
+        Log("phase=save_fixture_after");
+        await Task.Delay(500);
+    }
     private static async Task Run(Window window, object vm, Timeline t)
     {
         FoldInputAdapter? adapter = null;
@@ -72,8 +110,7 @@ internal static class Probe
         {
             window.WindowState = WindowState.Maximized;
             await Task.Delay(900);
-            // Test-fixture viewport only: fit all 11 native rows on small CI desktops.
-            // Item folding itself uses RenderTransform exclusively. Never write VM Top/Height.
+            // Fixture accommodation, not a product display change or virtualization proof.
             root = window.Content as FrameworkElement ?? throw new InvalidOperationException("Window content");
             oldScale = root.ReadLocalValue(FrameworkElement.LayoutTransformProperty);
             root.SetCurrentValue(FrameworkElement.LayoutTransformProperty, new ScaleTransform(0.5, 0.5));
@@ -98,17 +135,22 @@ internal static class Probe
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add " + item.Remark);
             t.CurrentFrame = 0; t.SelectedItems = ImmutableList<IItem>.Empty;
             await Task.Delay(1400);
+            await SaveFixture(window);
+            Live("fixture", t, fixtures);
+            host.Activate();
             var original = (drag.Layer, drag.Frame);
             var originalOther = (other.Layer, other.Frame);
-            // Unfolded control gesture establishes an actual native frame delta, not merely != 0.
             Log("phase=baseline_drag");
             var start = host.Center(drag);
             await Native.Drag(start, host.OffsetScreen(start, 64, h));
             var nativeDelta = drag.Frame - original.Frame;
+            Live("baseline_drag", t, fixtures);
             Check("baseline_native_drag", drag.Layer == 7 && nativeDelta > 0);
             Log("native_frame_delta=" + nativeDelta);
             await Native.Key(0x5A, true);
+            Live("baseline_undo", t, fixtures);
             Check("baseline_undo", (drag.Layer, drag.Frame) == original);
+            if ((drag.Layer, drag.Frame) != original) throw new InvalidOperationException("Unfolded native control did not undo one gesture");
             t.SelectedItems = ImmutableList<IItem>.Empty;
             Log("phase=install_track_a");
             adapter = new FoldInputAdapter(host, h, a, Log);
@@ -121,8 +163,7 @@ internal static class Probe
             await Native.Click(host.Center(target));
             Check("a_normal_click", t.SelectedItems.Any(x => ReferenceEquals(x, target)) && (target.Layer, target.Frame) == clickState);
             Check("a_click_no_layer_write", adapter.Corrections == 0);
-            Log("phase=right_a");
-            await Right(host, target, h, "a");
+            Log("phase=right_a"); await Right(host, target, h, "a");
             Log("phase=marquee_a");
             t.SelectedItems = ImmutableList<IItem>.Empty;
             var frameBefore = t.CurrentFrame;
@@ -136,24 +177,27 @@ internal static class Probe
             start = host.Center(drag);
             await Native.Drag(start, host.OffsetScreen(start, 64, h));
             var final = (drag.Layer, drag.Frame);
+            Live("single_drag", t, fixtures);
             Check("single_L6_to_L9", drag.Layer == 9 && adapter.Corrections > 0);
             Check("single_native_frame_preserved", drag.Frame - original.Frame == nativeDelta);
-            await Native.Key(0x5A, true); Check("single_undo", (drag.Layer, drag.Frame) == original);
-            await Native.Key(0x59, true); Check("single_redo", (drag.Layer, drag.Frame) == final);
-            await Native.Key(0x5A, true);
+            await Native.Key(0x5A, true); Live("single_undo", t, fixtures); Check("single_undo", (drag.Layer, drag.Frame) == original);
+            await Native.Key(0x59, true); Live("single_redo", t, fixtures); Check("single_redo", (drag.Layer, drag.Frame) == final);
+            await Native.Key(0x5A, true); Live("single_reset", t, fixtures);
             Check("single_reset", (drag.Layer, drag.Frame) == original);
             Log("phase=multi_drag");
             t.SelectItems([drag, other]); await Task.Delay(150);
             start = host.Center(drag);
             await Native.Drag(start, host.OffsetScreen(start, 64, h));
             var finalOther = (other.Layer, other.Frame); final = (drag.Layer, drag.Frame);
+            Live("multi_drag", t, fixtures);
             Check("multi_nonuniform_layers", drag.Layer == 9 && other.Layer == 9);
             Check("multi_native_frames", drag.Frame - original.Frame == nativeDelta && other.Frame - originalOther.Frame == nativeDelta);
-            await Native.Key(0x5A, true);
+            await Native.Key(0x5A, true); Live("multi_undo", t, fixtures);
             Check("multi_undo", (drag.Layer, drag.Frame) == original && (other.Layer, other.Frame) == originalOther);
-            await Native.Key(0x59, true);
+            await Native.Key(0x59, true); Live("multi_redo", t, fixtures);
             Check("multi_redo", (drag.Layer, drag.Frame) == final && (other.Layer, other.Frame) == finalOther);
-            await Native.Key(0x5A, true);
+            await Native.Key(0x5A, true); Live("multi_reset", t, fixtures);
+            Check("multi_reset", (drag.Layer, drag.Frame) == original && (other.Layer, other.Frame) == originalOther);
             Log("phase=parent_collapse");
             adapter.SetLayout(b); await Task.Delay(350);
             Check("b_visual_geometry", Math.Abs(host.LocalTop(target) - 3 * h) < 2);
@@ -171,6 +215,7 @@ internal static class Probe
             t.SelectedItems = ImmutableList<IItem>.Empty;
             await Native.Click(host.Center(target));
             Check("native_click_after_detach", t.SelectedItems.Any(x => ReferenceEquals(x, target)));
+            Live("teardown", t, fixtures);
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             Check("no_harmony_loaded", !assemblies.Any(x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
             Check("no_harmony_reference", !typeof(Probe).Assembly.GetReferencedAssemblies().Any(x => x.Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
