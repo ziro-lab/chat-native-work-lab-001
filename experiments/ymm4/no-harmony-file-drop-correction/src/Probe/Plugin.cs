@@ -185,7 +185,7 @@ internal static class Probe
         SetReactivePoint(timelineVm,"TimelineCursorPosition",mapped);
         SetReactivePoint(timelineVm,"TimelineCursorPositionWhenRightClick",mapped);
 
-        var command=CommandSettings.Default[CommandType.AddFileItem];
+        ICommand? command=CommandSettings.Default[CommandType.AddFileItem];
         if (command?.CanExecute(paths) == true)
         {
             // Suppress the native OLE drop path, but delegate actual file-item creation
