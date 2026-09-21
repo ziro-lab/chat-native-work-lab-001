@@ -54,6 +54,7 @@ internal static class Probe
     static string output="";
     static Timeline? timeline;
     static object? timelineVm;
+    static Window? hostWindow;
     static FrameworkElement? timelineView,cursorSource;
     static int h;
     static bool correctionEnabled;
@@ -95,6 +96,7 @@ internal static class Probe
     static async Task RunAsync(Window mainWindow,Timeline t)
     {
         try{
+            hostWindow=mainWindow;
             mainWindow.WindowState=System.Windows.WindowState.Maximized;
             mainWindow.Activate();Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
             await Task.Delay(900);
@@ -186,15 +188,32 @@ internal static class Probe
         SetReactivePoint(timelineVm,"TimelineCursorPositionWhenRightClick",mapped);
 
         ICommand? command=CommandSettings.Default[CommandType.AddFileItem];
-        if (command?.CanExecute(paths) == true)
+        IInputElement? executedTarget=null;
+
+        if (command is RoutedCommand routed)
         {
-            // Suppress the native OLE drop path, but delegate actual file-item creation
-            // to YMM4's own public AddFileItem command.
+            foreach (var target in new IInputElement?[] { cursorSource, Keyboard.FocusedElement, hostWindow })
+            {
+                if (target is null)
+                    continue;
+                if (!routed.CanExecute(paths,target))
+                    continue;
+
+                e.Handled=true;
+                routed.Execute(paths,target);
+                executedTarget=target;
+                customAddFileCommandExecuted=true;
+                break;
+            }
+        }
+        else if (command?.CanExecute(paths) == true)
+        {
             e.Handled=true;
             command.Execute(paths);
             customAddFileCommandExecuted=true;
-            trace.Add($"custom_add_file_command raw={Fmt(raw)} mapped={Fmt(mapped)} paths={paths.Length}");
         }
+
+        trace.Add($"custom_add_file_command executed={customAddFileCommandExecuted} target={executedTarget?.GetType().Name ?? "<none>"} raw={Fmt(raw)} mapped={Fmt(mapped)} paths={paths.Length}");
     }
 
     static void CorrectCursor(DragEventArgs e,string phase)
