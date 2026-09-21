@@ -4,7 +4,11 @@ This document records a **reference-first discovery policy** for YukkuriMovieMak
 
 It is not native-host evidence. Its purpose is to reduce unnecessary reverse engineering by checking known plugin-facing routes before creating a new probe, while keeping this Lab as the canonical place for version-pinned host-behavior evidence.
 
-## Reference implementation inspected
+The maintained external-source registry is [`YMM4_REFERENCE_SOURCES.md`](YMM4_REFERENCE_SOURCES.md). It separates official documentation, official samples, shipped/community source, API indexes, community notes and existing plugin implementations from Lab evidence.
+
+Use that registry before broad reflection or a new native-host run.
+
+## Reference implementation example
 
 Reference:
 
@@ -50,7 +54,7 @@ This is a useful starting point for Timeline-oriented plugin work. It does **not
 
 The Tool sample uses `IToolViewModel.SaveState()` / `LoadState()` and stores panel-local data in `ToolState.SavedState`.
 
-This identifies a public persistence surface worth considering before inventing a custom store for short-lived Tool UI state.
+The inspected YMM4 Community source at commit `ebb7102fe3ad36c6d90f9f4948e789fbf31dd0aa` also uses this pattern in Browser, Explorer and Notepad. That makes it a strong public implementation precedent before inventing a custom store for short-lived Tool UI state.
 
 It does not yet establish:
 
@@ -64,7 +68,7 @@ Those remain Lab questions if a downstream plugin needs them.
 
 The Settings sample uses `SettingsBase<T>`, `Set(ref field, value)`, `SettingsCategory`, and a Settings view.
 
-This is a good candidate for simple persistent plugin preferences such as booleans, numbers and small strings.
+The inspected YMM4 Community source also uses `SettingsBase<T>` across Tool, Voice, Effect and other features. This is a good candidate for simple persistent plugin preferences such as booleans, numbers and small strings.
 
 Do not assume that it is a replacement for a product-specific store that needs schema migration, atomic replacement, conflict detection, corruption refusal or large structured state.
 
@@ -96,12 +100,16 @@ For a new YMM4 question:
 
 1. Define the narrow host behavior the product actually needs.
 2. Search existing Lab observations.
-3. Check current public/reference implementations such as `YMM4plugin_template` for a known supported entry point.
-4. If S1 is sufficient, use it and create a Lab experiment only when the behavior itself is undocumented or failure-sensitive.
-5. If S1 is insufficient, inspect S2 before reaching for reflection.
-6. Use S3 only with exact type/member bounds and a fail-safe path.
-7. Use S4 only after documenting why S1-S3 are insufficient and what host/version boundary can break the patch.
-8. Product integration must still run its own acceptance; a Lab result does not certify the whole plugin.
+3. Check the current reference registry in [`YMM4_REFERENCE_SOURCES.md`](YMM4_REFERENCE_SOURCES.md).
+4. Prefer official documentation and official samples for intended public contracts.
+5. Check `YukkuriMovieMaker.Plugin.Community` for implementation patterns already used by shipped/community tools.
+6. Use the current API index and community notes to discover public symbols, standard controls and known pitfalls.
+7. Search existing public plugins/templates for precedent before declaring a route unavailable or novel.
+8. Use targeted static inspection only for facts not resolved by those references.
+9. Create a native-host Lab experiment only when the remaining question is undocumented/version-sensitive behavior that matters downstream.
+10. Product integration must still run its own acceptance; a Lab result does not certify the whole plugin.
+
+After discovery, apply the S1 -> S4 surface ladder independently. Finding an S3/S4 example in external code is not a reason to skip a viable S1/S2 route.
 
 Reference lookup is a **probe-design accelerator**, not evidence.
 

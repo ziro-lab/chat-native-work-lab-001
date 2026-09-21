@@ -77,7 +77,7 @@ When a reference materially shapes a Lab experiment:
 - prefer the least invasive public surface that satisfies the requirement;
 - if reference code conflicts with a version-pinned Lab observation, keep both facts visible and use the pinned Lab result for that tested host version.
 
-See [`YMM4_PLUGIN_SURFACE_GUIDE.md`](YMM4_PLUGIN_SURFACE_GUIDE.md) for the current discovery/escalation policy and the inspected `YMM4plugin_template` reference.
+See [`YMM4_REFERENCE_SOURCES.md`](YMM4_REFERENCE_SOURCES.md) for the maintained external-source registry and search order, and [`YMM4_PLUGIN_SURFACE_GUIDE.md`](YMM4_PLUGIN_SURFACE_GUIDE.md) for the dependency escalation policy.
 
 ## Version drift
 

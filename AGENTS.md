@@ -28,7 +28,7 @@ Keep this repository a small public experiment lab.
 - Manual observations may establish perceptual/UI behavior but do not silently become automated PASS assertions.
 - State the exact YMM4 version for every undocumented host behavior. Revalidate when a newer version materially touches the subsystem.
 - Follow [`docs/YMM4_OBSERVATION_POLICY.md`](docs/YMM4_OBSERVATION_POLICY.md) for YMM4 records.
-- Before creating a new YMM4 host probe, check existing Lab observations and [`docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](docs/YMM4_PLUGIN_SURFACE_GUIDE.md) for a known lower-risk entry point.
+- Before creating a new YMM4 host probe, check existing Lab observations, [`docs/YMM4_REFERENCE_SOURCES.md`](docs/YMM4_REFERENCE_SOURCES.md), and [`docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](docs/YMM4_PLUGIN_SURFACE_GUIDE.md). Use references to avoid rediscovering public APIs, controls and established implementation patterns.
 - Prefer the dependency ladder: plugin-facing public API -> public host/WPF surface -> bounded reflection -> Harmony/non-public hook.
 - External sample/plugin repositories may guide probe design, but they are not Lab evidence by themselves.
 

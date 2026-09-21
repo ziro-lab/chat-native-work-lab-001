@@ -70,7 +70,7 @@ Static IL/reflection inspection, native automated observations and manual intera
 
 See [`docs/YMM4_OBSERVATION_POLICY.md`](docs/YMM4_OBSERVATION_POLICY.md) and [`docs/YMM4_OBSERVATION_TEMPLATE.md`](docs/YMM4_OBSERVATION_TEMPLATE.md).
 
-Before opening a new YMM4 probe, consult [`docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](docs/YMM4_PLUGIN_SURFACE_GUIDE.md) for the reference-first discovery rule and the public-API -> WPF/public-host -> bounded-reflection -> Harmony/internal escalation ladder.
+Before opening a new YMM4 probe, consult [`docs/YMM4_REFERENCE_SOURCES.md`](docs/YMM4_REFERENCE_SOURCES.md) and [`docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](docs/YMM4_PLUGIN_SURFACE_GUIDE.md). The registry defines the external-source search order; the surface guide keeps the public-API -> WPF/public-host -> bounded-reflection -> Harmony/internal escalation ladder.
 
 Small plugin prototypes consume those observations in [`ziro-lab/ymm4-plugin-garage`](https://github.com/ziro-lab/ymm4-plugin-garage) rather than duplicating host-behavior research there.
 
