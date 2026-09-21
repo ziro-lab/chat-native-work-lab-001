@@ -395,7 +395,7 @@ internal static class Probe
     }
 
     private static CaseResult FailedCase(string name, string error) => new(
-        name, "<missing>", false, error, "", "", [], false, "", "", "", false, false, false, false, false, false, false, false, error);
+        name, "<missing>", false, error, "", "", [], false, "", "", "", false, false, false, false, false, false, false, error);
 
     private static async Task<CaseResult> RunBuiltInCaseAsync(string name, ITachiePlugin plugin, string targetCandidate)
     {
