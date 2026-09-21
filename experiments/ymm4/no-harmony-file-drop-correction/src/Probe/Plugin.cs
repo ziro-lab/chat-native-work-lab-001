@@ -58,6 +58,7 @@ internal static class Probe
     static int h;
     static bool correctionEnabled;
     static bool dragEnterObserved,dragOverObserved,dropObserved;
+    static bool customAddFileCommandExecuted;
     static readonly List<string> trace=[];
 
     public static void Schedule()
@@ -143,6 +144,7 @@ internal static class Probe
                 $"corrected_layers={corrected.Layers}",
                 $"corrected_frames={corrected.Frames}",
                 $"corrected_matches_fold_layer={correctedMatchesFold}",
+                $"custom_add_file_command_executed={customAddFileCommandExecuted}",
                 $"drag_enter_observed={dragEnterObserved}",
                 $"drag_over_observed={dragOverObserved}",
                 $"drop_observed={dropObserved}"
@@ -150,7 +152,7 @@ internal static class Probe
         }catch(Exception ex){Fail(ex);}
     }
 
-    static void ResetRouteFlags(){dragEnterObserved=dragOverObserved=dropObserved=false;}
+    static void ResetRouteFlags(){dragEnterObserved=dragOverObserved=dropObserved=false;customAddFileCommandExecuted=false;}
 
     static void OnPreviewDragEnter(object sender,DragEventArgs e)
     {
@@ -166,6 +168,33 @@ internal static class Probe
     {
         dropObserved=true;
         CorrectCursor(e,"drop");
+
+        if (!correctionEnabled)
+            return;
+
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop) ||
+            e.Data.GetData(DataFormats.FileDrop) is not string[] paths ||
+            paths.Length == 0)
+            return;
+
+        if (cursorSource is null)
+            return;
+
+        var raw=e.GetPosition(cursorSource);
+        var mapped=MapDisplayPointToLogical(raw);
+        SetReactivePoint(timelineVm,"TimelineCursorPosition",mapped);
+        SetReactivePoint(timelineVm,"TimelineCursorPositionWhenRightClick",mapped);
+
+        var command=CommandSettings.Default[CommandType.AddFileItem];
+        if (command?.CanExecute(paths) == true)
+        {
+            // Suppress the native OLE drop path, but delegate actual file-item creation
+            // to YMM4's own public AddFileItem command.
+            e.Handled=true;
+            command.Execute(paths);
+            customAddFileCommandExecuted=true;
+            trace.Add($"custom_add_file_command raw={Fmt(raw)} mapped={Fmt(mapped)} paths={paths.Length}");
+        }
     }
 
     static void CorrectCursor(DragEventArgs e,string phase)
