@@ -118,7 +118,114 @@ internal sealed class DirectDisplay : IDisposable
             throw new InvalidOperationException("Empty gesture selection");
         }
 
-        log("gesture_begin_frozen count=" + gestureItems.Count);
+        LeaseGestureViewports();
+        log("gesture_begin_frozen count=" + gestureItems.Count + " viewport_leases=" + gestureViewports.Count);
+    }
+
+    private void LeaseGestureViewports()
+    {
+        var candidates = Host.Elements(host.View)
+            .Where(x => x.GetType().Name == "FastCanvasItemsControl")
+            .ToArray();
+
+        foreach (var canvas in candidates)
+        {
+            var field = canvas.GetType().GetField(
+                "ViewportProperty",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+
+            if (field?.GetValue(null) is not DependencyProperty property || property.PropertyType != typeof(Rect))
+                continue;
+
+            if (!gestureViewports.ContainsKey(canvas))
+            {
+                gestureViewports[canvas] = new(
+                    canvas,
+                    property,
+                    canvas.ReadLocalValue(property),
+                    BindingOperations.GetBindingBase(canvas, property));
+            }
+
+            var current = (Rect)canvas.GetValue(property);
+            var nativeBottom = Math.Max(
+                current.Bottom,
+                Math.Max(
+                    (Layout.VisibleLayers.Count == 0 ? 0 : Layout.VisibleLayers.Max() + 2) * (double)Height,
+                    (gestureItems.Max(x => x.Layer) + 4) * (double)Height));
+
+            var expanded = new Rect(
+                current.X,
+                Math.Min(current.Y, 0),
+                current.Width,
+                nativeBottom - Math.Min(current.Y, 0));
+
+            canvas.SetCurrentValue(property, expanded);
+        }
+
+        if (gestureViewports.Count == 0)
+            throw new InvalidOperationException("No FastCanvas viewport surface found for gesture virtualization");
+
+        log("gesture_viewports_leased=" + gestureViewports.Count);
+    }
+
+    private void RestoreGestureViewports()
+    {
+        foreach (var lease in gestureViewports.Values)
+        {
+            if (lease.Binding is not null)
+                BindingOperations.SetBinding(lease.Canvas, lease.Property, lease.Binding);
+            else if (lease.Local == DependencyProperty.UnsetValue)
+                lease.Canvas.ClearValue(lease.Property);
+            else
+                lease.Canvas.SetValue(lease.Property, lease.Local);
+        }
+
+        gestureViewports.Clear();
+    }
+
+    private bool ApplyGestureVisual(FrameworkElement view, IItem item, int logicalLayer, bool countVisibility)
+    {
+        if (!gestureTransforms.ContainsKey(view))
+            gestureTransforms[view] = view.ReadLocalValue(UIElement.RenderTransformProperty);
+
+        var previousTranslation = view.RenderTransform is TranslateTransform prior ? prior.Y : 0.0;
+        var baseTop = view.TranslatePoint(new Point(), host.Source).Y - previousTranslation;
+        var desiredTop = Layout.VisualRowOfLogical(logicalLayer) * (double)Height;
+        var translation = desiredTop - baseTop;
+
+        if (view.RenderTransform is not TranslateTransform current ||
+            Math.Abs(current.X) > 0.001 ||
+            Math.Abs(current.Y - translation) > 0.001)
+        {
+            view.SetCurrentValue(UIElement.RenderTransformProperty, new TranslateTransform(0, translation));
+        }
+
+        if (!countVisibility)
+            return true;
+
+        var box = Host.ScreenRect(view);
+        var visible = box.Width > 2 && box.Height > 2 && Host.ScreenRect(host.Scroll).IntersectsWith(box);
+        log($"gesture_visual item={item.Remark} layer={item.Layer} target_layer={logicalLayer} local_top={host.LocalTop(item):F2} desired_top={desiredTop:F2} translation={translation:F2} visible={visible}");
+        if (!visible)
+            MissingGestureViews++;
+        return visible;
+    }
+
+    internal void PrepareGestureVisuals(IReadOnlyDictionary<IItem, int> targetLayers)
+    {
+        if (!gesture || disposed)
+            return;
+
+        ThrowIfFailed();
+
+        foreach (var view in host.ItemViews().ToArray())
+        {
+            var item = Host.Item(view.DataContext);
+            if (item is null || !gestureItems.Contains(item) || !targetLayers.TryGetValue(item, out var target))
+                continue;
+
+            ApplyGestureVisual(view, item, target, false);
+        }
     }
 
     internal void UpdateGestureVisuals()
@@ -129,33 +236,14 @@ internal sealed class DirectDisplay : IDisposable
         ThrowIfFailed();
 
         var found = new HashSet<IItem>(ReferenceEqualityComparer.Instance);
-        foreach (var view in host.ItemViews())
+        foreach (var view in host.ItemViews().ToArray())
         {
             var item = Host.Item(view.DataContext);
             if (item is null || !gestureItems.Contains(item))
                 continue;
 
             found.Add(item);
-            if (!gestureTransforms.ContainsKey(view))
-                gestureTransforms[view] = view.ReadLocalValue(UIElement.RenderTransformProperty);
-
-            var previousTranslation = view.RenderTransform is TranslateTransform prior ? prior.Y : 0.0;
-            var baseTop = view.TranslatePoint(new Point(), host.Source).Y - previousTranslation;
-            var desiredTop = Layout.VisualRowOfLogical(item.Layer) * (double)Height;
-            var translation = desiredTop - baseTop;
-
-            if (view.RenderTransform is not TranslateTransform current ||
-                Math.Abs(current.X) > 0.001 ||
-                Math.Abs(current.Y - translation) > 0.001)
-            {
-                view.SetCurrentValue(UIElement.RenderTransformProperty, new TranslateTransform(0, translation));
-            }
-
-            var box = Host.ScreenRect(view);
-            var visible = box.Width > 2 && box.Height > 2 && Host.ScreenRect(host.Scroll).IntersectsWith(box);
-            log($"gesture_visual item={item.Remark} layer={item.Layer} local_top={host.LocalTop(item):F2} desired_top={desiredTop:F2} translation={translation:F2} visible={visible}");
-            if (!visible)
-                MissingGestureViews++;
+            ApplyGestureVisual(view, item, item.Layer, true);
         }
 
         GestureSamples++;
@@ -180,6 +268,7 @@ internal sealed class DirectDisplay : IDisposable
         }
 
         gestureTransforms.Clear();
+        RestoreGestureViewports();
         gestureItems.Clear();
         log($"gesture_end samples={GestureSamples} missing={MissingGestureViews} deferred={DeferredApplies}");
         Queue();
