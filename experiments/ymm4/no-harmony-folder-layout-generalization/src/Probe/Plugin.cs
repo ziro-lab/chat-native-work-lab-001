@@ -456,7 +456,7 @@ internal static class Probe
             .Select(x => (View: x, Item: ItemOf(x.DataContext)))
             .Where(x => x.Item is not null && Box(x.View).Intersects(rect))
             .Select(x => x.Item!)
-            .Distinct(ReferenceEqualityComparer.Instance)
+            .Distinct<IItem>(ReferenceEqualityComparer.Instance)
             .ToArray();
 
         timeline.SelectItems(selected);
