@@ -62,6 +62,7 @@ internal static class ProbeC
     }
     private static async Task Reveal(Host host, double top)
     {
+        if (!ReferenceEquals(host.Vm, host.View.DataContext)) throw new InvalidOperationException("Visible Timeline context changed during probe");
         var current = (Rect)(Host.Reactive(host.Vm, "Viewport") ?? throw new InvalidOperationException("Viewport"));
         Host.SetReactive(host.Vm, "Viewport", new Rect(new Point(current.X, top), current.Size));
         await Task.Delay(450);
@@ -89,11 +90,17 @@ internal static class ProbeC
         try
         {
             window.WindowState = WindowState.Normal; window.Left = 0; window.Top = 0; window.Width = 1000; window.Height = 700;
-            await Task.Delay(900);
+            await Task.Delay(1200);
             var view = Host.Elements(window).Where(x => x.GetType().Name == "TimelineView" && x.IsVisible).OrderByDescending(x => x.ActualWidth * x.ActualHeight).First();
+            // A layout/startup replacement can leave Bootstrap's ActiveTimelineViewModel
+            // stale even while the actual displayed view uses the same Timeline model.
+            // Bind the exact visible context BEFORE creating or recording any fixtures.
+            Log("bootstrap_vm_same_as_visible=" + ReferenceEquals(vm, view.DataContext));
+            vm = view.DataContext is TimelineViewModel visible ? visible : throw new InvalidOperationException("Visible Timeline VM missing");
+            t = Host.Get(vm, "Timeline") as Timeline ?? vm.GetType().GetField("timeline", Host.Flags)?.GetValue(vm) as Timeline ?? throw new InvalidOperationException("Visible Timeline model missing");
             var scroll = Host.Elements(view).OfType<ScrollViewer>().Where(x => x.IsVisible && x.ActualHeight > 50).OrderByDescending(x => x.ActualWidth * x.ActualHeight).First();
             var host = new Host(window, t, vm, view, scroll.Content as FrameworkElement ?? throw new InvalidOperationException("Content"), scroll);
-            host.Activate();
+            host.Activate(); Check("visible_context_bound", ReferenceEquals(vm, view.DataContext));
             var character = new Character { Name = "CNWL_TRACK_C" };
             VoiceItem Make(string name, int frame, int layer) => new(character) { Frame = frame, Layer = layer, Length = 30, Serif = name, Remark = "CNWL_C_" + name };
             var drag = Make("drag", 40, 6); var other = Make("other", 220, 6); var target = Make("target", 140, 9);
@@ -101,7 +108,6 @@ internal static class ProbeC
             var fixtures = new IItem[] { drag, other, target, child, hidden, tail, low };
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             t.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
-            // Establish synthetic preparation boundary once; actual gestures own their history.
             var model = window.DataContext.GetType().GetField("model", Host.Flags)?.GetValue(window.DataContext) ?? throw new MissingMemberException("MainViewModel.model");
             var history = Host.Get(model, "UndoRedoManager") ?? throw new MissingMemberException("UndoRedoManager");
             history.GetType().GetMethod("Record", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null)!.Invoke(history, null);
@@ -174,6 +180,8 @@ internal static class ProbeC
             Check("low_realized_at_folded_row", Host.ScreenRect(scroll).Contains(host.Center(low)));
             await Native.Click(host.Center(low)); Check("low_native_click", t.SelectedItems.Any(x => ReferenceEquals(x, low)));
             Check("no_hidden_view", !host.ItemViews().Any(x => Host.Item(x.DataContext) is IItem item && display.Layout.IsHidden(item.Layer)));
+            Check("gesture_preview_sampled", display.GestureSamples > 0);
+            Check("gesture_previews_remained_visible", display.MissingGestureViews == 0);
             var idleWrites = display.Mutations; await Task.Delay(1500); display.ThrowIfFailed();
             Check("integrated_idle_stable", display.Mutations == idleWrites);
             Live("before_detach", t, fixtures);
