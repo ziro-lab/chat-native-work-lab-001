@@ -152,7 +152,7 @@ internal static class FoldProbe
             {
                 Frame = 10,
                 Length = 80,
-                Layer = 5,
+                Layer = 3,
                 Serif = "fold target",
                 Remark = "CNWL_FOLD_TARGET"
             };
@@ -160,7 +160,7 @@ internal static class FoldProbe
             if (!t.TryAddItems([head], head.Frame, head.Layer))
                 throw new InvalidOperationException("Could not insert Layer 1 fixture.");
             if (!t.TryAddItems([target], target.Frame, target.Layer))
-                throw new InvalidOperationException("Could not insert Layer 5 fixture.");
+                throw new InvalidOperationException("Could not insert Layer 3 fixture.");
 
             t.CurrentFrame = 0;
             t.SelectedItems = ImmutableList<IItem>.Empty;
@@ -173,7 +173,7 @@ internal static class FoldProbe
             var headView = FindTimelineItemView(timelineView, head)
                 ?? throw new InvalidOperationException("Layer 1 TimelineItemView not found.");
             var targetView = FindTimelineItemView(timelineView, target)
-                ?? throw new InvalidOperationException("Layer 5 TimelineItemView not found.");
+                ?? throw new InvalidOperationException("Layer 3 TimelineItemView not found.");
 
             var layerHeight = SettingsBase<YMMSettings>.Default.LayerHeight;
             if (layerHeight <= 0)
@@ -186,10 +186,10 @@ internal static class FoldProbe
             if (!headBefore.Valid || !targetBefore.Valid)
                 throw new InvalidOperationException("Fixture geometry is invalid.");
 
-            // Model a collapsed logical block [1..4]:
-            // Layer 1 remains the visible head; Layers 2..4 disappear; Layer 5 moves upward by 3 rows.
+            // Model a collapsed logical block [1..2]:
+            // Layer 1 remains the visible head; Layer 2 disappears; Layer 3 moves upward by 3 rows.
             // This is deliberately visual-only: no Harmony and no host ViewModel patching.
-            var shift = -3.0 * layerHeight;
+            var shift = -1.0 * layerHeight;
             var group = new TransformGroup();
             if (targetView.RenderTransform is { } existing && !ReferenceEquals(existing, Transform.Identity))
                 group.Children.Add(existing.CloneCurrentValue());
@@ -228,7 +228,7 @@ internal static class FoldProbe
             var rightClickCursor = ReadReactivePoint(activeTimelineViewModel, "TimelineCursorPositionWhenRightClick");
 
             // Re-select the fold head with real input, then drag by exactly one displayed row,
-            // i.e. to the visual row occupied by logical Layer 5 after the fold.
+            // i.e. to the visual row occupied by logical Layer 3 after the fold.
             action = "click-fold-head";
             await Click(headBefore.Center);
             await Task.Delay(500);
@@ -242,7 +242,7 @@ internal static class FoldProbe
             await Task.Delay(900);
 
             var actualLayer = head.Layer;
-            var dragMatchesFoldSemantics = actualLayer == 5;
+            var dragMatchesFoldSemantics = actualLayer == 3;
             var dragMatchesNativeOneRow = actualLayer == 2;
 
             lock (Events)
