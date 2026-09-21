@@ -223,8 +223,10 @@ internal static class Probe
             var targetTopBefore = GetItemVmTop(target);
             var dragTopBefore = GetItemVmTop(dragSource);
 
+            Checkpoint("before_layout_a");
             layout = layoutA;
             ApplyLayout();
+            Checkpoint("after_layout_a");
             await Task.Delay(450);
 
             // Use the compressed viewport coordinates now that item VM Top values are folded.
@@ -257,7 +259,9 @@ internal static class Probe
                 Near(dragTopA, layoutA.VisualRowOfLogical(6) * h) &&
                 Near(targetTopA - dragTopA, h);
 
+            Checkpoint("before_install_adapters");
             InstallAdapters();
+            Checkpoint("after_install_adapters");
 
             // Shift-marquee around the visually shifted L9 item.
             t.SelectedItems = ImmutableList<IItem>.Empty;
@@ -303,8 +307,10 @@ internal static class Probe
             await Escape();
 
             // Dynamically collapse the parent too. Nested child head must now disappear into L1.
+            Checkpoint("before_layout_b");
             layout = layoutB;
             ApplyLayout();
+            Checkpoint("after_layout_b");
             var parentFoldViewport = ReadReactiveRect(timelineVm, "Viewport");
             if (parentFoldViewport is { } pvp)
             {
@@ -557,7 +563,8 @@ internal static class Probe
                     : layout.VisualRowOfLogical(item.Layer) * (double)h;
 
                 SetPrivateProperty(itemVm, "Top", top);
-                SetPrivateProperty(itemVm, "Height", hidden ? 6.0 : (double)h);
+                if (hidden)
+                    SetPrivateProperty(itemVm, "Height", 6.0);
             }
         }
 
@@ -903,6 +910,18 @@ internal static class Probe
     }
 
     private static string Fmt(Point p) => $"{p.X:F2},{p.Y:F2}";
+
+    private static void Checkpoint(string value)
+    {
+        try
+        {
+            File.AppendAllLines(
+                Path.Combine(output, "progress.txt"),
+                [DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture) + " " + value],
+                new UTF8Encoding(false));
+        }
+        catch { }
+    }
 
     private static void WriteResult(string status, IEnumerable<string> details) =>
         File.WriteAllLines(
