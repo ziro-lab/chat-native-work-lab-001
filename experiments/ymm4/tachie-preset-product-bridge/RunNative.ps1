@@ -112,7 +112,7 @@ try{
  }
  foreach($name in @(
    'animationCharacterResolution','psdCharacterResolution','modernItemPropertyBinding',
-   'animationFingerprintStable','psdFingerprintStable',
+   'syntheticFingerprintStable','animationFingerprintStable','psdFingerprintStable',
    'animationItemRoundtrip','psdItemRoundtrip',
    'animationEditorCleanup','psdEditorCleanup'
  )){

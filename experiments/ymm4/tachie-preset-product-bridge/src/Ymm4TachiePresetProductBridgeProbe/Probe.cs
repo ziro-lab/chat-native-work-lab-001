@@ -242,6 +242,7 @@ internal sealed record ModernBindingResult(
     string PropertiesCacheRoute,
     bool MutationObserved,
     bool CleanupSucceeded,
+    bool FingerprintStable,
     string? Error);
 
 internal sealed record CaseResult(
@@ -328,6 +329,7 @@ internal static class Probe
                 animationCharacterResolution = animationResult.CharacterResolution,
                 psdCharacterResolution = psdResult.CharacterResolution,
                 modernItemPropertyBinding = modern.Passed,
+                syntheticFingerprintStable = modern.FingerprintStable,
                 animationFingerprintStable = animationResult.FingerprintStable,
                 psdFingerprintStable = psdResult.FingerprintStable,
                 animationItemRoundtrip = animationResult.ItemRoundtrip,
@@ -347,6 +349,7 @@ internal static class Probe
             var allPassed = assertions.animationCharacterResolution &&
                             assertions.psdCharacterResolution &&
                             assertions.modernItemPropertyBinding &&
+                            assertions.syntheticFingerprintStable &&
                             assertions.animationFingerprintStable &&
                             assertions.psdFingerprintStable &&
                             assertions.animationItemRoundtrip &&
@@ -372,7 +375,7 @@ internal static class Probe
             var report = new List<string>
             {
                 $"status={result.status}",
-                $"modern-item-property passed={modern.Passed} ctor={modern.ItemPropertyConstructionRoute} cache={modern.PropertiesCacheRoute} mutation={modern.MutationObserved} cleanup={modern.CleanupSucceeded} error={modern.Error}"
+                $"modern-item-property passed={modern.Passed} ctor={modern.ItemPropertyConstructionRoute} cache={modern.PropertiesCacheRoute} mutation={modern.MutationObserved} cleanup={modern.CleanupSucceeded} fingerprint-stable={modern.FingerprintStable} error={modern.Error}"
             };
 
             foreach (var x in result.cases)
@@ -977,57 +980,109 @@ internal static class Probe
         var host = StagingHost;
         var baseline = host.Children.Count;
         var character = new SyntheticModernCharacterParameter();
-        var face = new SyntheticModernFaceParameter();
         var property = typeof(SyntheticModernFaceParameter).GetProperty(nameof(SyntheticModernFaceParameter.PresetDummy))!;
-        var editor = property.GetCustomAttributes(inherit: true).OfType<SyntheticModernPresetEditorAttribute>().Single();
-        var control = editor.Create();
-        host.Children.Add(control);
 
         var itemRoute = "";
         var cacheRoute = "";
         var mutation = false;
-        var cleanup = false;
+        var cleanup = true;
+        var fingerprintStable = false;
 
+        var first = new SyntheticModernFaceParameter();
+        var beforeFingerprint = Fingerprint(first);
+        var firstEditor = property.GetCustomAttributes(inherit: true).OfType<SyntheticModernPresetEditorAttribute>().Single();
+        var firstControl = firstEditor.Create();
+        host.Children.Add(firstControl);
+
+        string appliedFingerprint;
         try
         {
-            editor.CharacterParameter = character;
-            var itemProperty = CreatePublicItemProperty(face, face, property, out itemRoute, out cacheRoute);
-            editor.SetBindings(control, [itemProperty]);
+            firstEditor.CharacterParameter = character;
+            var itemProperty = CreatePublicItemProperty(first, first, property, out itemRoute, out cacheRoute);
+            firstEditor.SetBindings(firstControl, [itemProperty]);
+            await SettleAsync(firstControl);
 
-            await SettleAsync(control);
+            ((ComboBox)firstControl).SelectedItem = "CNWL_MODERN_HAPPY";
+            await SettleAsync(firstControl);
 
-            var box = (ComboBox)control;
-            box.SelectedItem = "CNWL_MODERN_HAPPY";
-            await SettleAsync(control);
-
-            mutation = face.Mood == "Happy" && face.Level == 7;
+            mutation = first.Mood == "Happy" && first.Level == 7;
+            appliedFingerprint = Fingerprint(first);
         }
         catch (Exception ex)
         {
-            try { editor.ClearBindings(control); } catch { }
-            try { host.Children.Remove(control); } catch { }
-            return new(false, itemRoute, cacheRoute, false, host.Children.Count == baseline, ex.GetType().Name + ": " + ex.Message);
+            try { firstEditor.ClearBindings(firstControl); } catch { }
+            try { host.Children.Remove(firstControl); } catch { }
+            return new(false, itemRoute, cacheRoute, false, host.Children.Count == baseline, false,
+                ex.GetType().Name + ": " + ex.Message);
         }
 
         try
         {
-            editor.ClearBindings(control);
-            host.Children.Remove(control);
-            cleanup = host.Children.Count == baseline;
+            firstEditor.ClearBindings(firstControl);
+            host.Children.Remove(firstControl);
 
-            var beforeMood = face.Mood;
-            var beforeLevel = face.Level;
-            ((ComboBox)control).SelectedItem = "CNWL_MODERN_NEUTRAL";
-            await SettleAsync(control);
+            var beforeMood = first.Mood;
+            var beforeLevel = first.Level;
+            ((ComboBox)firstControl).SelectedItem = "CNWL_MODERN_NEUTRAL";
+            await SettleAsync(firstControl);
 
-            cleanup = cleanup && face.Mood == beforeMood && face.Level == beforeLevel;
+            cleanup = host.Children.Count == baseline &&
+                      first.Mood == beforeMood &&
+                      first.Level == beforeLevel;
         }
         catch
         {
             cleanup = false;
         }
 
-        return new(mutation && cleanup, itemRoute, cacheRoute, mutation, cleanup, null);
+        var second = new SyntheticModernFaceParameter();
+        var secondEditor = property.GetCustomAttributes(inherit: true).OfType<SyntheticModernPresetEditorAttribute>().Single();
+        var secondControl = secondEditor.Create();
+        host.Children.Add(secondControl);
+        var secondMutation = false;
+        var repeatFingerprint = "";
+
+        try
+        {
+            secondEditor.CharacterParameter = character;
+            var itemProperty = CreatePublicItemProperty(second, second, property, out _, out _);
+            secondEditor.SetBindings(secondControl, [itemProperty]);
+            await SettleAsync(secondControl);
+
+            ((ComboBox)secondControl).SelectedItem = "CNWL_MODERN_HAPPY";
+            await SettleAsync(secondControl);
+
+            secondMutation = second.Mood == "Happy" && second.Level == 7;
+            repeatFingerprint = Fingerprint(second);
+        }
+        catch (Exception ex)
+        {
+            cleanup = false;
+            try { secondEditor.ClearBindings(secondControl); } catch { }
+            try { host.Children.Remove(secondControl); } catch { }
+            return new(mutation && cleanup, itemRoute, cacheRoute, mutation, cleanup, false,
+                ex.GetType().Name + ": " + ex.Message);
+        }
+
+        try
+        {
+            secondEditor.ClearBindings(secondControl);
+            host.Children.Remove(secondControl);
+            cleanup = cleanup && host.Children.Count == baseline;
+        }
+        catch
+        {
+            cleanup = false;
+        }
+
+        fingerprintStable = mutation &&
+                            secondMutation &&
+                            beforeFingerprint != appliedFingerprint &&
+                            appliedFingerprint == repeatFingerprint &&
+                            appliedFingerprint == Fingerprint(first) &&
+                            repeatFingerprint == Fingerprint(second);
+
+        return new(mutation && cleanup, itemRoute, cacheRoute, mutation, cleanup, fingerprintStable, null);
     }
 
     private static ItemProperty CreatePublicItemProperty(
