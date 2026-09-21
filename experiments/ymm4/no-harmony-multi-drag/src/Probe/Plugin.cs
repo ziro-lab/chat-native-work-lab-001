@@ -148,7 +148,9 @@ internal static class Probe
         if(e.ChangedButton!=MouseButton.Left||cursorSource is null||timeline is null)return;
         var v=FindAncestorByName(e.OriginalSource as DependencyObject,"TimelineItemView") as FrameworkElement;var item=v is null?null:ItemOf(v.DataContext);if(item is null)return;
         activeItem=item;activeOriginalLayer=item.Layer;groupOriginalLayers.Clear();
-        var selected=timeline.SelectedItems.Any(x=>ReferenceEquals(x,item))?timeline.SelectedItems:new[]{item};
+        IEnumerable<IItem> selected=timeline.SelectedItems.Any(x=>ReferenceEquals(x,item))
+            ? timeline.SelectedItems
+            : new IItem[]{item};
         foreach(var x in selected)groupOriginalLayers[x]=x.Layer;
         trace.Add($"down active=L{item.Layer} group={string.Join("|",groupOriginalLayers.Select(x=>"L"+x.Value))}");
     }
