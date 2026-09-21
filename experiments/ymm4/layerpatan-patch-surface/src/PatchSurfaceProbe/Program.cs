@@ -19,14 +19,12 @@ var op2 = typeof(OpCodes).GetFields(BindingFlags.Public|BindingFlags.Static)
     .Where(f=>f.FieldType==typeof(OpCode)).Select(f=>(OpCode)f.GetValue(null)!)
     .Where(o=>o.Size==2).ToDictionary(o=>(byte)(o.Value & 0xff));
 
-record Ins(int Offset, OpCode Op, object? Operand);
-
-List<Ins> Decode(MethodBase m)
+List<(int Offset, OpCode Op, object? Operand)> Decode(MethodBase m)
 {
     var body=m.GetMethodBody();
     if(body is null) return [];
     var il=body.GetILAsByteArray()!;
-    var list=new List<Ins>();
+    var list=new List<(int Offset, OpCode Op, object? Operand)>();
     var module=m.Module;
     var typeArgs=m.DeclaringType?.GetGenericArguments();
     var methArgs=m is MethodInfo mi ? mi.GetGenericArguments() : null;
@@ -88,9 +86,9 @@ var settingsBase=settingsBaseDef.MakeGenericType(ymmSettings);
 var getDefault=settingsBase.GetProperty("Default")!.GetGetMethod()!;
 var getLayerHeight=ymmSettings.GetProperty("LayerHeight")!.GetGetMethod()!;
 
-bool IsCall(Ins x, MethodBase target)=> (x.Op==OpCodes.Call || x.Op==OpCodes.Callvirt) && x.Operand is MethodBase mb && mb.MetadataToken==target.MetadataToken && mb.Module==target.Module;
-bool IsDiv(List<Ins> a,int i)=>i>=1&&i+3<a.Count&&IsCall(a[i-1],getDefault)&&IsCall(a[i],getLayerHeight)&&a[i+1].Op==OpCodes.Conv_R8&&a[i+2].Op==OpCodes.Div&&a[i+3].Op==OpCodes.Conv_I4;
-bool IsMul(List<Ins> a,int i)=>i>=1&&i+1<a.Count&&IsCall(a[i-1],getDefault)&&IsCall(a[i],getLayerHeight)&&a[i+1].Op==OpCodes.Mul;
+bool IsCall((int Offset, OpCode Op, object? Operand) x, MethodBase target)=> (x.Op==OpCodes.Call || x.Op==OpCodes.Callvirt) && x.Operand is MethodBase mb && mb.MetadataToken==target.MetadataToken && mb.Module==target.Module;
+bool IsDiv(List<(int Offset, OpCode Op, object? Operand)> a,int i)=>i>=1&&i+3<a.Count&&IsCall(a[i-1],getDefault)&&IsCall(a[i],getLayerHeight)&&a[i+1].Op==OpCodes.Conv_R8&&a[i+2].Op==OpCodes.Div&&a[i+3].Op==OpCodes.Conv_I4;
+bool IsMul(List<(int Offset, OpCode Op, object? Operand)> a,int i)=>i>=1&&i+1<a.Count&&IsCall(a[i-1],getDefault)&&IsCall(a[i],getLayerHeight)&&a[i+1].Op==OpCodes.Mul;
 
 IEnumerable<MethodInfo> AllMethods(Type t)
 {
@@ -109,7 +107,7 @@ foreach(var typeName in new[]{"YukkuriMovieMaker.ViewModels.MainViewModel","Yukk
     var t=ymm.GetType(typeName)!;
     foreach(var m in AllMethods(t))
     {
-        List<Ins> il;
+        List<(int Offset, OpCode Op, object? Operand)> il;
         try{il=Decode(m);}catch{continue;}
         int d=0,u=0;
         for(int i=0;i<il.Count;i++){if(IsDiv(il,i))d++;if(IsMul(il,i))u++;}
