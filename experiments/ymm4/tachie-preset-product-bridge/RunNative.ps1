@@ -114,7 +114,7 @@ try{
    'animationCharacterResolution','psdCharacterResolution','modernItemPropertyBinding',
    'animationFingerprintStable','psdFingerprintStable',
    'animationItemRoundtrip','psdItemRoundtrip',
-   'animationCleanupCancellation','psdCleanupCancellation'
+   'animationEditorCleanup','psdEditorCleanup'
  )){
    if(-not$r.assertions.$name){throw "P0 assertion failed: $name"}
  }
