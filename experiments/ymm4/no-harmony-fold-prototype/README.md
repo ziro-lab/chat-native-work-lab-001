@@ -6,14 +6,14 @@ Test whether a LayerPatan-style compressed layer layout can preserve YMM4's stan
 
 The experiment intentionally starts with the smallest decisive case:
 
-- logical Layer 1 is the visible head of a collapsed block representing Layers 1-4;
-- logical Layer 5 is moved upward visually by three layer-heights using only WPF `RenderTransform`;
-- the visual result therefore places Layer 5 one displayed row below Layer 1.
+- logical Layer 1 is the visible head of a collapsed block representing Layers 1-2;
+- logical Layer 3 is moved upward visually by one layer-height using only WPF `RenderTransform`;
+- the visual result therefore places Layer 3 one displayed row below Layer 1.
 
 Then real OS mouse input checks two things:
 
-1. whether the transformed Layer 5 item is still hit-testable/selectable as Layer 5;
-2. whether dragging the Layer 1 item by one displayed row moves it to logical Layer 5, as compressed-layout semantics require, or only to Layer 2 under YMM4's native fixed-row geometry.
+1. whether the transformed Layer 3 item is still hit-testable/selectable as Layer 3;
+2. whether dragging the Layer 1 item by one displayed row moves it to logical Layer 3, as compressed-layout semantics require, or only to Layer 2 under YMM4's native fixed-row geometry.
 
 No Harmony package or runtime patching is used.
 
@@ -23,7 +23,7 @@ A visual-only fold can be useful only if YMM4's standard interaction path unders
 
 ```
 display row 1 -> logical Layer 1
-display row 2 -> logical Layer 5
+display row 2 -> logical Layer 3
 ```
 
 If a native drag by one displayed row still produces `Layer += 1`, then WPF-only visual compression is insufficient for LayerPatan-equivalent behavior. A product would still need either:
@@ -51,7 +51,7 @@ The probe writes:
 
 `PASS_NO_HARMONY_FOLD_OBSERVATION` means the experiment completed and produced an interpretable observation.
 
-It does **not** require the drag to reach Layer 5. The point of the probe is to determine whether that happens.
+It does **not** require the drag to reach Layer 3. The point of the probe is to determine whether that happens.
 
 A useful result should contain:
 
