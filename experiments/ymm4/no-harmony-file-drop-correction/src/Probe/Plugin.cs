@@ -70,7 +70,8 @@ internal static class Probe
 
     static void Bootstrap()
     {
-        var ticks=0,created=0;
+        var ticks=0;
+        var created=0;
         var timer=new DispatcherTimer(DispatcherPriority.ApplicationIdle){Interval=TimeSpan.FromMilliseconds(400)};
         timer.Tick+=(_,_)=>{
             try{
