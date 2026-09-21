@@ -431,7 +431,32 @@ internal static class FoldProbe
         var data = new DataObject();
         data.SetData(DataFormats.FileDrop, new[] { pngPath });
 
-        var start = new Point(Math.Max(40, targetPoint.X - 160), Math.Max(40, targetPoint.Y - 120));
+        // Use a separate tiny WPF window as the drag source so the target path is much
+        // closer to "drag a file from another application into YMM4" than a same-window drag.
+        var sourceBorder = new Border
+        {
+            Width = 64,
+            Height = 64,
+            Background = Brushes.Gray
+        };
+        var sourceWindow = new Window
+        {
+            Width = 80,
+            Height = 80,
+            Left = 20,
+            Top = 20,
+            WindowStyle = System.Windows.WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            Topmost = true,
+            Content = sourceBorder
+        };
+        sourceWindow.Show();
+        sourceWindow.Activate();
+        await Task.Delay(250);
+
+        var sourceScreen = sourceBorder.PointToScreen(new Point(sourceBorder.ActualWidth / 2, sourceBorder.ActualHeight / 2));
+        var start = sourceScreen;
         Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
         await Task.Delay(100);
         Native.mouse_event(Native.LD, 0, 0, 0, 0);
@@ -465,12 +490,15 @@ internal static class FoldProbe
         DragDropEffects effect;
         try
         {
-            effect = System.Windows.DragDrop.DoDragDrop(mainWindow, data, DragDropEffects.Copy);
+            effect = System.Windows.DragDrop.DoDragDrop(sourceBorder, data, DragDropEffects.Copy);
         }
         finally
         {
             cancel.Cancel();
             Native.mouse_event(Native.LU, 0, 0, 0, 0);
+            sourceWindow.Close();
+            mainWindow.Activate();
+            Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
         }
 
         try { await mover; } catch (OperationCanceledException) { }
@@ -488,6 +516,7 @@ internal static class FoldProbe
                 "effect=" + effect,
                 "added_count=" + added.Length,
                 "added=" + string.Join("|", added.Select(x => $"{x.GetType().FullName}@L{x.Layer}:F{x.Frame}:Len{x.Length}")),
+                "source_screen=" + start.X.ToString("F2", CultureInfo.InvariantCulture) + "," + start.Y.ToString("F2", CultureInfo.InvariantCulture),
                 "target_screen=" + targetPoint.X.ToString("F2", CultureInfo.InvariantCulture) + "," + targetPoint.Y.ToString("F2", CultureInfo.InvariantCulture)
             },
             new UTF8Encoding(false));
