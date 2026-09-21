@@ -37,8 +37,25 @@ internal sealed record Host(Window Window, Timeline Timeline, object Vm, Framewo
         }
     }
     internal IEnumerable<FrameworkElement> ItemViews() => Elements(View).Where(x => x.GetType().Name == "TimelineItemView");
-    internal FrameworkElement ItemView(IItem item) => ItemViews().FirstOrDefault(x => ReferenceEquals(Item(x.DataContext), item))
-        ?? throw new InvalidOperationException("Item not realized: " + item.Remark);
+    internal FrameworkElement ItemView(IItem item)
+    {
+        var views = ItemViews().ToArray();
+        var found = views.FirstOrDefault(x => ReferenceEquals(Item(x.DataContext), item));
+        if (found is not null) return found;
+        var live = Timeline.Items.ToArray();
+        var detail = $"Item not realized: {item.Remark}; live_count={live.Length}; same_reference={live.Any(x => ReferenceEquals(x, item))}; view_count={views.Length}; "
+            + $"vm_type={Vm.GetType().FullName}; view_vm_type={View.DataContext?.GetType().FullName}; same_vm={ReferenceEquals(Vm, View.DataContext)}; viewport={Reactive(Vm, "Viewport")}; "
+            + "live=" + string.Join("|", live.Select(x => $"{x.Remark}:L{x.Layer}:F{x.Frame}"))
+            + "; views=" + string.Join("|", views.Select(x => $"{Item(x.DataContext)?.Remark}:{x.DataContext?.GetType().Name}:visible={x.IsVisible}"));
+        foreach (var owner in new[] { Window.DataContext, Vm, (object)Timeline }.Where(x => x is not null))
+        {
+            var type = owner!.GetType();
+            detail += "; undo_surface_" + type.Name + "=" + string.Join("|", type.GetMembers(Flags)
+                .Where(x => x.Name.Contains("Undo", StringComparison.OrdinalIgnoreCase) || x.Name.Contains("Commit", StringComparison.OrdinalIgnoreCase))
+                .Take(40).Select(x => x.ToString()));
+        }
+        throw new InvalidOperationException(detail);
+    }
     internal static FrameworkElement? AncestorItem(DependencyObject? source)
     {
         for (var depth = 0; source is not null && depth < 100; depth++)
@@ -60,7 +77,6 @@ internal sealed record Host(Window Window, Timeline Timeline, object Vm, Framewo
     internal double LocalTop(IItem item) => ItemView(item).TranslatePoint(new Point(), Source).Y;
     internal double ModelTop(IItem item)
     {
-        // Use the actual rendered item's exact DataContext, not a possibly stale host collection.
         var context = ItemView(item).DataContext;
         if (!ReferenceEquals(Item(context), item)) throw new InvalidOperationException("View/model identity mismatch");
         var top = Get(context, "Top") ?? throw new MissingMemberException(context.GetType().FullName, "Top");
