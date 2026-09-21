@@ -181,6 +181,8 @@ internal static class ProbeC
             await Native.Click(host.Center(low)); Check("low_native_click", t.SelectedItems.Any(x => ReferenceEquals(x, low)));
             Check("no_hidden_view", !host.ItemViews().Any(x => Host.Item(x.DataContext) is IItem item && display.Layout.IsHidden(item.Layer)));
             Check("gesture_preview_sampled", display.GestureSamples > 0);
+            Check("gesture_render_audits_sampled", display.RenderAudits >= display.GestureSamples);
+            Check("gesture_render_audits_drained", display.PendingRenderAudits == 0);
             Check("gesture_previews_remained_visible", display.MissingGestureViews == 0);
             var idleWrites = display.Mutations; await Task.Delay(1500); display.ThrowIfFailed();
             Check("integrated_idle_stable", display.Mutations == idleWrites);
