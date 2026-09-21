@@ -189,18 +189,36 @@ internal static class Probe
 
             timelineView = FindLargest(mainWindow, x => x.GetType().Name == "TimelineView")
                 ?? throw new InvalidOperationException("TimelineView not found.");
-            var targetView = FindItemView(timelineView, target)
-                ?? throw new InvalidOperationException("Target view not found.");
-            var dragView = FindItemView(timelineView, dragSource)
-                ?? throw new InvalidOperationException("Drag view not found.");
-            var scroll = FindAncestor<ScrollViewer>(targetView)
-                ?? throw new InvalidOperationException("Timeline ScrollViewer not found.");
-            cursorSource = scroll.Content as FrameworkElement
-                ?? throw new InvalidOperationException("Timeline cursor source not found.");
 
             h = SettingsBase<YMMSettings>.Default.LayerHeight;
             if (h <= 0)
                 throw new InvalidOperationException("LayerHeight invalid.");
+
+            var scroll = Elements(timelineView)
+                .OfType<ScrollViewer>()
+                .Where(x => x.IsVisible && x.ActualHeight > 50)
+                .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException("Timeline ScrollViewer not found.");
+            cursorSource = scroll.Content as FrameworkElement
+                ?? throw new InvalidOperationException("Timeline cursor source not found.");
+
+            // L9 is outside the startup viewport on some host/layout combinations.
+            // Move the native viewport so logical L6-L9 are realized before applying the visual fold.
+            var viewport = ReadReactiveRect(timelineVm, "Viewport");
+            if (viewport is { } vp)
+            {
+                SetReactiveRect(
+                    timelineVm,
+                    "Viewport",
+                    new Rect(new Point(vp.X, 6 * h), vp.Size));
+                await Task.Delay(500);
+            }
+
+            var targetView = FindItemView(timelineView, target)
+                ?? throw new InvalidOperationException("Target view not found after viewport realization.");
+            var dragView = FindItemView(timelineView, dragSource)
+                ?? throw new InvalidOperationException("Drag view not found after viewport realization.");
 
             var targetBefore = Box(targetView);
             var dragBefore = Box(dragView);
@@ -480,6 +498,47 @@ internal static class Probe
     }
 
     private static bool SetReactivePoint(object? instance, string propertyName, Point value)
+    {
+        try
+        {
+            if (instance is null)
+                return false;
+            var holder = instance.GetType()
+                .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(instance);
+            var p = holder?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (p is null || !p.CanWrite)
+                return false;
+            p.SetValue(holder, value);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static Rect? ReadReactiveRect(object? instance, string propertyName)
+    {
+        try
+        {
+            if (instance is null)
+                return null;
+            var holder = instance.GetType()
+                .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(instance);
+            var value = holder?.GetType()
+                .GetProperty("Value", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(holder);
+            return value is Rect rect ? rect : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool SetReactiveRect(object? instance, string propertyName, Rect value)
     {
         try
         {
