@@ -14,9 +14,9 @@ jobs:
           - version: '4.55.1.1'
             asset: 'YukkuriMovieMaker_v4.55.1.1_Lite.zip'
             sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
-          - version: '4.56.1'
-            asset: 'YukkuriMovieMaker_v4.56.1_Lite.zip'
-            sha256: ''
+          - version: '4.56.1.0'
+            asset: 'YukkuriMovieMaker_v4.56.1.0_Lite.zip'
+            sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
