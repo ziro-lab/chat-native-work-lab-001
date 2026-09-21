@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Project.Items;
@@ -20,6 +21,7 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 internal sealed class DirectDisplay : IDisposable
 {
     private sealed record Slot(object Target, Func<int> Layer, bool Item, double HeightRatio, PropertyInfo Top, PropertyInfo Height);
+    private sealed record ViewportLease(FrameworkElement Canvas, DependencyProperty Property, object Local, BindingBase? Binding);
 
     private readonly Host host;
     private readonly TimelineViewModel vm;
@@ -29,6 +31,7 @@ internal sealed class DirectDisplay : IDisposable
     private readonly HashSet<INotifyCollectionChanged> collections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IItem> gestureItems = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FrameworkElement, object> gestureTransforms = [];
+    private readonly Dictionary<FrameworkElement, ViewportLease> gestureViewports = [];
     private readonly object oldMaxHeight;
     private readonly Stopwatch clock = Stopwatch.StartNew();
 
