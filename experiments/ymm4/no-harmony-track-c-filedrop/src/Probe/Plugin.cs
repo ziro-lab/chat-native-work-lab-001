@@ -135,21 +135,17 @@ internal static class ProbeDrop
         Log("fixture_recorded");
     }
 
-    private static async Task Reveal(Host host, int logicalLayer)
+    private static async Task Reveal(Host host, int top)
     {
         var current =
             (Rect)(Host.Reactive(host.Vm, "Viewport") ??
             throw new InvalidOperationException("Viewport missing."));
 
-        var y = host is null
-            ? 0
-            : logicalLayer;
-
         Host.SetReactive(
             host.Vm,
             "Viewport",
             new Rect(
-                new Point(current.X, y),
+                new Point(current.X, Math.Max(0, top)),
                 current.Size));
 
         await Task.Delay(450);
