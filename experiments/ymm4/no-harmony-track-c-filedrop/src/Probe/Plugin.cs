@@ -238,7 +238,9 @@ internal static class ProbeDrop
             Check("a_command", a.CommandExecuted);
             Check("a_added_one", a.AddedCount == 1);
             Check("a_logical_layer", a.LogicalLayer == 9);
-            Check("a_final_layer", a.AddedItems.All(x => x.Layer == 9));
+            Check("a_final_layer", a.AddedCount == 1 && a.AddedItems.All(x => x.Layer == 9));
+            if (a.AddedCount != 1)
+                throw new InvalidOperationException($"Layout A added {a.AddedCount} items; expected exactly one.");
 
             await Task.Delay(500);
             display.ThrowIfFailed();
@@ -294,7 +296,9 @@ internal static class ProbeDrop
             Check("b_command", b.CommandExecuted);
             Check("b_added_one", b.AddedCount == 1);
             Check("b_logical_layer", b.LogicalLayer == 9);
-            Check("b_final_layer", b.AddedItems.All(x => x.Layer == 9));
+            Check("b_final_layer", b.AddedCount == 1 && b.AddedItems.All(x => x.Layer == 9));
+            if (b.AddedCount != 1)
+                throw new InvalidOperationException($"Layout B added {b.AddedCount} items; expected exactly one.");
 
             await Task.Delay(500);
             display.ThrowIfFailed();
