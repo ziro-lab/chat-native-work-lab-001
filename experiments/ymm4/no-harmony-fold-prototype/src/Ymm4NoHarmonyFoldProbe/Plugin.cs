@@ -29,8 +29,10 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] internal static extern void mouse_event(uint flags, uint dx, uint dy, uint data, nuint extra);
+    [DllImport("user32.dll")] internal static extern void keybd_event(byte vk, byte scan, uint flags, nuint extra);
     internal const uint LD = 0x0002;
     internal const uint LU = 0x0004;
+    internal const uint KEYUP = 0x0002;
 }
 
 internal readonly record struct ScreenBox(double Left, double Top, double Width, double Height)
@@ -397,7 +399,16 @@ internal static class FoldProbe
         // Start just to the left of the item on blank Timeline space and sweep over it.
         var start = new Point(box.Left - 14, box.Top + 5);
         var end = new Point(box.Right + 14, box.Bottom - 5);
-        await Drag(start, end);
+        Native.keybd_event(0x10, 0, 0, 0);
+        await Task.Delay(80);
+        try
+        {
+            await Drag(start, end);
+        }
+        finally
+        {
+            Native.keybd_event(0x10, 0, Native.KEYUP, 0);
+        }
     }
 
     private readonly record struct ConverterObservation(bool Found, int Layer, bool FileCandidate, string[] Details);
