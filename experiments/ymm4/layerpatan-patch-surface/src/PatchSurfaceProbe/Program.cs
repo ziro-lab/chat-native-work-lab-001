@@ -80,8 +80,8 @@ List<(int Offset, OpCode Op, object? Operand)> Decode(MethodBase m)
     return list;
 }
 
-var ymmSettings=ymm.GetType("YukkuriMovieMaker.Settings.YMMSettings")!;
-var settingsBaseDef=plugin.GetType("YukkuriMovieMaker.Plugin.SettingsBase`1")!;
+var ymmSettings=ymm.GetType("YukkuriMovieMaker.Settings.YMMSettings") ?? plugin.GetType("YukkuriMovieMaker.Settings.YMMSettings") ?? throw new TypeLoadException("YMMSettings");
+var settingsBaseDef=plugin.GetType("YukkuriMovieMaker.Plugin.SettingsBase`1") ?? ymm.GetType("YukkuriMovieMaker.Plugin.SettingsBase`1") ?? throw new TypeLoadException("SettingsBase<T>");
 var settingsBase=settingsBaseDef.MakeGenericType(ymmSettings);
 var getDefault=settingsBase.GetProperty("Default")!.GetGetMethod()!;
 var getLayerHeight=ymmSettings.GetProperty("LayerHeight")!.GetGetMethod()!;
