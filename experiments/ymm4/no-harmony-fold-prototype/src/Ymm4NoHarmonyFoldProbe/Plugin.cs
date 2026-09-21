@@ -187,7 +187,7 @@ internal static class FoldProbe
                 throw new InvalidOperationException("Fixture geometry is invalid.");
 
             // Model a collapsed logical block [1..2]:
-            // Layer 1 remains the visible head; Layer 2 disappears; Layer 3 moves upward by 3 rows.
+            // Layer 1 remains the visible head; Layer 2 disappears; Layer 3 moves upward by 1 row.
             // This is deliberately visual-only: no Harmony and no host ViewModel patching.
             var shift = -1.0 * layerHeight;
             var group = new TransformGroup();
@@ -221,11 +221,8 @@ internal static class FoldProbe
                 ReferenceEquals(t.SelectedItem, target) ||
                 (t.SelectedItems.Count == 1 && ReferenceEquals(t.SelectedItems[0], target));
 
-            // Capture right-click cursor state as an extra observation. This is not a PASS requirement.
-            action = "right-click-transformed-target";
-            await RightClick(targetAfter.Center);
-            await Task.Delay(350);
-            var rightClickCursor = ReadReactivePoint(activeTimelineViewModel, "TimelineCursorPositionWhenRightClick");
+            // Keep context-menu input out of the decisive drag observation.
+            Point? rightClickCursor = null;
 
             // Re-select the fold head with real input, then drag by exactly one displayed row,
             // i.e. to the visual row occupied by logical Layer 3 after the fold.
@@ -244,6 +241,13 @@ internal static class FoldProbe
             var actualLayer = head.Layer;
             var dragMatchesFoldSemantics = actualLayer == 3;
             var dragMatchesNativeOneRow = actualLayer == 2;
+
+            // Capture right-click cursor state only after the drag observation so an open
+            // context menu cannot steal the click/drag sequence.
+            action = "right-click-transformed-target";
+            await RightClick(targetAfter.Center);
+            await Task.Delay(350);
+            rightClickCursor = ReadReactivePoint(activeTimelineViewModel, "TimelineCursorPositionWhenRightClick");
 
             lock (Events)
                 File.WriteAllLines(Path.Combine(output, "events.txt"), Events, new UTF8Encoding(false));
