@@ -47,7 +47,11 @@ try{
     }
     Start-Sleep -Milliseconds 500
   }
-  if(-not(Test-Path $result)){throw 'no result.txt'}
+  if(-not(Test-Path $result)){
+    $progress=Join-Path $OutputDir 'progress.txt'
+    if(Test-Path $progress){Write-Host '=== progress.txt before timeout ===';Get-Content $progress}
+    throw 'no result.txt'
+  }
   Get-Content $result
   if(-not((Get-Content $result)-contains 'status=PASS_NO_HARMONY_FOLDER_LAYOUT_GENERALIZATION')){throw 'probe failed'}
 }finally{
