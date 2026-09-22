@@ -80,8 +80,8 @@ def validate_settings(settings: dict) -> dict:
     }
 
     phase = settings.get("phase", 4)
-    if phase not in (1, 2, 3, 4):
-        raise ValueError("phase must be 1, 2, 3 or 4")
+    if type(phase) is not int or phase not in (3, 4, 5):
+        raise ValueError("phase must be 3, 4 or 5")
 
     budget = settings.get("budget_seconds_per_fit", 180)
     if isinstance(budget, bool) or not isinstance(budget, (int, float)):
@@ -217,7 +217,7 @@ def candidate_card(task_id: str, candidate: dict) -> str:
         </label>
         <label class="best">
           <input type="radio" name="{radio_name}" value="{label}">
-          この3つなら一番よい
+          この中で一番よい
         </label>
       </div>
     </article>
@@ -240,6 +240,13 @@ def review_html(manifest: dict) -> str:
             candidate_card(task["id"], candidate)
             for candidate in task["candidates"]
         )
+        diagnostic = ''
+        if task.get("core_result"):
+            diagnostic = ('<details><summary>解析・構成の手がかり（診断用）</summary>'
+                          '<a href="' + html.escape(task["core_result"], quote=True)
+                          + '">詳細JSON</a><pre style="white-space:pre-wrap">'
+                          + html.escape(json.dumps(task.get("planner"),ensure_ascii=False,indent=2))
+                          + '</pre></details>')
         sections.append(
             f"""<section class="task" data-task="{html.escape(task["id"])}">
               <h2>{html.escape(task["source_name"])} → {task["target_seconds"]:.3f}s</h2>
@@ -248,11 +255,11 @@ def review_html(manifest: dict) -> str:
                 <b>元曲</b>
                 <audio controls preload="metadata" src="{html.escape(task["source_audio"], quote=True)}"></audio>
                 <details>
-                  <summary>元曲 Ending 8秒</summary>
+                  <summary>元曲 Ending {task.get("ending_preview_seconds", 8):g}秒</summary>
                   <audio controls preload="metadata" src="{html.escape(task["source_ending_audio"], quote=True)}"></audio>
                 </details>
               </div>
-              <div class="candidates">{cards}</div>
+              <div class="candidates">{cards}</div>{diagnostic}
             </section>"""
         )
 
@@ -358,7 +365,8 @@ def build_task(
         # Decode/copy is part of the per-file task boundary. A single unsupported
         # or damaged input must not abort the entire batch.
         source_info = copy_as_wav(source, source_audio)
-        write_ending(source_audio, source_ending)
+        ending_preview_seconds = 24.0 if settings["phase"] == 5 else 8.0
+        write_ending(source_audio, source_ending, ending_preview_seconds)
 
         report = fit(
             source,
@@ -369,6 +377,8 @@ def build_task(
             settings["phase"],
         )
 
+        # Keep the portable edit map and hints before raw_dir is removed.
+        core_result = task_dir / "core-result.json"
         candidates = report["candidates"]
         if not candidates:
             raise FitError("fit_returned_no_candidates")
@@ -388,8 +398,9 @@ def build_task(
             rendered = raw_dir / candidate["render"]["path"]
             destination = task_dir / f"{blind}.wav"
             shutil.copy2(rendered, destination)
+            candidate["render"]["path"] = destination.name
             ending_path = task_dir / f"{blind}-ending.wav"
-            write_ending(destination, ending_path)
+            write_ending(destination, ending_path, ending_preview_seconds)
 
             output_candidates.append({
                 "blind_id": blind,
@@ -402,6 +413,10 @@ def build_task(
             })
 
         output_candidates.sort(key=lambda row: row["blind_id"])
+        if (raw_dir / "previews").is_dir():
+            shutil.copytree(raw_dir / "previews", task_dir / "previews")
+        core_result.write_text(json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False)
+                               + "\n",encoding="utf-8")
         return {
             "id": task_id,
             "status": "ok",
@@ -411,6 +426,9 @@ def build_task(
             "source_audio": f"tasks/{task_id}/source.wav",
             "source_ending_audio": f"tasks/{task_id}/source-ending.wav",
             "candidates": output_candidates,
+            "core_result": f"tasks/{task_id}/core-result.json",
+            "planner": report.get("planner"),
+            "ending_preview_seconds": ending_preview_seconds,
         }
     except Exception as exc:
         return {
