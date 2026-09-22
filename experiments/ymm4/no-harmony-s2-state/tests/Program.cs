@@ -301,4 +301,148 @@ Check("runtime_reset_clears_quarantine",
     !malformedRuntime.IsRecoveryBlocked
     && malformedRuntime.Save() is null);
 
+// Visibility policy: one restore entry per layer, overlapping hidden folders
+// never overwrite the original state, and final restore waits for the last
+// hidden-folder reason.
+var visibilityCore = FolderDocumentRules.NormalizeAndValidate(new FolderDocument
+{
+    Timelines =
+    [
+        new TimelineFolderState
+        {
+            TimelineKey = "vis",
+            Folders =
+            [
+                new PersistedFolder
+                {
+                    Id = folderId,
+                    Start = 1,
+                    End = 5,
+                    Name = "Parent",
+                    IsCollapsed = false
+                },
+                new PersistedFolder
+                {
+                    Id = otherId,
+                    Start = 3,
+                    End = 4,
+                    Name = "Child",
+                    IsCollapsed = false
+                }
+            ]
+        }
+    ]
+});
+
+var visibilityState = new FolderSessionDocument { Core = visibilityCore };
+var hostVisibility = new Dictionary<int, bool>
+{
+    [1] = true,
+    [2] = false,
+    [3] = true,
+    [4] = true,
+    [5] = true
+};
+
+var hideChild = FolderVisibilityRules.SetFolderHidden(
+    visibilityState,
+    "vis",
+    otherId,
+    true,
+    hostVisibility);
+Check("visibility_hide_child_writes_exact_range",
+    hideChild.Writes.Select(x => x.Layer).SequenceEqual(new[] { 3, 4 })
+    && hideChild.Writes.All(x => !x.Visible));
+Check("visibility_hide_child_captures_original_once",
+    hideChild.State.VisibilityRestore.Count == 2
+    && hideChild.State.VisibilityRestore.All(x => x.RestoreVisible));
+
+var hostAfterChild = hostVisibility.ToDictionary(x => x.Key, x => x.Value);
+foreach (var write in hideChild.Writes)
+    hostAfterChild[write.Layer] = write.Visible;
+
+var hideParent = FolderVisibilityRules.SetFolderHidden(
+    hideChild.State,
+    "vis",
+    folderId,
+    true,
+    hostAfterChild);
+Check("visibility_hide_parent_writes_parent_range",
+    hideParent.Writes.Select(x => x.Layer)
+        .SequenceEqual(new[] { 1, 2, 3, 4, 5 })
+    && hideParent.Writes.All(x => !x.Visible));
+Check("visibility_overlap_does_not_overwrite_restore",
+    hideParent.State.VisibilityRestore.Single(x => x.Layer == 3).RestoreVisible
+    && hideParent.State.VisibilityRestore.Single(x => x.Layer == 4).RestoreVisible
+    && !hideParent.State.VisibilityRestore.Single(x => x.Layer == 2).RestoreVisible);
+
+var userShow = FolderVisibilityRules.ObserveUserVisibility(
+    hideParent.State,
+    "vis",
+    3,
+    true);
+Check("visibility_user_override_recorded",
+    userShow.VisibilityRestore.Single(x => x.Layer == 3)
+        is { RestoreVisible: true, UserOverride: true });
+
+var unhideParent = FolderVisibilityRules.SetFolderHidden(
+    userShow,
+    "vis",
+    folderId,
+    false,
+    hostAfterChild);
+Check("visibility_unhide_parent_keeps_child_covered",
+    !unhideParent.Writes.Any(x => x.Layer is 3 or 4)
+    && unhideParent.Writes.Single(x => x.Layer == 1).Visible
+    && !unhideParent.Writes.Single(x => x.Layer == 2).Visible
+    && unhideParent.Writes.Single(x => x.Layer == 5).Visible);
+Check("visibility_child_restore_entries_remain",
+    unhideParent.State.VisibilityRestore.Any(x => x.Layer == 3)
+    && unhideParent.State.VisibilityRestore.Any(x => x.Layer == 4));
+
+var unhideChild = FolderVisibilityRules.SetFolderHidden(
+    unhideParent.State,
+    "vis",
+    otherId,
+    false,
+    hostAfterChild);
+Check("visibility_last_reason_restores_child",
+    unhideChild.Writes.Single(x => x.Layer == 3).Visible
+    && unhideChild.Writes.Single(x => x.Layer == 4).Visible
+    && unhideChild.State.VisibilityRestore.Count == 0);
+Check("visibility_originally_hidden_restored_hidden",
+    unhideParent.Writes.Single(x => x.Layer == 2).Visible == false);
+
+var hideAgainBase = FolderVisibilityRules.SetFolderHidden(
+    visibilityState,
+    "vis",
+    folderId,
+    true,
+    hostVisibility);
+var overrideAgain = FolderVisibilityRules.ObserveUserVisibility(
+    hideAgainBase.State,
+    "vis",
+    3,
+    true);
+var explicitRehideChild = FolderVisibilityRules.SetFolderHidden(
+    overrideAgain,
+    "vis",
+    otherId,
+    true,
+    hostVisibility);
+Check("visibility_explicit_rehide_resets_override_but_keeps_restore_value",
+    explicitRehideChild.Writes.Single(x => x.Layer == 3).Visible == false
+    && explicitRehideChild.State.VisibilityRestore.Single(x => x.Layer == 3)
+        is { RestoreVisible: true, UserOverride: false });
+
+var outsideUserChange = FolderVisibilityRules.ObserveUserVisibility(
+    visibilityState,
+    "vis",
+    1,
+    false);
+Check("visibility_user_change_outside_hidden_is_noop",
+    FolderSessionDocumentCodec.Save(outsideUserChange)
+        == FolderSessionDocumentCodec.Save(
+            FolderSessionDocumentRules.NormalizeAndValidate(visibilityState)));
+
 Console.WriteLine($"status=PASS_S2_STATE_V2\nassertion_count={count}");
