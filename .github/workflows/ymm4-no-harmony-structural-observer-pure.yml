@@ -1,0 +1,44 @@
+name: YMM4 no-Harmony pure structural observer
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-structural-observer/**'
+      - '.github/workflows/ymm4-no-harmony-structural-observer-pure.yml'
+permissions: { contents: read }
+concurrency:
+  group: structural-observer-pure-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  pure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false, fetch-depth: 1 }
+      - name: Enforce pure boundary
+        shell: bash
+        run: |
+          files=(
+            experiments/ymm4/no-harmony-structural-observer/src/StructuralDeltaDetector.cs
+            experiments/ymm4/no-harmony-structural-observer/tests/ObserverTests.csproj
+          )
+          if grep -Eiq 'YukkuriMovieMaker|PresentationFramework|UseWPF|net[0-9.]+-windows|System\.Windows' "${files[@]}"; then
+            echo 'P1.3a boundary violation: detector gained YMM4/WPF/Windows dependency' >&2
+            exit 1
+          fi
+      - name: Build pure detector
+        run: dotnet build experiments/ymm4/no-harmony-structural-observer/tests/ObserverTests.csproj -c Release --nologo -warnaserror
+      - name: Run detector suite
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet run --project experiments/ymm4/no-harmony-structural-observer/tests/ObserverTests.csproj -c Release --no-build | tee observer-result.txt
+          grep -q '^status=PASS_STRUCTURAL_DELTA_DETECTOR$' observer-result.txt
+          grep -Eq '^assertion_count=[2-9][0-9]+$' observer-result.txt
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-structural-observer-pure
+          path: observer-result.txt
+          retention-days: 14
