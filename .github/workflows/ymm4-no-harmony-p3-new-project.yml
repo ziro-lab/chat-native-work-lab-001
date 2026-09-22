@@ -50,7 +50,8 @@ jobs:
         name: Show results
         shell: pwsh
         run: |
-          foreach($f in @('manifest.txt','result.json')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+          foreach($f in @('manifest.txt','result.json','progress.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+          if(Test-Path out/evidence/windows.txt){Write-Host '=== windows tail ===';Get-Content out/evidence/windows.txt -Tail 80}
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
