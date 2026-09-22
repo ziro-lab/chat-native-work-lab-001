@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>Ymm4NoHarmonyFolderHandsOn</AssemblyName>
+    <Version>0.0.1</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>YMM4 no-Harmony Layer Folder</Product>
+    <Description>YMM4 timeline layer-folder hands-on candidate without Harmony.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="YukkuriMovieMaker.Plugin" />
@@ -22,4 +26,31 @@
     <Compile Include="../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
     <Compile Include="../../../no-harmony-p4-ux-policy/src/FolderUxCommands.cs" Link="FolderUxCommands.cs" />
   </ItemGroup>
+
+  <Target Name="MakeYmme" AfterTargets="Build" Condition="'$(PackYmme)' == 'true'">
+    <PropertyGroup>
+      <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..\..'))</RepoRoot>
+      <CandidateRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</CandidateRoot>
+      <YmmeStageRoot>$(OutputPath)ymme</YmmeStageRoot>
+      <YmmeStage>$(YmmeStageRoot)\$(AssemblyName)</YmmeStage>
+      <YmmeOut>$(RepoRoot)\publish\$(AssemblyName).P4.4.ymme</YmmeOut>
+    </PropertyGroup>
+
+    <RemoveDir Directories="$(YmmeStageRoot)" />
+    <MakeDir Directories="$(YmmeStage)" />
+
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(YmmeStage)" />
+    <Copy SourceFiles="$(CandidateRoot)\README.md"
+          DestinationFiles="$(YmmeStage)\README.md" />
+    <Copy SourceFiles="$(RepoRoot)\docs\YMM4_NO_HARMONY_P4_HANDS_ON.md"
+          DestinationFiles="$(YmmeStage)\HANDS_ON.md" />
+
+    <MakeDir Directories="$(RepoRoot)\publish" />
+    <Delete Files="$(YmmeOut)" />
+    <ZipDirectory SourceDirectory="$(YmmeStageRoot)"
+                  DestinationFile="$(YmmeOut)"
+                  Overwrite="true" />
+    <Message Text="ymme package created: $(YmmeOut)" Importance="high" />
+  </Target>
 </Project>
