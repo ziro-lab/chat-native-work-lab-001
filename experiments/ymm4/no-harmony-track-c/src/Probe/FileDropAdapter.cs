@@ -110,7 +110,7 @@ internal sealed class FileDropMapAdapter : IDisposable
         SetCursor(mapped, true);
         pendingLogicalLayer = (int)Math.Floor(mapped.Y / display.Height);
         LastLogicalLayer = pendingLogicalLayer;
-        pendingBefore = vm.Items.Select(x => x.Item).ToHashSet(ReferenceEqualityComparer.Instance);
+        pendingBefore = new HashSet<IItem>(vm.Items.Select(x => (IItem)x.Item), ReferenceEqualityComparer.Instance);
 
         ICommand? command = CommandSettings.Default[CommandType.AddFileItem];
         IInputElement? executedTarget = null;
