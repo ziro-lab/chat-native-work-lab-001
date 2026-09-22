@@ -155,17 +155,54 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
             product,
             TimelineKey);
         var restore = FolderProductStateRules.RestoreMap(
-            product,
-            TimelineKey);
+                product,
+                TimelineKey)
+            .ToDictionary(x => x.Key, x => x.Value);
 
-        foreach (var layer in hidden)
+        var changed = false;
+        internalWriteDepth++;
+        try
         {
-            if (restore.ContainsKey(layer)
-                && !timeline.LayerSettings.IsVisibles[layer])
+            foreach (var layer in hidden.OrderBy(x => x))
             {
-                pluginSuppressed.Add(layer);
+                var current = timeline.LayerSettings.IsVisibles[layer];
+
+                if (!restore.ContainsKey(layer))
+                {
+                    // Structural edits may introduce a new logical row into an
+                    // already-hidden folder. Capture its native default once
+                    // and suppress it after the host command has settled.
+                    restore[layer] = current;
+                    changed = true;
+
+                    if (current)
+                        timeline.LayerSettings.IsVisibles[layer] = false;
+
+                    pluginSuppressed.Add(layer);
+                    continue;
+                }
+
+                if (!current)
+                    pluginSuppressed.Add(layer);
             }
         }
+        finally
+        {
+            internalWriteDepth--;
+        }
+
+        if (!changed)
+            return;
+
+        var repaired = FolderProductStateRules.ReplaceRestoreMap(
+            product,
+            TimelineKey,
+            restore);
+        state.ReplaceProductState(repaired);
+
+        log(
+            $"visibility_reconcile_hidden_rows hidden={hidden.Count} " +
+            $"restore={restore.Count}");
     }
 
     private void CaptureExternalOverrides()
