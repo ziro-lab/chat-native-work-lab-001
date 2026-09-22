@@ -192,40 +192,51 @@ Direct `Timeline.AddLayer/DeleteLayer/MoveLayer` calls are **not** treated as eq
 
 ### P1.2 FolderRangeTracker model
 
-Build a small deterministic tracker separate from WPF display code **and separate from YMM4 host types**.
+**Current status: COMPLETE / FROZEN.**
 
-P1.2 is a product-boundary gate as well as a correctness gate:
+PR #76 source `0124fdaf86862927608121b296c3520f66ca0efe`, run `35681179713`:
 
-- `FolderRangeTracker` may depend on logical folder/span state and structural operations such as Insert/Delete/Swap;
-- it must not depend on `TimelineView`, `TimelineViewModel`, RoutedCommand, WPF coordinates, reflection or DirectDisplay;
-- host observation is translated into small structural-operation values before the tracker sees it;
-- the same tracker must be testable without launching YMM4.
+- pure Linux runner;
+- no YMM4 / WPF / Windows dependency;
+- `PASS_FOLDER_RANGE_TRACKER`;
+- **41/41** policy and boundary assertions;
+- artifact `10674367679`;
+- ZIP SHA256 `99f66fb0b839ab59d402a50aa906f4170ac21119a1d12735e6e658a08c0038eb`.
 
-It must define and test structural transforms for:
+The frozen tracker is separate from WPF display code **and separate from YMM4 host types**.
 
-- insert before / at / inside / after a folder span;
-- delete before / at owner / inside / at end / after;
-- adjacent swap crossing a folder boundary;
-- owner move;
-- child move;
-- nested spans;
-- disjoint spans;
-- repeated operation sequences.
+P1.2 product boundary:
 
-The tracker must preserve the existing invariant:
+- `FolderRangeTracker` depends only on logical folder/span state and structural edit values;
+- it does not depend on `TimelineView`, `TimelineViewModel`, RoutedCommand, WPF coordinates, reflection or DirectDisplay;
+- host observation must be translated into small structural operations before the tracker sees it;
+- the same tracker is executable without launching YMM4.
 
+Frozen positional policy:
+
+- folders are contiguous logical-position ranges rather than ownership attached to a particular YMM4 row object;
+- Insert before or at a folder head shifts the folder;
+- Insert with `Start < P <= End` joins the inserted row to the folder and expands End;
+- Delete before shifts the folder upward;
+- Delete inside shrinks it;
+- Delete at the head promotes the next surviving row at the same numeric head;
+- deleting the whole interval removes that folder metadata;
+- a one-row folder may survive deletion; minimum folder size is a creation-UX concern;
+- if delete makes a nested folder share its parent's head, the nested head is normalized downward and is pruned if it becomes empty;
+- standard MoveUp/MoveDown is modeled as an adjacent row swap while folder numeric ranges remain fixed, so a row crossing a boundary changes membership;
+- moving a whole folder is a separate explicit product operation and is not inferred from a standard single-layer reorder.
+
+Frozen invariants:
+
+- folder IDs are unique and non-empty;
+- `Start >= 0` and `End >= Start`;
 - nested or disjoint spans are valid;
-- crossing spans are invalid.
+- crossing spans are invalid;
+- two folders may not share the same head layer.
 
-#### Product-policy decisions that must be frozen here, not earlier
+The policy was compared with the public MIT-licensed `bluemistel/YMM4-LayerPatan` structural core. Its positional insert/delete ideas are compatible with this boundary, while its YMM4 integration, persistence, group-range correction, UI and Harmony patch architecture are not imported.
 
-- deleting a folder owner;
-- inserting exactly at a folder owner / end boundary;
-- moving an owner through its own child range;
-- moving a child outside its folder;
-- whether membership follows logical row identity or absolute numeric range in each standard edit.
-
-Each decision must be backed by an explicit UX/product rule and tested.
+P1.5 still has to prove these semantics under the Track C folded display, especially standard layer reorder across folder boundaries.
 
 ### P1.3 Native command observation boundary
 
@@ -516,8 +527,8 @@ The active path is:
 ```text
 P0 Core Spine                 DONE
   -> P1.1 host semantics      DONE
-  -> P1.2 FolderRangeTracker  NEXT
-  -> P1.3 operation observe
+  -> P1.2 FolderRangeTracker  DONE
+  -> P1.3 operation observe    NEXT
   -> P1.4 Undo synchronization
   -> P1.5 Track C integration
   -> P1.6 architecture convergence
