@@ -217,8 +217,14 @@ internal static class Probe
             // P2.3: verify the actual historical YMM4 Up/Down shortcut route,
             // not only the public helper methods above.
             await Reset();
-            Keyboard.ClearFocus();
             host.Activate();
+            var keyFrameBefore = timeline.CurrentFrame;
+            var scrollRect = Host.ScreenRect(scroll);
+            var focusPoint = new Point(scrollRect.X + scrollRect.Width * 0.75, scrollRect.Y + Math.Min(24, scrollRect.Height / 3));
+            await Native.Click(focusPoint);
+            Fact("keyboard_focus_after_timeline_click", Keyboard.FocusedElement?.GetType().FullName ?? "<null>");
+            Fact("keyboard_focus_within_timeline", view.IsKeyboardFocusWithin);
+            scroll.ScrollToVerticalOffset(0);
             await Task.Delay(250);
             var keyScrollStart = scroll.VerticalOffset;
             await Native.Key(0x28); // VK_DOWN
@@ -228,10 +234,12 @@ internal static class Probe
             Fact("keyboard_layer_scroll_start", keyScrollStart);
             Fact("keyboard_layer_scroll_down", keyScrollDown);
             Fact("keyboard_layer_scroll_up", keyScrollUp);
+            Check("keyboard_timeline_received_focus", view.IsKeyboardFocusWithin);
             Check("keyboard_down_is_one_display_row", Math.Abs((keyScrollDown - keyScrollStart) - display.Height) < 1);
             Check("keyboard_up_roundtrips", Math.Abs(keyScrollUp - keyScrollStart) < 1);
             Check("keyboard_layer_scroll_preserves_fold_state", collapsed.SequenceEqual(Baseline));
             Check("keyboard_layer_scroll_preserves_item_state", State(timeline) == original);
+            timeline.CurrentFrame = keyFrameBefore;
             await Reset();
 
             navigation = new SelectionNavigationBridge(host, display, () => collapsed, x => collapsed = x, Log);
