@@ -128,7 +128,7 @@ jobs:
             $p=Join-Path "out/evidence/$name" 'result.json'
             if(-not(Test-Path $p)){throw "Missing result: $name"}
             $r=Get-Content $p -Raw|ConvertFrom-Json -AsHashtable
-            if($r.status -ne $expected[$name]){throw "Unexpected status for $name: $($r.status)"}
+            if($r.status -ne $expected[$name]){throw "Unexpected status for ${name}: $($r.status)"}
           }
           'PASS_P3_V2_SECONDARY'|Set-Content out/evidence/PASS_P3_V2_SECONDARY.txt
 
