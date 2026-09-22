@@ -655,6 +655,15 @@ Product-facing folder controls, discoverability and interaction polish move to P
 
 ## P4 — Product UX
 
+**Status: ACTIVE — automated minimum workflow GREEN; hands-on NEXT.**
+
+Current P4 evidence:
+
+- P4.1 layer-label UI surface — 19/19 named assertions PASS on YMM4 4.56.1.0;
+- P4.2 host-independent UX commands — 27/27 PASS;
+- P4.3 minimum integrated workflow — 24/24 named assertions PASS on YMM4 4.56.1.0;
+- P4.4 hands-on — NEXT, using `docs/YMM4_NO_HARMONY_P4_HANDS_ON.md`.
+
 **Purpose:** turn the proven engine into a practical editor feature.
 
 ### Minimum Full UX candidates
@@ -788,7 +797,11 @@ P0 Core Spine                 DONE
   -> P1 freeze                DONE
   -> P2 interaction coverage  DONE
   -> P3 persistence           DONE
-  -> P4 UX                    NEXT
+  -> P4.1 UI surface           DONE (V1 primary)
+  -> P4.2 UX command policy    DONE
+  -> P4.3 minimum workflow     DONE (V1 primary)
+  -> P4.4 hands-on             NEXT
+  -> P4 freeze
   -> P5 compatibility
   -> P6 hardening
   -> P7 release
