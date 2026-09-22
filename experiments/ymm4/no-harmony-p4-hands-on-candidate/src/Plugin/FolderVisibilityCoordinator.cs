@@ -148,8 +148,6 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
 
     private void RebuildSuppressionOwnership()
     {
-        pluginSuppressed.Clear();
-
         var product = state.ProductState;
         var hidden = FolderProductStateRules.HiddenLayers(
             product,
@@ -163,15 +161,37 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
         internalWriteDepth++;
         try
         {
+            // First release layers whose final Hidden reason disappeared due to
+            // metadata or structural changes. A visible current value wins over
+            // an old "false" restore value because that is the externally shown
+            // override supported by S2.
+            foreach (var layer in restore.Keys
+                .Where(layer => !hidden.Contains(layer))
+                .OrderBy(x => x)
+                .ToArray())
+            {
+                var original = restore[layer];
+                var current = timeline.LayerSettings.IsVisibles[layer];
+
+                if (!(current && !original) && current != original)
+                    timeline.LayerSettings.IsVisibles[layer] = original;
+
+                restore.Remove(layer);
+                pluginSuppressed.Remove(layer);
+                changed = true;
+            }
+
+            // Then reconstruct ownership for currently-hidden layers. Missing
+            // restore entries can occur when a structural edit inserted a row
+            // into an already-hidden folder.
+            pluginSuppressed.RemoveWhere(layer => !hidden.Contains(layer));
+
             foreach (var layer in hidden.OrderBy(x => x))
             {
                 var current = timeline.LayerSettings.IsVisibles[layer];
 
                 if (!restore.ContainsKey(layer))
                 {
-                    // Structural edits may introduce a new logical row into an
-                    // already-hidden folder. Capture its native default once
-                    // and suppress it after the host command has settled.
                     restore[layer] = current;
                     changed = true;
 
@@ -184,6 +204,8 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
 
                 if (!current)
                     pluginSuppressed.Add(layer);
+                else
+                    pluginSuppressed.Remove(layer);
             }
         }
         finally
@@ -201,7 +223,7 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
         state.ReplaceProductState(repaired);
 
         log(
-            $"visibility_reconcile_hidden_rows hidden={hidden.Count} " +
+            $"visibility_reconcile hidden={hidden.Count} " +
             $"restore={restore.Count}");
     }
 
