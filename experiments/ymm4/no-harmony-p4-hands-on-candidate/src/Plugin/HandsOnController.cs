@@ -180,6 +180,70 @@ internal sealed class HandsOnController : IDisposable
                     [3] = true
                 });
 
+            // Simulate the native eye action while the folder still has a
+            // Hidden reason. The plugin must not immediately steal visibility
+            // back, and its restore value must follow native Undo/Redo.
+            timeline.LayerSettings.IsVisibles[2] = true;
+            undo.Record();
+            await Task.Delay(350);
+
+            AssertS2Visibility(
+                "external_eye_show",
+                expectedHidden: new[] { 2, 3 },
+                expectedVisible: new Dictionary<int, bool>
+                {
+                    [1] = true,
+                    [2] = true,
+                    [3] = false,
+                    [4] = false
+                },
+                expectedRestore: new Dictionary<int, bool>
+                {
+                    [2] = true,
+                    [3] = true
+                });
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(350);
+            AssertS2Visibility(
+                "external_eye_undo",
+                expectedHidden: new[] { 2, 3 },
+                expectedVisible: new Dictionary<int, bool>
+                {
+                    [1] = true,
+                    [2] = false,
+                    [3] = false,
+                    [4] = false
+                },
+                expectedRestore: new Dictionary<int, bool>
+                {
+                    [2] = false,
+                    [3] = true
+                });
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(350);
+            AssertS2Visibility(
+                "external_eye_redo",
+                expectedHidden: new[] { 2, 3 },
+                expectedVisible: new Dictionary<int, bool>
+                {
+                    [1] = true,
+                    [2] = true,
+                    [3] = false,
+                    [4] = false
+                },
+                expectedRestore: new Dictionary<int, bool>
+                {
+                    [2] = true,
+                    [3] = true
+                });
+
+            // Return to the original pre-override state before the nested
+            // parent/child restoration matrix below.
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(350);
+
             commands.SetHidden(outerId, true);
             await Task.Delay(250);
             AssertS2Visibility(
@@ -355,6 +419,8 @@ internal sealed class HandsOnController : IDisposable
                 "PASS_S2_INTEGRATION\n" +
                 $"timeline={key}\n" +
                 "nested_visibility=true\n" +
+                "external_eye_override=true\n" +
+                "external_eye_undo_redo=true\n" +
                 "visibility_undo_redo=true\n" +
                 "original_visibility_restore=true\n" +
                 "folder_color=true\n" +
