@@ -135,11 +135,25 @@ internal sealed class FolderCommands
             folderId,
             name);
 
+        var existingGroups = CurrentGroups();
+        var existingSpans = GroupSpans(existingGroups);
+        var groupRanges =
+            StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+                before,
+                TimelineKey,
+                new Ymm4NoHarmonyFolderRanges.InsertLayers(
+                    insertionPosition,
+                    1),
+                existingSpans);
+
         using var composite = structural.PrepareCompositeOverride(
             CommandType.AddLayer,
             insertionPosition,
             before,
-            after);
+            after,
+            () => HandsOnHostAccess.ApplyGroupRanges(
+                existingGroups,
+                groupRanges));
 
         if (!HandsOnHostAccess.TryExecuteTimelineCommand(
                 host,
