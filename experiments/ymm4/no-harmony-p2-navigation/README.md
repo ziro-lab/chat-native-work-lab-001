@@ -1,6 +1,6 @@
 # P2.1 — selection-triggered folded navigation candidate
 
-Status: implementation candidate; native result pending. This is not P2 completion.
+Status: **V0/V1 GREEN on YMM4 4.56.1.0 Lite**. This is not P2 completion or a product/release gate.
 
 ## Narrow question
 
@@ -34,6 +34,35 @@ The runner checks required assertion names, not an arbitrary assertion-count thr
 
 Reproduce with `.github/workflows/ymm4-no-harmony-p2-navigation.yml`.
 
+## Observed result — 2026-09-22
+
+Source / actual checkout: `bb5146189573454f45ee95ee8331caccba34c412`.
+Tree: `838f6a36bc5b420d7aaaec54cad35158c4f75384`.
+Run: [35699152547](https://github.com/ziro-lab/chat-native-work-lab-001/actions/runs/35699152547).
+
+| Gate | Result |
+| --- | --- |
+| Linux pure C# policy, job `106652771759` | 17/17 PASS |
+| YMM4 4.56.1.0 native, job `106652862394` | 24/24 named assertions PASS |
+| Native build | 0 warnings, 0 errors |
+| Native marker | `PASS_P2_NAVIGATION` |
+
+Native automated observation:
+
+- Raw public selection leaves the nested target folded and not visible.
+- The bridge receives real SelectedItems notifications and reveals the target on screen without an explicit harness Reveal call.
+- Only blocking ancestors open; unrelated collapsed folders remain; selecting a nested owner preserves that owner's own collapse.
+- A visible off-screen target is followed using the frozen FolderLayout mapping.
+- Tested selection/playhead/horizontal offset are preserved; all fixture item Layer/Frame/Length values are unchanged.
+- Rapid selection replacement, clearing, ambiguous multi-selection and detach pass their cancellation/non-guessing checks.
+- No navigation/display failure, no display reentry, no Harmony assembly; subscriptions release on detach.
+
+Artifact: `10681539220`, `ymm4-no-harmony-p2-navigation-4.56.1.0`.
+ZIP SHA256 reported by upload-artifact: `786f2e9ab49da37cdf6586ac38c17b1f0836b898a90548841f86c6e1a936f09b`.
+This V1 result was checked through the completed job logs; the artifact was not independently downloaded/rehashed. No P0/P1 native golden rerun or secondary-host run was performed for this leaf integration.
+
+The public-member inventory found `ScrollToItem(IItem)`, `ScrollToLowerLayer()` and `ScrollToHigherLayer()`. Their presence is static discovery, not native-route acceptance. They are the next bounded discovery entry points.
+
 ## NOT PROVEN / next routes
 
 - 4.55.1.1; both-host V2 remains a P2 exit requirement.
@@ -44,4 +73,4 @@ Reproduce with `.github/workflows/ymm4-no-harmony-p2-navigation.yml`.
 - other placement/template/add/context routes.
 - native Undo/Redo of auto-expansion, persistence, product UX, release package.
 
-The existing P0/P1 sources and golden assertions are not modified or replayed by this leaf candidate.
+The existing P0/P1 sources and golden assertions are not modified or replayed by this leaf candidate. Result-record-only commits after the tested source do not change the probe/runtime/workflow bits.
