@@ -35,7 +35,7 @@ try {
       }
       if($title -like '*Check for updates*' -or $title -like '*About YukkuriMovieMaker*'){
         [void][P3NewProjectWindow]::PostMessage($w,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
-      }elseif($title -eq 'Confirm'){
+      }elseif($title -eq 'Confirm' -or $title -eq 'Profile'){
         [void][P3NewProjectWindow]::PostMessage($w,0x0100,[IntPtr]0x0D,[IntPtr]::Zero)
         [void][P3NewProjectWindow]::PostMessage($w,0x0101,[IntPtr]0x0D,[IntPtr]::Zero)
       }
