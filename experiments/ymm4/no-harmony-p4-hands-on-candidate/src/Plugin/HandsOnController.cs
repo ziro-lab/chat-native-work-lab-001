@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
+using Ymm4NoHarmonyStructuralConvenience;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.UndoRedo;
@@ -1104,6 +1105,36 @@ internal sealed class HandsOnController : IDisposable
             .ThenByDescending(x => x.Start)
             .ToArray();
 
+        if (containing.FirstOrDefault() is { } innermost)
+        {
+            root.Items.Add(new Separator());
+
+            var addTail = new MenuItem
+            {
+                Header = $"「{innermost.Name}」の末尾にレイヤーを追加"
+            };
+            addTail.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.AddLayerAtFolderEnd(innermost.Id));
+            root.Items.Add(addTail);
+
+            if (logicalLayer != innermost.Start)
+            {
+                var addBelow = new MenuItem
+                {
+                    Header =
+                        $"L{logicalLayer:00} の下にレイヤーを追加" +
+                        $"（「{innermost.Name}」内）"
+                };
+                addBelow.Click += (_, _) =>
+                    RunFolderCommand(
+                        () => commands.AddLayerBelowInsideFolder(
+                            innermost.Id,
+                            logicalLayer));
+                root.Items.Add(addBelow);
+            }
+        }
+
         foreach (var folder in containing)
         {
             root.Items.Add(new Separator());
@@ -1180,6 +1211,51 @@ internal sealed class HandsOnController : IDisposable
                         option?.Hidden != true));
             sub.Items.Add(visibilityItem);
 
+            var addLayer = new MenuItem
+            {
+                Header = "フォルダの末尾にレイヤーを追加"
+            };
+            addLayer.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.AddLayerAtFolderEnd(folder.Id));
+            sub.Items.Add(addLayer);
+
+            sub.Items.Add(new Separator());
+
+            var addGroup = new MenuItem
+            {
+                Header = "フォルダ全体を制御するグループ制御を追加"
+            };
+            addGroup.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.AddGroupControl(folder.Id));
+            sub.Items.Add(addGroup);
+
+            IReadOnlyList<GroupIssue> issues;
+            try
+            {
+                issues = commands.GetGroupIssues(folder.Id);
+            }
+            catch (Exception ex)
+            {
+                HandsOnRuntime.Diagnostic(
+                    "group_issue_scan_error=" + ex);
+                issues = [];
+            }
+
+            var fitGroups = new MenuItem
+            {
+                Header = issues.Count > 0
+                    ? $"グループ制御の範囲をフォルダに合わせる" +
+                      $"（{issues.Count}件のずれ）"
+                    : "グループ制御の範囲をフォルダに合わせる",
+                IsEnabled = issues.Count > 0
+            };
+            fitGroups.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.FitGroupRanges(folder.Id));
+            sub.Items.Add(fitGroups);
+
             sub.Items.Add(new Separator());
 
             var ungroup = new MenuItem
@@ -1189,6 +1265,44 @@ internal sealed class HandsOnController : IDisposable
             ungroup.Click += (_, _) =>
                 RunFolderCommand(() => commands.Ungroup(folder.Id));
             sub.Items.Add(ungroup);
+
+            var deleteContents = new MenuItem
+            {
+                Header = "フォルダと中のレイヤーを削除..."
+            };
+            deleteContents.Click += (_, _) =>
+            {
+                var layerCount = folder.End - folder.Start + 1;
+                var itemCount = 0;
+                try
+                {
+                    itemCount = commands.CountItemsInFolder(folder.Id);
+                }
+                catch (Exception ex)
+                {
+                    HandsOnRuntime.Diagnostic(
+                        "delete_count_error=" + ex);
+                }
+
+                var message =
+                    $"フォルダ「{folder.Name}」と中の {layerCount} レイヤー" +
+                    $"（アイテム {itemCount} 個）を削除します。\n" +
+                    "元に戻すには YMM4 の「元に戻す」を使ってください。";
+
+                if (MessageBox.Show(
+                        message,
+                        FolderToolViewModel.DisplayTitle,
+                        MessageBoxButton.OKCancel,
+                        MessageBoxImage.Warning)
+                    != MessageBoxResult.OK)
+                {
+                    return;
+                }
+
+                RunFolderCommand(
+                    () => commands.DeleteFolderContents(folder.Id));
+            };
+            sub.Items.Add(deleteContents);
 
             root.Items.Add(sub);
         }
