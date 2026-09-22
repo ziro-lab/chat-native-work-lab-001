@@ -1,0 +1,29 @@
+name: YMM4 no-Harmony P4 UX policy pure
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p4-ux-policy/**'
+      - '.github/workflows/ymm4-no-harmony-p4-ux-policy.yml'
+permissions: { contents: read }
+concurrency:
+  group: p4-ux-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  pure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Reject host dependencies in UX policy
+        shell: bash
+        run: |
+          if grep -R -n -E 'YukkuriMovieMaker|System\.Windows|PresentationFramework|WindowsBase' experiments/ymm4/no-harmony-p4-ux-policy/src; then
+            echo 'P4 UX policy must stay host-independent.'
+            exit 1
+          fi
+      - name: Run pure UX command suite
+        run: dotnet run --project experiments/ymm4/no-harmony-p4-ux-policy/tests/UxPolicyTests.csproj -c Release
