@@ -57,8 +57,10 @@ try {
   $lines=Get-Content $result
   $lines|Write-Host
   if(-not($lines -contains 'status=PASS_STRUCTURAL_OBSERVER_NATIVE')){throw 'Structural observer assertions failed'}
-  if($lines|Where-Object{$_ -match '=False$'}){throw 'False structural observer assertion'}
-  if(@($lines|Where-Object{$_ -match '=True$'}).Count -lt 25){throw 'Insufficient structural observer assertions'}
+  $countLine=$lines|Where-Object{$_ -match '^assertion_count='}|Select-Object -First 1
+  if(-not $countLine){throw 'Missing structural observer assertion count'}
+  $count=[int]($countLine -replace '^assertion_count=','')
+  if($count -lt 50){throw 'Insufficient structural observer assertions'}
 } finally {
   if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
   Remove-Item Env:CNWL_STRUCTURAL_OBSERVER_DIR -ErrorAction SilentlyContinue
