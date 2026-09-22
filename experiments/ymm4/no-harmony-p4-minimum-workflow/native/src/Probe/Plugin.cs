@@ -563,7 +563,10 @@ internal static class Probe
             }
             await Task.Delay(700);
 
-            var baselineLayers = fixtures.ToDictionary(x => x, x => x.Layer, ReferenceEqualityComparer.Instance);
+            var baselineLayers = new Dictionary<IItem, int>(ReferenceEqualityComparer.Instance);
+            foreach (var item in fixtures)
+                baselineLayers[item] = item.Layer;
+
             timeline.LayerSelection.SelectedLayers = ImmutableList.Create(2, 3, 4);
 
             var labels = FindLabels(window);
