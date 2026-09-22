@@ -70,3 +70,38 @@ The pure Linux suite covers:
 - direct application of detected edits to the frozen FolderRangeTracker.
 
 P1.3b follows only after this pure detector is green. P1.3b will prove that exact YMM4 4.55.1.1 / 4.56.1.0 snapshots can feed this detector without command-specific folder logic.
+
+## P1.3b native observer
+
+The exact-host lane is under `native/`.
+
+It reuses the standard YMM4 RoutedCommand trigger only as the Lab test driver. Folder logic is **not** attached to those commands.
+
+The observed product-shaped path is:
+
+```text
+previous stable snapshot
+      + UndoRedoManager Recorded/Undoed/Redoed trigger
+      + current Timeline item layers
+      + optional empty LayerSetting insert hints
+                ↓
+      StructuralDeltaDetector
+                ↓
+InsertLayers / DeleteLayers / SwapAdjacentLayers
+```
+
+Strict native acceptance on both pinned hosts requires the same observer to classify:
+
+- Add L3 -> Insert(3,1);
+- Undo -> Delete(3,1);
+- Redo -> Insert(3,1);
+- Delete L3 -> Delete(3,1);
+- Undo -> Insert(3,1);
+- Redo -> Delete(3,1);
+- MoveDown L3 -> Swap(3);
+- Undo/Redo -> the same adjacent Swap;
+- exact baseline restoration after every sequence;
+- public UndoRedoManager trigger events;
+- no Harmony.
+
+The fixture also places sparse markers at L20/L30 and records standard Add/Delete at L24. Those sparse results are discovery facts in the first native run, not yet a strict product-policy assertion. They decide whether state-delta observation alone is sufficient or whether P1.3 needs one generic RoutedCommand-position fallback.
