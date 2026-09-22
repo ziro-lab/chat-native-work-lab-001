@@ -445,4 +445,103 @@ Check("visibility_user_change_outside_hidden_is_noop",
         == FolderSessionDocumentCodec.Save(
             FolderSessionDocumentRules.NormalizeAndValidate(visibilityState)));
 
+// Structural edits reuse the frozen FolderRangePlan mapping for restore keys.
+var structuralSource = FolderSessionDocumentRules.NormalizeAndValidate(
+    new FolderSessionDocument
+    {
+        Core = visibilityCore,
+        FolderOptions =
+        [
+            new FolderOptionState
+            {
+                TimelineKey = "vis",
+                FolderId = folderId,
+                Color = "#FF4F7FE0",
+                Hidden = true
+            }
+        ],
+        VisibilityRestore =
+        [
+            new VisibilityRestoreState
+            {
+                TimelineKey = "vis",
+                Layer = 1,
+                RestoreVisible = true
+            },
+            new VisibilityRestoreState
+            {
+                TimelineKey = "vis",
+                Layer = 3,
+                RestoreVisible = false
+            },
+            new VisibilityRestoreState
+            {
+                TimelineKey = "vis",
+                Layer = 5,
+                RestoreVisible = true
+            }
+        ]
+    });
+
+var structuralTimeline = FolderDocumentRules.FindTimeline(
+    structuralSource.Core,
+    "vis")!;
+var insertPlan = Ymm4NoHarmonyFolderRanges.FolderRangeTracker.Apply(
+    structuralTimeline.Folders.Select(
+        x => new Ymm4NoHarmonyFolderRanges.FolderRange(
+            x.Id, x.Start, x.End)),
+    new Ymm4NoHarmonyFolderRanges.InsertLayers(3, 1));
+
+var insertById = structuralTimeline.Folders.ToDictionary(x => x.Id);
+var insertedCore = FolderDocumentRules.ReplaceTimeline(
+    structuralSource.Core,
+    "vis",
+    insertPlan.Ranges.Select(range =>
+    {
+        var old = insertById[range.Id];
+        return old with { Start = range.Start, End = range.End };
+    }));
+
+var insertedState =
+    FolderSessionDocumentRules.ReplaceCoreAfterStructuralEdit(
+        structuralSource,
+        insertedCore,
+        "vis",
+        insertPlan);
+
+Check("structural_restore_insert_maps_existing_layers",
+    insertedState.VisibilityRestore
+        .Select(x => x.Layer)
+        .SequenceEqual(new[] { 1, 4, 6 }));
+Check("structural_restore_insert_preserves_folder_option",
+    FolderSessionDocumentRules.FindOption(
+        insertedState, "vis", folderId)
+        is { Color: "#FF4F7FE0", Hidden: true });
+
+var deletePlan = Ymm4NoHarmonyFolderRanges.FolderRangeTracker.Apply(
+    insertPlan.Ranges,
+    new Ymm4NoHarmonyFolderRanges.DeleteLayers(4, 1));
+var deleteById = insertedCore.Timelines.Single().Folders
+    .ToDictionary(x => x.Id);
+var deletedCore = FolderDocumentRules.ReplaceTimeline(
+    insertedCore,
+    "vis",
+    deletePlan.Ranges.Select(range =>
+    {
+        var old = deleteById[range.Id];
+        return old with { Start = range.Start, End = range.End };
+    }));
+
+var deletedState =
+    FolderSessionDocumentRules.ReplaceCoreAfterStructuralEdit(
+        insertedState,
+        deletedCore,
+        "vis",
+        deletePlan);
+
+Check("structural_restore_delete_drops_deleted_layer",
+    deletedState.VisibilityRestore
+        .Select(x => x.Layer)
+        .SequenceEqual(new[] { 1, 5 }));
+
 Console.WriteLine($"status=PASS_S2_STATE_V2\nassertion_count={count}");
