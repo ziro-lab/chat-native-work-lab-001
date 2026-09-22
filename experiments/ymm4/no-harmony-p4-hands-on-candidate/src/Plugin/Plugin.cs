@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
 using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
@@ -230,7 +231,7 @@ internal static class HandsOnRuntime
 
         try
         {
-            currentWindow.WindowState = WindowState.Normal;
+            currentWindow.WindowState = System.Windows.WindowState.Normal;
             currentWindow.Left = 0;
             currentWindow.Top = 0;
             currentWindow.Width = 1100;
