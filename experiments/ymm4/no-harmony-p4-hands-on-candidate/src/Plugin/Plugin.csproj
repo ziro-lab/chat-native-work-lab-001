@@ -21,6 +21,8 @@
     <Compile Include="../../../no-harmony-track-a/src/Probe/Host.cs" Link="Host.cs" />
     <Compile Include="../../../no-harmony-folder-layout-generalization/src/Probe/FolderLayout.cs" Link="FolderLayout.cs" />
     <Compile Include="../../../no-harmony-track-c/src/Probe/GestureDisplay.cs" Link="GestureDisplay.cs" />
+    <Compile Include="../../../no-harmony-track-c/src/Probe/InputMapAdapter.cs" Link="InputMapAdapter.cs" />
+    <Compile Include="../../../no-harmony-track-c/src/Probe/FileDropAdapter.cs" Link="FileDropAdapter.cs" />
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
     <Compile Include="../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
