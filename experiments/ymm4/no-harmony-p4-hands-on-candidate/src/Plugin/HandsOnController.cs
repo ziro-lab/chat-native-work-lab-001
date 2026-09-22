@@ -221,6 +221,15 @@ internal sealed class HandsOnController : IDisposable
                     "Tail insert Undo did not restore host/group structure.");
             }
 
+            var restoreAfterTailUndo = FolderProductStateRules.RestoreMap(
+                state.ProductState,
+                key);
+            if (restoreAfterTailUndo.ContainsKey(4))
+            {
+                throw new InvalidOperationException(
+                    "Tail insert Undo left visibility restore ownership for removed L4.");
+            }
+
             ExecuteHostCommand(CommandType.Redo, null);
             await Task.Delay(350);
             AssertS3Folder(folderA, 1, 4, "tail_redo_A");
@@ -230,6 +239,16 @@ internal sealed class HandsOnController : IDisposable
             {
                 throw new InvalidOperationException(
                     "Tail insert Redo did not reapply host/group structure.");
+            }
+
+            var restoreAfterTailRedo = FolderProductStateRules.RestoreMap(
+                state.ProductState,
+                key);
+            if (!restoreAfterTailRedo.ContainsKey(4)
+                || timeline.LayerSettings.IsVisibles[4])
+            {
+                throw new InvalidOperationException(
+                    "Tail insert Redo did not restore hidden ownership for L4.");
             }
 
             commands.SetHidden(folderA, false);
