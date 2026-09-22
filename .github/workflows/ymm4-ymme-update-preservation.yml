@@ -1,0 +1,118 @@
+name: YMM4 ymme update preservation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/ymme-update-preservation/**'
+      - '.github/workflows/ymm4-ymme-update-preservation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/ymm4/ymme-update-preservation/**'
+      - '.github/workflows/ymm4-ymme-update-preservation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-ymme-update-preservation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-observation:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) {
+            throw '.NET 10 SDK is not present on the runner.'
+          }
+
+      - name: Download and verify exact YMM4 4.55.1.1 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash = (Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b') {
+            throw "YMM4 hash mismatch: $hash"
+          }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe = Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YukkuriMovieMaker.exe not found.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build v1 and v2 probe DLLs
+        shell: pwsh
+        run: |
+          $project = 'experiments/ymm4/ymme-update-preservation/src/Ymm4PortableSettingsProbe/Ymm4PortableSettingsProbe.csproj'
+          New-Item -ItemType Directory -Force out/v1,out/v2 | Out-Null
+
+          dotnet build $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" "-p:Version=1.0.0" -o out/v1 --nologo -warnaserror 2>&1 | Tee-Object out/build-v1.txt
+          if ($LASTEXITCODE -ne 0) { throw 'v1 build failed.' }
+
+          dotnet build $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" "-p:Version=2.0.0" -o out/v2 --nologo -warnaserror 2>&1 | Tee-Object out/build-v2.txt
+          if ($LASTEXITCODE -ne 0) { throw 'v2 build failed.' }
+
+          $v1 = (Get-FileHash out/v1/Ymm4PortableSettingsProbe.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          $v2 = (Get-FileHash out/v2/Ymm4PortableSettingsProbe.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($v1 -eq $v2) { throw 'Versioned probe DLLs have identical SHA256.' }
+          "v1=$v1" | Set-Content out/probe-hashes.txt
+          "v2=$v2" | Add-Content out/probe-hashes.txt
+
+      - name: Exercise real ymme install then update
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/ymme-update-preservation/RunNative.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -V1Dll (Join-Path $PWD 'out/v1/Ymm4PortableSettingsProbe.dll') `
+            -V2Dll (Join-Path $PWD 'out/v2/Ymm4PortableSettingsProbe.dll') `
+            -OutputDir (Join-Path $PWD 'out/evidence')
+
+      - name: Record provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/evidence | Out-Null
+          $event = Get-Content -Raw $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+          $sourceHead = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $event.pull_request.head.sha } else { $env:GITHUB_SHA }
+          $result = if (Test-Path out/evidence/result.json) { Get-Content -Raw out/evidence/result.json | ConvertFrom-Json } else { $null }
+          [ordered]@{
+            schema = 'chat-native-work-lab.provenance.v1'
+            experiment = 'ymm4-ymme-update-preservation'
+            repository = $env:GITHUB_REPOSITORY
+            source_head = $sourceHead
+            checkout_sha = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_url = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            runner_image = $env:ImageOS
+            ymm4_version = '4.55.1.1 Lite'
+            ymm4_zip_sha256 = '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+            observed_result = $result
+          } | ConvertTo-Json -Depth 8 | Set-Content out/evidence/provenance.json
+
+      - name: Upload compact evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-ymme-update-preservation
+          path: |
+            out/evidence/
+            out/build-v1.txt
+            out/build-v2.txt
+            out/probe-hashes.txt
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14
