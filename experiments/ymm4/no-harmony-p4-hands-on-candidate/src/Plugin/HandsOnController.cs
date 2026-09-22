@@ -11,6 +11,7 @@ using Ymm4NoHarmonyProductState;
 using Ymm4NoHarmonyStructuralConvenience;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.UndoRedo;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
@@ -81,6 +82,332 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS0IntegrationSmoke();
         ScheduleS1IntegrationSmoke();
         ScheduleS2IntegrationSmoke();
+        ScheduleS3IntegrationSmoke();
+    }
+
+    private void ScheduleS3IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S3_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS3IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS3IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "S3 integration smoke must start from a resource-free Timeline.");
+
+            // Establish enough real native layer structure that direct insert /
+            // delete can prove row mapping, not only FolderDocument changes.
+            for (var layer = 0; layer <= 8; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(120);
+            }
+
+            var baselineMaxLayer = timeline.MaxLayer;
+            var key = timeline.ID.ToString("D");
+            var folderA = Guid.Parse(
+                "44444444-4444-4444-4444-444444444444");
+            var folderB = Guid.Parse(
+                "55555555-5555-5555-5555-555555555555");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderA,
+                                            Start = 1,
+                                            End = 3,
+                                            Name = "A"
+                                        },
+                                        new PersistedFolder
+                                        {
+                                            Id = folderB,
+                                            Start = 5,
+                                            End = 6,
+                                            Name = "B"
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            var groupA = new GroupItem
+            {
+                Frame = 0,
+                Length = Math.Max(1, timeline.Length),
+                Layer = 1,
+                GroupRange = 2
+            };
+            if (!timeline.TryAddItems(
+                    [groupA],
+                    groupA.Frame,
+                    groupA.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "S3 baseline GroupItem could not be added.");
+            }
+
+            undo.Record();
+            await Task.Delay(250);
+
+            // S2 + S3 composition: a row inserted into a hidden folder must
+            // become hidden and get one restore entry before the same Record().
+            commands.SetHidden(folderA, true);
+            await Task.Delay(250);
+
+            commands.AddLayerAtFolderEnd(folderA);
+            await Task.Delay(350);
+
+            AssertS3Folder(folderA, 1, 4, "tail_add_A");
+            AssertS3Folder(folderB, 6, 7, "tail_shift_B");
+
+            if (groupA.Layer != 1 || groupA.GroupRange != 3)
+                throw new InvalidOperationException(
+                    $"Tail insert GroupRange mismatch: L{groupA.Layer} R{groupA.GroupRange}.");
+
+            var hiddenAfterTail = FolderProductStateRules.HiddenLayers(
+                state.ProductState,
+                key);
+            var restoreAfterTail = FolderProductStateRules.RestoreMap(
+                state.ProductState,
+                key);
+
+            if (!hiddenAfterTail.Contains(4)
+                || timeline.LayerSettings.IsVisibles[4]
+                || !restoreAfterTail.ContainsKey(4))
+            {
+                throw new InvalidOperationException(
+                    "Inserted tail row did not join hidden/restore ownership.");
+            }
+
+            if (timeline.MaxLayer != baselineMaxLayer + 1)
+                throw new InvalidOperationException(
+                    $"Tail insert MaxLayer mismatch: {timeline.MaxLayer}.");
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(350);
+            AssertS3Folder(folderA, 1, 3, "tail_undo_A");
+            AssertS3Folder(folderB, 5, 6, "tail_undo_B");
+            if (groupA.GroupRange != 2
+                || timeline.MaxLayer != baselineMaxLayer)
+            {
+                throw new InvalidOperationException(
+                    "Tail insert Undo did not restore host/group structure.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(350);
+            AssertS3Folder(folderA, 1, 4, "tail_redo_A");
+            AssertS3Folder(folderB, 6, 7, "tail_redo_B");
+            if (groupA.GroupRange != 3
+                || timeline.MaxLayer != baselineMaxLayer + 1)
+            {
+                throw new InvalidOperationException(
+                    "Tail insert Redo did not reapply host/group structure.");
+            }
+
+            commands.SetHidden(folderA, false);
+            await Task.Delay(250);
+
+            // Standard native Add must also correct a GroupRange in the same
+            // YMM4-owned history unit.
+            ExecuteHostCommand(CommandType.AddLayer, 2);
+            await Task.Delay(350);
+            AssertS3Folder(folderA, 1, 5, "standard_add_A");
+            AssertS3Folder(folderB, 7, 8, "standard_add_B");
+            if (groupA.GroupRange != 4)
+                throw new InvalidOperationException(
+                    $"Standard Add GroupRange mismatch: {groupA.GroupRange}.");
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(350);
+            if (groupA.GroupRange != 3)
+                throw new InvalidOperationException(
+                    "Standard Add Undo did not restore GroupRange.");
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(350);
+            if (groupA.GroupRange != 4)
+                throw new InvalidOperationException(
+                    "Standard Add Redo did not restore GroupRange correction.");
+
+            // Fit only the mismatched GroupRange and keep it in one native unit.
+            groupA.GroupRange = 6;
+            undo.Record();
+            await Task.Delay(150);
+
+            var fitIssues = commands.GetGroupIssues(folderA);
+            if (fitIssues.Count != 1)
+                throw new InvalidOperationException(
+                    $"Expected one GroupRange issue, got {fitIssues.Count}.");
+
+            if (commands.FitGroupRanges(folderA) != 1
+                || groupA.GroupRange != 4)
+            {
+                throw new InvalidOperationException(
+                    "Fit GroupRange did not align to folder A.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(300);
+            if (groupA.GroupRange != 6)
+                throw new InvalidOperationException(
+                    "Fit GroupRange Undo failed.");
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(300);
+            if (groupA.GroupRange != 4)
+                throw new InvalidOperationException(
+                    "Fit GroupRange Redo failed.");
+
+            // Group Control add is a plugin-owned structural composite.
+            if (!commands.AddGroupControl(folderB))
+                throw new InvalidOperationException(
+                    "Group Control add returned false.");
+            await Task.Delay(350);
+
+            AssertS3Folder(folderB, 7, 9, "group_add_B");
+            var groupsAfterAdd = timeline.Items
+                .OfType<GroupItem>()
+                .OrderBy(x => x.Layer)
+                .ToArray();
+            if (groupsAfterAdd.Length != 2)
+                throw new InvalidOperationException(
+                    $"Expected two GroupItems, got {groupsAfterAdd.Length}.");
+
+            var groupB = groupsAfterAdd.Single(x => !ReferenceEquals(x, groupA));
+            if (groupB.Layer != 7 || groupB.GroupRange != 2)
+                throw new InvalidOperationException(
+                    $"Group B span mismatch: L{groupB.Layer} R{groupB.GroupRange}.");
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(350);
+            AssertS3Folder(folderB, 7, 8, "group_add_undo_B");
+            if (timeline.Items.OfType<GroupItem>().Count() != 1)
+                throw new InvalidOperationException(
+                    "Group Control add Undo did not remove the new GroupItem.");
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(350);
+            AssertS3Folder(folderB, 7, 9, "group_add_redo_B");
+            if (timeline.Items.OfType<GroupItem>().Count() != 2)
+                throw new InvalidOperationException(
+                    "Group Control add Redo did not restore the GroupItem.");
+
+            // Destructive folder delete must remove metadata + rows + GroupItem
+            // and come back with one Undo.
+            var maxBeforeDelete = timeline.MaxLayer;
+            commands.DeleteFolderContents(folderB);
+            await Task.Delay(400);
+
+            if (commands.FindFolder(folderB) is not null)
+                throw new InvalidOperationException(
+                    "Destructive folder delete left folder B metadata.");
+            if (timeline.Items
+                .OfType<GroupItem>()
+                .Any(x => x.Layer >= 7 && x.Layer <= 9))
+            {
+                throw new InvalidOperationException(
+                    "Destructive folder delete left GroupItems in removed rows.");
+            }
+            if (timeline.MaxLayer != maxBeforeDelete - 3)
+                throw new InvalidOperationException(
+                    "Destructive folder delete did not remove three logical rows.");
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(400);
+            AssertS3Folder(folderB, 7, 9, "delete_undo_B");
+            if (timeline.Items.OfType<GroupItem>().Count() != 2
+                || timeline.MaxLayer != maxBeforeDelete)
+            {
+                throw new InvalidOperationException(
+                    "Destructive delete Undo did not restore host state.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(400);
+            if (commands.FindFolder(folderB) is not null
+                || timeline.Items.OfType<GroupItem>().Count() != 1
+                || timeline.MaxLayer != maxBeforeDelete - 3)
+            {
+                throw new InvalidOperationException(
+                    "Destructive delete Redo did not reapply host state.");
+            }
+
+            WriteS3Result(
+                "PASS_S3_INTEGRATION\n" +
+                $"timeline={key}\n" +
+                "insert_into_hidden_folder=true\n" +
+                "plugin_structural_undo_redo=true\n" +
+                "standard_group_autofix=true\n" +
+                "group_fit_undo_redo=true\n" +
+                "group_add_undo_redo=true\n" +
+                "destructive_delete_undo_redo=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic("s3_integration_smoke_error=" + ex);
+            WriteS3Result("FAIL_S3_INTEGRATION\n" + ex + "\n");
+        }
+    }
+
+    private void AssertS3Folder(
+        Guid folderId,
+        int expectedStart,
+        int expectedEnd,
+        string phase)
+    {
+        var folder = commands.FindFolder(folderId)
+            ?? throw new InvalidOperationException(
+                $"{phase}: folder {folderId} is missing.");
+
+        if (folder.Start != expectedStart
+            || folder.End != expectedEnd)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: folder range {folder.Start}-{folder.End}, " +
+                $"expected {expectedStart}-{expectedEnd}.");
+        }
+
+        display.ThrowIfFailed();
+        HandsOnRuntime.Diagnostic(
+            $"s3_folder phase={phase} id={folderId} " +
+            $"range={folder.Start}-{folder.End}");
+    }
+
+    private static void WriteS3Result(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "s3-result.txt"), text);
     }
 
     private void ScheduleS2IntegrationSmoke()
