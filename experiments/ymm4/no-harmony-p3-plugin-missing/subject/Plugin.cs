@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4P3MissingSubject;
 
@@ -106,6 +107,18 @@ internal static class Seeder
                 }
 
                 timer.Stop();
+                var character = new Character { Name = "CNWL P3 Missing Marker Character" };
+                var marker = new VoiceItem(character)
+                {
+                    Frame = 123,
+                    Layer = 7,
+                    Length = 60,
+                    Serif = "marker",
+                    Remark = "CNWL_P3_MISSING_MARKER"
+                };
+                if (!timeline.TryAddItems([marker], marker.Frame, marker.Layer))
+                    throw new InvalidOperationException("Failed to add marker item.");
+
                 var expected = FolderDocumentCodec.Save(new FolderDocument
                 {
                     Timelines =
