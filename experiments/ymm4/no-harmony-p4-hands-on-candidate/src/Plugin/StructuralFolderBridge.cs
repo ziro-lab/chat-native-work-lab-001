@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using Ymm4NoHarmonyFolderRanges;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyState;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
@@ -10,11 +11,8 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 
 /// <summary>
 /// Product-side adapter for the frozen P1 same-transaction structural policy.
-///
-/// Standard YMM4 layer commands remain host-owned. Before the host executes one
-/// of the proven structural commands, the current folder ranges are transformed
-/// with FolderRangeTracker and one folder-state undo callback is appended to the
-/// host's pending history unit. This adapter deliberately does not call Record().
+/// S2 upgrades the history payload from Core-only FolderDocument snapshots to
+/// the single FolderSessionDocument so visual metadata is restored together.
 /// </summary>
 internal sealed class StructuralFolderBridge : IDisposable
 {
@@ -54,20 +52,21 @@ internal sealed class StructuralFolderBridge : IDisposable
     internal CompositeOverrideLease PrepareCompositeOverride(
         CommandType type,
         int layer,
-        FolderDocument before,
-        FolderDocument after)
+        FolderSessionDocument before,
+        FolderSessionDocument after)
     {
         if (disposed)
             throw new ObjectDisposedException(nameof(StructuralFolderBridge));
         if (compositeOverride is not null)
-            throw new InvalidOperationException("A structural composite override is already active.");
+            throw new InvalidOperationException(
+                "A structural composite override is already active.");
 
         var lease = new CompositeOverrideLease(
             this,
             type,
             layer,
-            FolderDocumentRules.NormalizeAndValidate(before),
-            FolderDocumentRules.NormalizeAndValidate(after));
+            FolderSessionDocumentRules.NormalizeAndValidate(before),
+            FolderSessionDocumentRules.NormalizeAndValidate(after));
         compositeOverride = lease;
         return lease;
     }
@@ -78,28 +77,29 @@ internal sealed class StructuralFolderBridge : IDisposable
             compositeOverride = null;
     }
 
-    private void ApplyPendingDocument(
-        FolderDocument before,
-        FolderDocument after,
+    private void ApplyPendingState(
+        FolderSessionDocument before,
+        FolderSessionDocument after,
         string reason)
     {
-        if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
+        if (FolderSessionDocumentCodec.Save(before)
+            == FolderSessionDocumentCodec.Save(after))
         {
             log("structural_noop reason=" + reason);
             return;
         }
 
-        state.ReplaceDocument(after);
+        state.ReplaceState(after);
         undo.AddCommand(new UndoRedoActionCommand(
             () =>
             {
                 UndoCallbacks++;
-                state.ReplaceDocument(before);
+                state.ReplaceState(before);
             },
             () =>
             {
                 RedoCallbacks++;
-                state.ReplaceDocument(after);
+                state.ReplaceState(after);
             }));
 
         PendingEdits++;
@@ -154,21 +154,28 @@ internal sealed class StructuralFolderBridge : IDisposable
             return;
 
         if (e.Parameter is not int layer
-            || !TryStructuralEdit(e.Command, layer, out var type, out var edit)
+            || !TryStructuralEdit(
+                e.Command,
+                layer,
+                out var type,
+                out var edit)
             || edit is null)
             return;
 
         if (compositeOverride is { } composite
             && composite.Matches(type, layer))
         {
-            var current = FolderDocumentRules.NormalizeAndValidate(state.Document);
-            if (FolderDocumentCodec.Save(current) != FolderDocumentCodec.Save(composite.Before))
+            var current =
+                FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+
+            if (FolderSessionDocumentCodec.Save(current)
+                != FolderSessionDocumentCodec.Save(composite.Before))
             {
                 throw new InvalidOperationException(
-                    "Folder state changed while a composite structural command was pending.");
+                    "Folder session state changed while a composite structural command was pending.");
             }
 
-            ApplyPendingDocument(
+            ApplyPendingState(
                 composite.Before,
                 composite.After,
                 $"composite:{type}:L{layer}");
@@ -177,16 +184,21 @@ internal sealed class StructuralFolderBridge : IDisposable
         }
 
         var key = timeline.ID.ToString("D");
-        var timelineState = FolderDocumentRules.FindTimeline(state.Document, key);
+        var beforeState =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+        var timelineState = FolderDocumentRules.FindTimeline(
+            beforeState.Core,
+            key);
+
         if (timelineState is null || timelineState.Folders.Count == 0)
             return;
 
-        var before = state.Document;
         var beforeFolders = timelineState.Folders.ToArray();
         var beforeById = beforeFolders.ToDictionary(x => x.Id);
 
         var plan = FolderRangeTracker.Apply(
-            beforeFolders.Select(x => new FolderRange(x.Id, x.Start, x.End)),
+            beforeFolders.Select(
+                x => new FolderRange(x.Id, x.Start, x.End)),
             edit);
 
         var nextFolders = plan.Ranges
@@ -201,19 +213,24 @@ internal sealed class StructuralFolderBridge : IDisposable
             })
             .ToArray();
 
-        var after = FolderDocumentRules.ReplaceTimeline(
-            before,
+        var afterCore = FolderDocumentRules.ReplaceTimeline(
+            beforeState.Core,
             key,
             nextFolders);
 
-        ApplyPendingDocument(
-            before,
-            after,
+        var afterState =
+            FolderSessionDocumentRules.ReplaceCoreAfterStructuralEdit(
+                beforeState,
+                afterCore,
+                key,
+                plan);
+
+        ApplyPendingState(
+            beforeState,
+            afterState,
             $"standard:{type}:L{layer}:folders={beforeFolders.Length}->{nextFolders.Length}");
 
-        // Frozen P1 contract: the host's structural command owns Record().
-        // Adding a second Record() here would split one user action into two
-        // undo units.
+        // Frozen P1 contract: YMM4 owns Record().
     }
 
     public void Dispose()
@@ -239,8 +256,8 @@ internal sealed class StructuralFolderBridge : IDisposable
             StructuralFolderBridge owner,
             CommandType type,
             int layer,
-            FolderDocument before,
-            FolderDocument after)
+            FolderSessionDocument before,
+            FolderSessionDocument after)
         {
             this.owner = owner;
             Type = type;
@@ -251,8 +268,8 @@ internal sealed class StructuralFolderBridge : IDisposable
 
         internal CommandType Type { get; }
         internal int Layer { get; }
-        internal FolderDocument Before { get; }
-        internal FolderDocument After { get; }
+        internal FolderSessionDocument Before { get; }
+        internal FolderSessionDocument After { get; }
         internal bool Applied { get; private set; }
 
         internal bool Matches(CommandType type, int layer) =>
@@ -264,6 +281,7 @@ internal sealed class StructuralFolderBridge : IDisposable
         {
             if (disposed)
                 return;
+
             disposed = true;
             owner.ReleaseCompositeOverride(this);
         }
