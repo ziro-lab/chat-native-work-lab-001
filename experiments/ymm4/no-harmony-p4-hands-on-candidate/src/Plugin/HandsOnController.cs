@@ -74,6 +74,277 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS0IntegrationSmoke();
         ScheduleS1IntegrationSmoke();
         ScheduleS2MetadataSurfaceSmoke();
+        ScheduleS2IntegrationSmoke();
+    }
+
+    private void ScheduleS2IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S2_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS2IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS2IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "S2 integration smoke must start resource-free.");
+
+            undo.Record();
+
+            var key = timeline.ID.ToString("D");
+            var folderId = Guid.Parse(
+                "22222222-3333-4444-5555-666666666666");
+
+            var core = FolderDocumentRules.ReplaceTimeline(
+                FolderDocument.Empty,
+                key,
+                [
+                    new PersistedFolder
+                    {
+                        Id = folderId,
+                        Start = 1,
+                        End = 2,
+                        Name = "S2 Smoke",
+                        IsCollapsed = false
+                    }
+                ]);
+
+            state.ReplaceState(new FolderSessionDocument
+            {
+                Core = core
+            });
+
+            var originalVisible1 =
+                timeline.LayerSettings.IsVisibles[1];
+            var originalVisible2 =
+                timeline.LayerSettings.IsVisibles[2];
+            var originalColor1 =
+                timeline.LayerSettings.Colors[1];
+            var originalColor2 =
+                timeline.LayerSettings.Colors[2];
+
+            commands.SetColor(folderId, "#FF4F7FE0");
+            await Task.Delay(200);
+            AssertS2Option(
+                "after_set_color",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_color_undo",
+                folderId,
+                null,
+                hidden: false,
+                restoreCount: 0);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_color_redo",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            commands.ApplyColorToLayers(folderId);
+            await Task.Delay(200);
+
+            var blue = Color.FromArgb(255, 79, 127, 224);
+            if (timeline.LayerSettings.Colors[1] != blue
+                || timeline.LayerSettings.Colors[2] != blue)
+            {
+                throw new InvalidOperationException(
+                    "ApplyColorToLayers did not update both native layers.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            if (timeline.LayerSettings.Colors[1] != originalColor1
+                || timeline.LayerSettings.Colors[2] != originalColor2)
+            {
+                throw new InvalidOperationException(
+                    "Native layer colors did not restore on Undo.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            if (timeline.LayerSettings.Colors[1] != blue
+                || timeline.LayerSettings.Colors[2] != blue)
+            {
+                throw new InvalidOperationException(
+                    "Native layer colors did not restore on Redo.");
+            }
+
+            commands.SetHidden(folderId, true);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_hide",
+                folderId,
+                "#FF4F7FE0",
+                hidden: true,
+                restoreCount: 2);
+
+            if (timeline.LayerSettings.IsVisibles[1]
+                || timeline.LayerSettings.IsVisibles[2])
+            {
+                throw new InvalidOperationException(
+                    "Folder hide did not hide both native layers.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_hide_undo",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            if (timeline.LayerSettings.IsVisibles[1] != originalVisible1
+                || timeline.LayerSettings.IsVisibles[2] != originalVisible2)
+            {
+                throw new InvalidOperationException(
+                    "Folder hide Undo did not restore native visibility.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_hide_redo",
+                folderId,
+                "#FF4F7FE0",
+                hidden: true,
+                restoreCount: 2);
+
+            if (timeline.LayerSettings.IsVisibles[1]
+                || timeline.LayerSettings.IsVisibles[2])
+            {
+                throw new InvalidOperationException(
+                    "Folder hide Redo did not re-hide native layers.");
+            }
+
+            commands.SetHidden(folderId, false);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_show",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            if (timeline.LayerSettings.IsVisibles[1] != originalVisible1
+                || timeline.LayerSettings.IsVisibles[2] != originalVisible2)
+            {
+                throw new InvalidOperationException(
+                    "Folder show did not restore original native visibility.");
+            }
+
+            var saved = state.SaveRaw();
+            var roundtrip = FolderSessionDocumentCodec.Load(saved);
+            if (!roundtrip.Success
+                || roundtrip.Status != FolderSessionLoadStatus.LoadedV2
+                || roundtrip.Document is null
+                || FolderSessionDocumentRules.FindOption(
+                    roundtrip.Document,
+                    key,
+                    folderId)?.Color != "#FF4F7FE0")
+            {
+                throw new InvalidOperationException(
+                    "S2 state did not roundtrip as schema v2.");
+            }
+
+            WriteS2IntegrationResult(
+                "PASS_S2_INTEGRATION\n" +
+                $"timeline={key}\n" +
+                "schema_v2_roundtrip=true\n" +
+                "folder_color_undo_redo=true\n" +
+                "native_color_undo_redo=true\n" +
+                "hidden_undo_redo=true\n" +
+                "visibility_restore=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic("s2_integration_smoke_error=" + ex);
+            WriteS2IntegrationResult(
+                "FAIL_S2_INTEGRATION\n" + ex + "\n");
+        }
+    }
+
+    private void AssertS2Option(
+        string phase,
+        Guid folderId,
+        string? color,
+        bool hidden,
+        int restoreCount)
+    {
+        var key = timeline.ID.ToString("D");
+        var option = FolderSessionDocumentRules.FindOption(
+            state.State,
+            key,
+            folderId);
+
+        if (color is null && !hidden)
+        {
+            if (option is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{phase}: expected default/no option.");
+            }
+        }
+        else if (option is null
+            || !string.Equals(
+                option.Color,
+                color,
+                StringComparison.OrdinalIgnoreCase)
+            || option.Hidden != hidden)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: option mismatch.");
+        }
+
+        var count = state.State.VisibilityRestore.Count(
+            x => string.Equals(
+                x.TimelineKey,
+                key,
+                StringComparison.Ordinal));
+
+        if (count != restoreCount)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: restore count {count} != {restoreCount}.");
+        }
+
+        HandsOnRuntime.Diagnostic(
+            $"s2_state phase={phase} color={option?.Color ?? "<null>"} " +
+            $"hidden={option?.Hidden ?? false} restore={count}");
+    }
+
+    private static void WriteS2IntegrationResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "s2-integration-result.txt"),
+            text);
     }
 
     private void ScheduleS2MetadataSurfaceSmoke()
