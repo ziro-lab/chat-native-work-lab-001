@@ -266,6 +266,22 @@ internal sealed record CaseResult(
     bool StageRestored,
     string? Error);
 
+internal sealed record ItemSurfaceResult(
+    string Name,
+    string PluginType,
+    bool ItemCreatedFace,
+    bool FreshFromCharacterDefault,
+    bool CharacterDefaultUntouched,
+    string FaceParameterType,
+    string Candidate,
+    string[] Choices,
+    bool CandidateVisible,
+    bool MutationObserved,
+    bool RepeatStable,
+    bool ItemRetainedAppliedFace,
+    bool CleanupSucceeded,
+    string? Error);
+
 internal static class Probe
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -324,6 +340,14 @@ internal static class Probe
                 ? FailedCase("psd", "PsdTachiePlugin not found")
                 : await RunBuiltInCaseAsync("psd", psd, "CNWL_PSD_ON");
 
+            var animationItemSurface = animation == null
+                ? FailedItemSurface("animation", "AnimationTachiePlugin not found")
+                : await RunItemSurfaceCaseAsync("animation", animation, "CNWL_ANIM_SMILE");
+
+            var psdItemSurface = psd == null
+                ? FailedItemSurface("psd", "PsdTachiePlugin not found")
+                : await RunItemSurfaceCaseAsync("psd", psd, "CNWL_PSD_ON");
+
             var assertions = new
             {
                 animationCharacterResolution = animationResult.CharacterResolution,
@@ -343,7 +367,23 @@ internal static class Probe
                                    psdResult.FailureCleanup &&
                                    psdResult.CancellationObserved &&
                                    psdResult.ClearBindingsSucceeded &&
-                                   psdResult.StageRestored
+                                   psdResult.StageRestored,
+                animationExpressionItemPresetSurface = animationItemSurface.ItemCreatedFace &&
+                                                       animationItemSurface.FreshFromCharacterDefault &&
+                                                       animationItemSurface.CharacterDefaultUntouched &&
+                                                       animationItemSurface.CandidateVisible &&
+                                                       animationItemSurface.MutationObserved &&
+                                                       animationItemSurface.RepeatStable &&
+                                                       animationItemSurface.ItemRetainedAppliedFace &&
+                                                       animationItemSurface.CleanupSucceeded,
+                psdExpressionItemPresetSurface = psdItemSurface.ItemCreatedFace &&
+                                                 psdItemSurface.FreshFromCharacterDefault &&
+                                                 psdItemSurface.CharacterDefaultUntouched &&
+                                                 psdItemSurface.CandidateVisible &&
+                                                 psdItemSurface.MutationObserved &&
+                                                 psdItemSurface.RepeatStable &&
+                                                 psdItemSurface.ItemRetainedAppliedFace &&
+                                                 psdItemSurface.CleanupSucceeded
             };
 
             var allPassed = assertions.animationCharacterResolution &&
@@ -355,7 +395,9 @@ internal static class Probe
                             assertions.animationItemRoundtrip &&
                             assertions.psdItemRoundtrip &&
                             assertions.animationEditorCleanup &&
-                            assertions.psdEditorCleanup;
+                            assertions.psdEditorCleanup &&
+                            assertions.animationExpressionItemPresetSurface &&
+                            assertions.psdExpressionItemPresetSurface;
 
             var result = new
             {
@@ -364,7 +406,8 @@ internal static class Probe
                 host = "4.55.1.1 Lite",
                 assertions,
                 modernItemProperty = modern,
-                cases = new[] { animationResult, psdResult }
+                cases = new[] { animationResult, psdResult },
+                itemSurfaces = new[] { animationItemSurface, psdItemSurface }
             };
 
             File.WriteAllText(
@@ -386,6 +429,15 @@ internal static class Probe
                 report.Add($"  fingerprint before={x.BeforeFingerprint} applied={x.AppliedFingerprint} repeat={x.RepeatFingerprint} stable={x.FingerprintStable}");
                 report.Add($"  item-roundtrip={x.ItemRoundtrip}");
                 report.Add($"  cleanup success={x.SuccessCleanup} failure={x.FailureCleanup} cancellation={x.CancellationObserved} clear={x.ClearBindingsSucceeded} stage-restored={x.StageRestored}");
+                if (x.Error != null) report.Add($"  error={x.Error}");
+            }
+
+            foreach (var x in result.itemSurfaces)
+            {
+                report.Add($"[item-surface:{x.Name}] plugin={x.PluginType}");
+                report.Add($"  face-created={x.ItemCreatedFace} fresh-from-default={x.FreshFromCharacterDefault} default-untouched={x.CharacterDefaultUntouched} face={x.FaceParameterType}");
+                report.Add($"  candidate={x.Candidate} choices=[{string.Join(", ", x.Choices)}] visible={x.CandidateVisible} mutated={x.MutationObserved} repeat-stable={x.RepeatStable}");
+                report.Add($"  item-retained={x.ItemRetainedAppliedFace} cleanup={x.CleanupSucceeded}");
                 if (x.Error != null) report.Add($"  error={x.Error}");
             }
 
@@ -476,6 +528,97 @@ internal static class Probe
         catch (Exception ex)
         {
             return FailedCase(name, ex.GetType().Name + ": " + ex.Message) with
+            {
+                PluginType = plugin.GetType().FullName ?? plugin.Name
+            };
+        }
+    }
+
+    private static ItemSurfaceResult FailedItemSurface(string name, string error) => new(
+        name, "<missing>", false, false, false, "<missing>", "", [], false, false, false, false, false, error);
+
+    private static async Task<ItemSurfaceResult> RunItemSurfaceCaseAsync(
+        string name,
+        ITachiePlugin plugin,
+        string targetCandidate)
+    {
+        try
+        {
+            var characterParameter = plugin.CreateCharacterParameter();
+            var defaultFace = plugin.CreateFaceParameter();
+            ConfigureFixturePaths(characterParameter, defaultFace);
+            var defaultBefore = Fingerprint(defaultFace);
+
+            var character = new Character
+            {
+                Name = "CNWL_ITEM_" + name,
+                TachieType = plugin.GetType(),
+                TachieCharacterParameter = characterParameter,
+                TachieDefaultFaceParameter = defaultFace
+            };
+
+            var firstItem = new TachieFaceItem(character);
+            var secondItem = new TachieFaceItem(character);
+            if (firstItem.TachieFaceParameter == null || secondItem.TachieFaceParameter == null)
+                throw new InvalidOperationException("TachieFaceItem(Character) did not create a face parameter.");
+
+            var first = firstItem.TachieFaceParameter;
+            var second = secondItem.TachieFaceParameter;
+            ConfigureFixturePaths(characterParameter, first);
+            ConfigureFixturePaths(characterParameter, second);
+
+            var freshFromDefault =
+                !ReferenceEquals(first, defaultFace) &&
+                !ReferenceEquals(second, defaultFace) &&
+                !ReferenceEquals(first, second) &&
+                first.GetType() == defaultFace.GetType() &&
+                second.GetType() == defaultFace.GetType();
+
+            var beforeFirst = Fingerprint(first);
+            var beforeSecond = Fingerprint(second);
+            var appliedFirst = await ApplyNamedPresetAsync(characterParameter, first, targetCandidate);
+            var afterFirst = Fingerprint(first);
+            var appliedSecond = await ApplyNamedPresetAsync(characterParameter, second, targetCandidate);
+            var afterSecond = Fingerprint(second);
+
+            var candidateVisible =
+                appliedFirst.Choices.Count(x => x == targetCandidate) == 1 &&
+                appliedSecond.Choices.Count(x => x == targetCandidate) == 1;
+
+            var repeatStable =
+                appliedFirst.MutationObserved &&
+                appliedSecond.MutationObserved &&
+                beforeFirst != afterFirst &&
+                beforeSecond != afterSecond &&
+                afterFirst == afterSecond;
+
+            var defaultUntouched = Fingerprint(defaultFace) == defaultBefore;
+            var itemRetained =
+                ReferenceEquals(firstItem.TachieFaceParameter, first) &&
+                ReferenceEquals(secondItem.TachieFaceParameter, second) &&
+                Fingerprint(firstItem.TachieFaceParameter) == afterFirst &&
+                Fingerprint(secondItem.TachieFaceParameter) == afterSecond;
+
+            return new ItemSurfaceResult(
+                name,
+                plugin.GetType().FullName ?? plugin.Name,
+                true,
+                freshFromDefault,
+                defaultUntouched,
+                first.GetType().FullName ?? first.GetType().Name,
+                targetCandidate,
+                appliedFirst.Choices,
+                candidateVisible,
+                appliedFirst.MutationObserved && appliedSecond.MutationObserved,
+                repeatStable,
+                itemRetained,
+                appliedFirst.ClearSucceeded && appliedFirst.StageRestored &&
+                appliedSecond.ClearSucceeded && appliedSecond.StageRestored,
+                null);
+        }
+        catch (Exception ex)
+        {
+            return FailedItemSurface(name, ex.GetType().Name + ": " + ex.Message) with
             {
                 PluginType = plugin.GetType().FullName ?? plugin.Name
             };

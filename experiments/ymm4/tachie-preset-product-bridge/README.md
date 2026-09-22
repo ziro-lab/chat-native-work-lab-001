@@ -58,3 +58,24 @@ Run the GitHub Actions workflow named YMM4 Tachie Preset product bridge P0.
 ## Evidence
 
 The workflow emits result.json, report.txt, fixture.json, host-log.txt and provenance.json, then uploads them as one artifact. Provenance records source HEAD, actual checkout SHA/tree, workflow run, exact host and result marker.
+
+
+## Child extension — expression-item preset surface
+
+This child experiment tightens the abstraction boundary from plugin/Character preset definitions to the
+actual expression item edited by the user in YMM4.
+
+For built-in Animation and PSD tachie it additionally proves that:
+
+1. `new TachieFaceItem(character)` creates an item-owned FaceParameter;
+2. two fresh expression items do not share the Character default or each other;
+3. the item-owned FaceParameter exposes the same public expression-preset PropertyEditor choices;
+4. choosing the named preset mutates only the item-owned face state;
+5. the Character default face remains unchanged;
+6. two fresh items selecting the same candidate converge to the same bounded state fingerprint;
+7. the applied state stays attached to each TachieFaceItem after editor cleanup.
+
+A green child run emits `PASS_EXPRESSION_ITEM_PRESET_SURFACE`.
+
+This does not by itself prove that every third-party plugin exposes its expression-item preset selector through
+the same public PropertyEditor contract. A real external plugin binary remains a separate compatibility observation.
