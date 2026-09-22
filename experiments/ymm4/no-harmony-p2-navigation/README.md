@@ -74,3 +74,54 @@ The public-member inventory found `ScrollToItem(IItem)`, `ScrollToLowerLayer()` 
 - native Undo/Redo of auto-expansion, persistence, product UX, release package.
 
 The existing P0/P1 sources and golden assertions are not modified or replayed by this leaf candidate. Result-record-only commits after the tested source do not change the probe/runtime/workflow bits.
+
+
+## P2.2 / P2.3 follow-up — ScrollToItem and layer navigation
+
+Latest tested source / actual checkout: `0d2fecfd1d73a79c17a40dc9f79b647ef662faaa`.
+Run: [35704217666](https://github.com/ziro-lab/chat-native-work-lab-001/actions/runs/35704217666).
+
+- Pure policy job `106669263951`: PASS.
+- YMM4 4.56.1.0 native job `106669362224`: PASS.
+- Artifact `10684021588`, workflow digest `sha256:a3c7091d6c2590aa417a31ba0c33eb3482961081b121bdac0b4375e2998d8017`.
+- This remains V1 evidence; no secondary-host replay and no P0/P1 golden replay.
+
+### Raw ScrollToItem
+
+With the folded display active and no fold-aware navigation bridge:
+
+- hidden L4: vertical offset `0 -> 96`, target remains invisible;
+- visible logical L45: vertical offset `0 -> 1408`, target still does not land in the folded viewport;
+- a bare same-item `ScrollToItem` emits no new `SelectedItems` signal, so the selection observer cannot safely infer it.
+
+Therefore bare host `ScrollToItem` is **not fold-aware**. Product-owned item navigation now enters the shared `NavigateTo(IItem)` route instead. That route is green for an off-screen visible item and for same-item recovery while preserving native selection.
+
+Do not guess arbitrary bare `ScrollToItem` calls from viewport numbers alone: ordinary user scrolling can produce the same observable viewport changes.
+
+### Lower/Higher layer navigation
+
+Both public helpers and the real foreground Down/Up key route moved exactly one **display row** in the tested folded layout.
+
+Representative collapsed-boundary case:
+
+- folder A = logical L1..L10 collapsed;
+- display row 1 = logical L1 owner;
+- display row 2 = logical L11;
+- public helper: `32 -> 64 -> 32`;
+- real Down/Up key route: `32 -> 64 -> 32`.
+
+Folder state and item Layer/Frame/Length were unchanged.
+
+For the tested host, `ScrollToLowerLayer` / `ScrollToHigherLayer` and the corresponding foreground Down/Up route are therefore **native-safe candidates and need no fold correction**.
+
+### Current navigation classification
+
+| Route | 4.56.1.0 classification |
+| --- | --- |
+| single-item selection change | mapped through shared fold-aware navigation — GREEN |
+| product-owned item navigation | `NavigateTo(IItem)` — GREEN |
+| bare/same-item `ScrollToItem` with no selection notification | not fold-aware; do not heuristically intercept |
+| `ScrollToLowerLayer` / `ScrollToHigherLayer` | native-safe candidate — GREEN including folded boundary |
+| real foreground Down/Up layer scroll | native-safe candidate — GREEN including folded boundary |
+
+This does not yet freeze P2 across both pinned hosts.
