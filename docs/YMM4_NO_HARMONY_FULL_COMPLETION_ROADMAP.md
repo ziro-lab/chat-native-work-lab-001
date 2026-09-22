@@ -653,42 +653,115 @@ Product-facing folder controls, discoverability and interaction polish move to P
 
 ---
 
-## P4 — Product UX
+## P4 — Product UX & LayerPatan Convenience Parity
 
-**Status: ACTIVE — automated minimum workflow GREEN; hands-on NEXT.**
+**Status: ACTIVE — minimum workflow / packaging GREEN; convenience Full reproduction is the active path.**
+
+Work-policy authority:
+- `docs/YMM4_NO_HARMONY_CONVENIENCE_DESIGN.md`
+
+Reference feature baseline:
+- LayerPatan commit `aa58e7e772deb829853742afc65e42036cf09d47`
+- feature set is the reproduction target;
+- LayerPatan internal topology / Harmony implementation is **not** the architecture target.
 
 Current P4 evidence:
 
 - P4.1 layer-label UI surface — 19/19 named assertions PASS on YMM4 4.56.1.0;
 - P4.2 host-independent UX commands — 27/27 PASS;
 - P4.3 minimum integrated workflow — 24/24 named assertions PASS on YMM4 4.56.1.0;
-- P4.4 hands-on — NEXT, using `docs/YMM4_NO_HARMONY_P4_HANDS_ON.md`.
+- P4.4 installable hands-on candidate — startup-smoked;
+- P4.5 real `.ymme` install — GREEN on YMM4 4.56.1.0.
 
-**Purpose:** turn the proven engine into a practical editor feature.
+### Product direction
 
-### Minimum Full UX candidates
+Reproduce LayerPatan's convenience feature set while preserving the frozen no-Harmony core.
 
-- create folder / define range;
-- collapse / expand;
-- delete folder metadata without deleting user items;
-- rename;
-- clear visual ownership of hidden layers;
-- selection feedback;
-- nested-folder discoverability;
-- keyboard-accessible core actions where reasonable.
+Required principles:
 
-### UX constraints
+- no Harmony;
+- keep P0-P3 core semantics and ownership intact;
+- prefer a small number of shared product boundaries over one service per feature;
+- one runtime state authority;
+- one edit/commit entry;
+- one YMM4 host-access boundary;
+- one FoldMap authority;
+- no feature-specific Undo stack, persistence path, structural observer or reflection island;
+- Tool panel is a projection, not a second folder model.
 
-- do not require selecting the plugin itself before normal timeline work;
-- do not steal standard YMM4 gestures when native semantics can be preserved;
-- destructive actions require clear outcome;
-- failure or unsupported state must degrade to a usable timeline rather than trap the project.
+### Active implementation sequence
+
+#### S0 — integration reconciliation
+
+Before adding convenience features:
+
+- compare the installable candidate with frozen P1/P2/P3 mechanisms;
+- connect any proven components that are not actually wired into the candidate;
+- do not reinterpret Lab PASS as product integration PASS.
+
+#### S1 — common command surface + low-risk parity
+
+- LayerPatan creation-range behavior;
+- folder-head adjustment;
+- one-layer create convenience;
+- double-click rename;
+- expand all / collapse all;
+- select items in folder;
+- shared command entry from Timeline / tag / Tool panel / keyboard.
+
+#### S2 — extended project state + visual metadata
+
+- outer persistence schema for Color / Hidden / visibility restore state;
+- folder colors;
+- apply folder color to YMM4 layer colors;
+- folder hide/show;
+- original per-layer visibility restoration;
+- global preferences through SettingsBase where appropriate.
+
+#### S3 — structural convenience + Group Control
+
+- add layer at folder end;
+- add layer inside folder;
+- destructive folder+layer delete;
+- add Group Control for folder;
+- Fit GroupRange;
+- GroupRange warnings;
+- structural auto-correction using the existing StructuralDelta stream.
+
+LayerPatan planning formulas may be adapted; host mutation remains owned by the no-Harmony structural/Undo boundary.
+
+#### S4 — management panel parity
+
+- folder/layer list projection;
+- inline rename / F2 / Ctrl+G / Delete;
+- expand/collapse all;
+- Follow Timeline;
+- current-item-at-playhead display;
+- Group warning lanes;
+- Before / Into / After block drag/drop.
+
+The panel must not become a second structural engine or persistence model.
+
+#### S5 — visual parity requiring redesign
+
+- collapsed-owner-row inner timing summary;
+- folded Group/background visual compatibility;
+- final Timeline visual polish.
+
+Do not reproduce LayerPatan's native item Top/Height Harmony patch. Use plugin-owned overlay/drawing where viable.
 
 ### Exit gate
 
-Hands-on tasks must be possible without lab-only controls or manual state injection.
+P4 completes only when:
 
-Fine styling, animation and optional convenience features can remain deferred.
+- the LayerPatan reference feature set is either reproduced or explicitly documented as intentionally different with an equivalent user outcome;
+- the frozen no-Harmony core remains authoritative;
+- Tool panel and Timeline UI call the same command/state boundaries;
+- no Harmony dependency is introduced;
+- host-sensitive new mechanisms have narrow Lab evidence;
+- hands-on confirms the resulting workflow is practical.
+
+Styling differences are acceptable only when they do not remove reference functionality.
 
 ---
 
@@ -800,7 +873,14 @@ P0 Core Spine                 DONE
   -> P4.1 UI surface           DONE (V1 primary)
   -> P4.2 UX command policy    DONE
   -> P4.3 minimum workflow     DONE (V1 primary)
-  -> P4.4 hands-on             NEXT
+  -> P4.4 installable candidate DONE
+  -> P4.5 real .ymme install    DONE
+  -> S0 integration reconcile  NEXT
+  -> S1 common commands / low-risk parity
+  -> S2 color / visibility / persistence extension
+  -> S3 structural convenience / Group Control
+  -> S4 management panel parity
+  -> S5 visual parity redesign
   -> P4 freeze
   -> P5 compatibility
   -> P6 hardening
@@ -813,7 +893,7 @@ P0-P3 are frozen. If later phases expose evidence that contradicts a frozen assu
 
 To avoid turning the Full exploration into an unbounded rewrite:
 
-- New functionality enters the roadmap only if it is required for correct folder semantics, normal Full UX, compatibility, or release safety.
+- LayerPatan reference convenience features are now part of P4 Full scope; do not reclassify them as optional merely to shorten implementation.
 - Nice-to-have features discovered during P1-P3 are recorded under the later appropriate phase instead of implemented immediately.
 - A phase can add a new sub-gate, but must not silently expand an already-frozen earlier gate.
 - If a host behavior cannot be supported safely without Harmony, document the exact missing surface before considering architectural escalation.
