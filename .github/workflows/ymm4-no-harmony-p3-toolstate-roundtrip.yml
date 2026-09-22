@@ -1,0 +1,59 @@
+name: YMM4 no-Harmony P3 ToolState roundtrip
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p3-persistence/native-roundtrip/**'
+      - '.github/workflows/ymm4-no-harmony-p3-toolstate-roundtrip.yml'
+permissions: { contents: read }
+concurrency:
+  group: p3-toolstate-roundtrip-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      HOST_VERSION: '4.56.1.0'
+      HOST_HASH: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Acquire pinned host
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build ToolState roundtrip probe
+        shell: pwsh
+        env: { SOURCE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}' }
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p3-persistence/native-roundtrip/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Build failed'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3ToolStateRoundtrip'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/probe/Ymm4P3ToolStateRoundtrip.dll $d
+          if(Get-ChildItem out/probe -Filter '*Harmony*.dll'){throw 'Unexpected Harmony dependency'}
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @("source_head=$env:SOURCE_HEAD","checkout=$(git rev-parse HEAD)","tree=$(git rev-parse 'HEAD^{tree}')","host_version=$env:HOST_VERSION","host_zip_sha256=$env:HOST_HASH","probe_sha256=$((Get-FileHash out/probe/Ymm4P3ToolStateRoundtrip.dll -Algorithm SHA256).Hash)","run=$env:GITHUB_RUN_ID","level=V1")|Set-Content out/evidence/manifest.txt
+      - name: Exercise project ToolState roundtrip
+        shell: pwsh
+        run: ./experiments/ymm4/no-harmony-p3-persistence/native-roundtrip/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - if: always()
+        name: Show results
+        shell: pwsh
+        run: |
+          foreach($f in @('manifest.txt','result.json','load-events.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-p3-toolstate-roundtrip-4.56.1.0
+          path: out/evidence/
+          retention-days: 14
