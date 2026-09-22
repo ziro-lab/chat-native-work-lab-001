@@ -26,6 +26,10 @@ internal sealed class StructuralFolderBridge : IDisposable
     private readonly ExecutedRoutedEventHandler previewHandler;
     private bool disposed;
 
+    internal int PendingEdits { get; private set; }
+    internal int UndoCallbacks { get; private set; }
+    internal int RedoCallbacks { get; private set; }
+
     internal StructuralFolderBridge(
         Window root,
         Timeline timeline,
@@ -135,8 +139,18 @@ internal sealed class StructuralFolderBridge : IDisposable
         state.ReplaceDocument(after);
 
         undo.AddCommand(new UndoRedoActionCommand(
-            () => state.ReplaceDocument(before),
-            () => state.ReplaceDocument(after)));
+            () =>
+            {
+                UndoCallbacks++;
+                state.ReplaceDocument(before);
+            },
+            () =>
+            {
+                RedoCallbacks++;
+                state.ReplaceDocument(after);
+            }));
+
+        PendingEdits++;
 
         // Frozen P1 contract: the host's structural command owns Record().
         // Adding a second Record() here would split one user action into two
