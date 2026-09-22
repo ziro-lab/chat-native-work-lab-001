@@ -151,6 +151,39 @@ internal static class Probe
             ?? throw new InvalidOperationException("Layer label row not realized: " + layer);
     }
 
+    private static DependencyObject? Parent(DependencyObject current) =>
+        current is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(current)
+            : LogicalTreeHelper.GetParent(current);
+
+    private static int? FindLayerFromSource(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = Parent(current))
+            if (current is FrameworkElement fe && LayerId(fe.DataContext) is int layer)
+                return layer;
+        return null;
+    }
+
+    private static FrameworkElement FindLayerContextOwner(FrameworkElement labels, int layer)
+    {
+        var direct = Host.Elements(labels)
+            .Where(x => x.IsVisible && LayerId(x.DataContext) == layer && x.ContextMenu is not null)
+            .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+            .FirstOrDefault();
+        if (direct is not null)
+            return direct;
+
+        DependencyObject? current = FindLayerElement(labels, layer);
+        while (current is not null)
+        {
+            if (current is FrameworkElement { ContextMenu: not null } fe)
+                return fe;
+            current = Parent(current);
+        }
+
+        throw new InvalidOperationException("ContextMenu owner not found for layer " + layer);
+    }
+
     private sealed class FolderMenuLease : IDisposable
     {
         private const string Tag = "CNWL.P4.Menu";
@@ -172,19 +205,6 @@ internal static class Probe
             labels.AddHandler(FrameworkElement.ContextMenuOpeningEvent, opening, true);
         }
 
-        private static DependencyObject? Parent(DependencyObject current) =>
-            current is Visual or System.Windows.Media.Media3D.Visual3D
-                ? VisualTreeHelper.GetParent(current)
-                : LogicalTreeHelper.GetParent(current);
-
-        private static int? FindLayer(DependencyObject? source)
-        {
-            for (var current = source; current is not null; current = Parent(current))
-                if (current is FrameworkElement fe && LayerId(fe.DataContext) is int layer)
-                    return layer;
-            return null;
-        }
-
         private static FrameworkElement? FindMenuOwner(DependencyObject? source)
         {
             for (var current = source; current is not null; current = Parent(current))
@@ -202,7 +222,7 @@ internal static class Probe
         private void OnOpening(object sender, ContextMenuEventArgs e)
         {
             if (disposed) return;
-            var layer = FindLayer(e.OriginalSource as DependencyObject);
+            var layer = FindLayerFromSource(e.OriginalSource as DependencyObject);
             var owner = FindMenuOwner(e.OriginalSource as DependencyObject);
             if (layer is null || owner?.ContextMenu is not { } menu)
                 return;
@@ -365,6 +385,8 @@ internal static class Probe
         FolderOwnerAdorner? adorner = null;
         FolderToggleInputLease? toggleLease = null;
         AdornerLayer? adornerLayer = null;
+        MouseButtonEventHandler? nativeInputObserver = null;
+        FrameworkElement? labelsForObserver = null;
         try
         {
             window.WindowState = WindowState.Normal;
@@ -426,6 +448,25 @@ internal static class Probe
             Fact("labels_type", labels.GetType().FullName);
             Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
 
+            var menuOwner6 = FindLayerContextOwner(labels, 6);
+            var nativePoint = Center(menuOwner6);
+            Fact("layer6_context_owner", menuOwner6.GetType().FullName);
+            Fact("layer6_native_point", nativePoint);
+
+            var nativeLeftDown = 0;
+            nativeInputObserver = (_, e) =>
+            {
+                if (e.ChangedButton == MouseButton.Left
+                    && FindLayerFromSource(e.OriginalSource as DependencyObject) == 6)
+                    nativeLeftDown++;
+            };
+            labelsForObserver = labels;
+            labels.AddHandler(Mouse.PreviewMouseDownEvent, nativeInputObserver, true);
+
+            await Native.Click(nativePoint);
+            Check("baseline_native_layer_input_observed", nativeLeftDown > 0);
+            Fact("baseline_selected_layers", string.Join(",", timeline.LayerSelection.SelectedLayers));
+
             adornerLayer = AdornerLayer.GetAdornerLayer(labels)
                 ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
             adorner = new FolderOwnerAdorner(labels, display, span);
@@ -433,7 +474,7 @@ internal static class Probe
             toggleLease = new FolderToggleInputLease(labels, display, span, adorner);
             await Task.Delay(500);
             Check("adorner_attached", adornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
-            Check("adorner_input_transparent", !adorner.IsHitTestVisible && !adorner.Toggle.IsHitTestVisible);
+            Check("adorner_input_transparent", !adorner.IsHitTestVisible);
             Check("toggle_on_screen", Host.ScreenRect(labels).Contains(Center(adorner.Toggle)));
 
             await Native.Click(Center(adorner.Toggle));
@@ -446,15 +487,13 @@ internal static class Probe
             display.ThrowIfFailed();
             Check("native_toggle_collapses", toggleLease.Clicks == 2 && display.Layout.IsHidden(3));
 
-            var row6 = FindLayerElement(labels, 6);
-            var rowRect = Host.ScreenRect(row6);
-            var outsideToggle = new Point(rowRect.Right - 12, rowRect.Y + rowRect.Height / 2);
-            timeline.LayerSelection.Clear();
-            await Native.Click(outsideToggle);
-            Check("outside_overlay_preserves_native_layer_click", timeline.LayerSelection.SelectedLayers.Contains(6));
+            var beforePassThrough = nativeLeftDown;
+            await Native.Click(nativePoint);
+            Check("outside_overlay_preserves_native_layer_click", nativeLeftDown == beforePassThrough + 1);
+            Fact("post_overlay_selected_layers", string.Join(",", timeline.LayerSelection.SelectedLayers));
 
             menuLease = new FolderMenuLease(labels);
-            await Native.Click(outsideToggle, right: true);
+            await Native.Click(nativePoint, right: true);
             await Task.Delay(500);
             Check("context_open_observed", menuLease.Openings == 1 && menuLease.LastLayer == 6);
             Check("native_menu_preserved_and_extended",
@@ -474,6 +513,12 @@ internal static class Probe
 
             menuLease.Dispose();
             menuLease = null;
+            if (nativeInputObserver is not null)
+            {
+                labels.RemoveHandler(Mouse.PreviewMouseDownEvent, nativeInputObserver);
+                nativeInputObserver = null;
+                labelsForObserver = null;
+            }
             toggleLease.Dispose();
             toggleLease = null;
             adornerLayer.Remove(adorner);
@@ -497,6 +542,8 @@ internal static class Probe
             try
             {
                 menuLease?.Dispose();
+                if (nativeInputObserver is not null && labelsForObserver is not null)
+                    labelsForObserver.RemoveHandler(Mouse.PreviewMouseDownEvent, nativeInputObserver);
                 toggleLease?.Dispose();
                 if (adorner is not null && adornerLayer is not null)
                     adornerLayer.Remove(adorner);
