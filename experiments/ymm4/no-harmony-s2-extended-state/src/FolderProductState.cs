@@ -314,6 +314,37 @@ public static class FolderProductStateRules
         });
     }
 
+    public static FolderProductState RemapRestoreLayers(
+        FolderProductState state,
+        string timelineKey,
+        Func<int, int> mapLayer)
+    {
+        ArgumentNullException.ThrowIfNull(mapLayer);
+        var normalized = NormalizeAndValidate(state);
+        var mapped = new Dictionary<int, bool>();
+
+        foreach (var (layer, visible) in RestoreMap(normalized, timelineKey))
+        {
+            var target = mapLayer(layer);
+            if (target < 0)
+                continue;
+
+            if (mapped.TryGetValue(target, out var existing)
+                && existing != visible)
+            {
+                throw new InvalidOperationException(
+                    $"Visibility restore map collision at L{target}.");
+            }
+
+            mapped[target] = visible;
+        }
+
+        return ReplaceRestoreMap(
+            normalized,
+            timelineKey,
+            mapped);
+    }
+
     public static IReadOnlySet<int> HiddenLayers(
         FolderProductState state,
         string timelineKey)
