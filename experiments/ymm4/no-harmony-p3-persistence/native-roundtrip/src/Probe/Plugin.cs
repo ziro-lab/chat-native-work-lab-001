@@ -146,6 +146,21 @@ internal static class Probe
     private static Guid GetTimelineId(object root) =>
         GetTimeline(root)?.ID ?? Guid.Empty;
 
+    private static string? GetProjectFilePath(object root)
+    {
+        var reactive = PublicProperty(root, "ProjectFilePath");
+        return reactive?.GetType()
+            .GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)
+            ?.GetValue(reactive) as string;
+    }
+
+    private static bool SamePath(string? actual, string expected) =>
+        !string.IsNullOrWhiteSpace(actual)
+        && string.Equals(
+            Path.GetFullPath(actual),
+            Path.GetFullPath(expected),
+            StringComparison.OrdinalIgnoreCase);
+
     private static object? TryFindToolArea(object root)
     {
         // Discovery P3.1 proved the host-owned ToolAreaViewModel is present in
@@ -295,27 +310,39 @@ internal static class Probe
 
             var beforeA = RoundtripToolViewModel.LoadCount;
             openProject.Invoke(root, [pathA]);
-            await Wait("open project A", () =>
-                GetTimelineId(root) == idA
-                && RoundtripToolViewModel.LoadCount > beforeA
-                && RoundtripToolViewModel.LastLoadedSavedState == stateA);
+            await Task.Delay(2500);
+            var areaAfterA = ReadToolAreaState(root);
+            facts["open_a_project_path"] = GetProjectFilePath(root) ?? "<null>";
+            facts["open_a_load_count_before"] = beforeA.ToString(CultureInfo.InvariantCulture);
+            facts["open_a_load_count_after"] = RoundtripToolViewModel.LoadCount.ToString(CultureInfo.InvariantCulture);
+            facts["open_a_last_loaded_matches"] = (RoundtripToolViewModel.LastLoadedSavedState == stateA).ToString();
+            facts["open_a_area_matches"] = (areaAfterA == stateA).ToString();
+            Check("open_a_project_path_applied", SamePath(GetProjectFilePath(root), pathA));
             Check("open_a_timeline_id_stable", GetTimelineId(root) == idA);
-            Check("open_a_toolstate_restored", RoundtripToolViewModel.LastLoadedSavedState == stateA);
-            Check("open_a_area_state_restored", ReadToolAreaState(root) == stateA);
+            Check("open_a_toolstate_callback_restored",
+                RoundtripToolViewModel.LoadCount > beforeA
+                && RoundtripToolViewModel.LastLoadedSavedState == stateA);
+            Check("open_a_area_state_restored", areaAfterA == stateA);
             var loadA = FolderDocumentCodec.Load(stateA);
             Check("open_a_document_valid", loadA.Success && loadA.Document is not null
                 && FolderDocumentRules.FindTimeline(loadA.Document, idA.ToString("D"))?.Folders.Single().Name == "Project A");
 
             var beforeB = RoundtripToolViewModel.LoadCount;
             openProject.Invoke(root, [pathB]);
-            await Wait("open project B", () =>
-                GetTimelineId(root) == idB
-                && RoundtripToolViewModel.LoadCount > beforeB
-                && RoundtripToolViewModel.LastLoadedSavedState == stateB);
+            await Task.Delay(2500);
+            var areaAfterB = ReadToolAreaState(root);
+            facts["open_b_project_path"] = GetProjectFilePath(root) ?? "<null>";
+            facts["open_b_load_count_before"] = beforeB.ToString(CultureInfo.InvariantCulture);
+            facts["open_b_load_count_after"] = RoundtripToolViewModel.LoadCount.ToString(CultureInfo.InvariantCulture);
+            facts["open_b_last_loaded_matches"] = (RoundtripToolViewModel.LastLoadedSavedState == stateB).ToString();
+            facts["open_b_area_matches"] = (areaAfterB == stateB).ToString();
+            Check("open_b_project_path_applied", SamePath(GetProjectFilePath(root), pathB));
             Check("open_b_timeline_id_stable", GetTimelineId(root) == idB);
-            Check("open_b_toolstate_restored", RoundtripToolViewModel.LastLoadedSavedState == stateB);
-            Check("open_b_area_state_restored", ReadToolAreaState(root) == stateB);
-            Check("project_state_isolated", stateA != stateB && RoundtripToolViewModel.LastLoadedSavedState != stateA);
+            Check("open_b_toolstate_callback_restored",
+                RoundtripToolViewModel.LoadCount > beforeB
+                && RoundtripToolViewModel.LastLoadedSavedState == stateB);
+            Check("open_b_area_state_restored", areaAfterB == stateB);
+            Check("project_state_isolated", stateA != stateB && areaAfterA == stateA && areaAfterB == stateB);
             Check("no_harmony_loaded", !AppDomain.CurrentDomain.GetAssemblies()
                 .Any(x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
 
