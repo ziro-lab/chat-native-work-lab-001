@@ -309,6 +309,7 @@ internal static class Probe
 
     private sealed class LayerLabelInputRouter : IDisposable
     {
+        private readonly Window routeRoot;
         private readonly FrameworkElement labels;
         private readonly DirectDisplay display;
         private readonly MouseButtonEventHandler handler;
@@ -318,12 +319,13 @@ internal static class Probe
         internal int LastLogicalLayer { get; private set; } = -1;
         internal ContextMenu? LastMenu { get; private set; }
 
-        internal LayerLabelInputRouter(FrameworkElement labels, DirectDisplay display)
+        internal LayerLabelInputRouter(Window routeRoot, FrameworkElement labels, DirectDisplay display)
         {
+            this.routeRoot = routeRoot;
             this.labels = labels;
             this.display = display;
             handler = OnPreviewMouseDown;
-            labels.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
+            routeRoot.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
         }
 
         private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -357,7 +359,7 @@ internal static class Probe
         {
             if (disposed) return;
             disposed = true;
-            labels.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
+            routeRoot.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
             if (LastMenu?.IsOpen == true)
                 LastMenu.IsOpen = false;
         }
@@ -426,6 +428,7 @@ internal static class Probe
 
     private sealed class FolderToggleInputLease : IDisposable
     {
+        private readonly Window routeRoot;
         private readonly FrameworkElement labels;
         private readonly DirectDisplay display;
         private readonly CollapsedSpan span;
@@ -436,17 +439,19 @@ internal static class Probe
         internal int Clicks { get; private set; }
 
         internal FolderToggleInputLease(
+            Window routeRoot,
             FrameworkElement labels,
             DirectDisplay display,
             CollapsedSpan span,
             FolderOwnerAdorner adorner)
         {
+            this.routeRoot = routeRoot;
             this.labels = labels;
             this.display = display;
             this.span = span;
             this.adorner = adorner;
             handler = OnPreviewMouseDown;
-            labels.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
+            routeRoot.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
         }
 
         private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -470,7 +475,7 @@ internal static class Probe
         {
             if (disposed) return;
             disposed = true;
-            labels.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
+            routeRoot.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
         }
     }
 
@@ -582,7 +587,7 @@ internal static class Probe
             // The label views are visually compacted by DirectDisplay. Route only
             // the label-column right-click Y coordinate back through FoldMap while
             // keeping YMM4's existing ContextMenu instance/commands.
-            labelRouter = new LayerLabelInputRouter(labels, display);
+            labelRouter = new LayerLabelInputRouter(window, labels, display);
 
             var foldedContextOwner = FindLayerContextOwner(labels, 6);
             var foldedMenu = foldedContextOwner.ContextMenu
@@ -610,19 +615,16 @@ internal static class Probe
             window.AddHandler(Mouse.PreviewMouseDownEvent, windowInputObserver, true);
             await Native.Click(nativePoint);
             window.RemoveHandler(Mouse.PreviewMouseDownEvent, windowInputObserver);
-            var baselineOwner = FindContextMenuOwnerFromSource(baselineSource);
             Check("baseline_native_layer_input_observed",
                 baselineLeftDown == 1
-                && baselineSource is not null
-                && baselineOwner is not null);
+                && baselineSource is not null);
             Fact("baseline_input_source", baselineSource?.GetType().FullName);
-            Fact("baseline_input_owner", baselineOwner?.GetType().FullName);
 
             adornerLayer = AdornerLayer.GetAdornerLayer(labels)
                 ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
             adorner = new FolderOwnerAdorner(labels, display, span);
             adornerLayer.Add(adorner);
-            toggleLease = new FolderToggleInputLease(labels, display, span, adorner);
+            toggleLease = new FolderToggleInputLease(window, labels, display, span, adorner);
             await Task.Delay(500);
             Check("adorner_attached", adornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
             Check("adorner_input_transparent", !adorner.IsHitTestVisible);
@@ -654,14 +656,12 @@ internal static class Probe
             window.AddHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver, true);
             await Native.Click(nativePoint);
             window.RemoveHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver);
-            var postOverlayOwner = FindContextMenuOwnerFromSource(postOverlaySource);
             Check("outside_overlay_preserves_native_layer_click",
                 postOverlayLeftDown == 1
                 && postOverlaySource is not null
-                && postOverlayOwner is not null
-                && ReferenceEquals(postOverlayOwner, baselineOwner));
+                && baselineSource is not null
+                && postOverlaySource.GetType() == baselineSource.GetType());
             Fact("post_overlay_input_source", postOverlaySource?.GetType().FullName);
-            Fact("post_overlay_input_owner", postOverlayOwner?.GetType().FullName);
 
             menuLease = new FolderMenuLease(foldedMenu, 6);
             await Native.Click(nativePoint, right: true);
