@@ -1,0 +1,72 @@
+name: YMM4 timeline playback start sync
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['experiments/ymm4/timeline-playback-start-sync/**','.github/workflows/ymm4-timeline-playback-start-sync.yml']
+  push:
+    branches: [main]
+    paths: ['experiments/ymm4/timeline-playback-start-sync/**','.github/workflows/ymm4-timeline-playback-start-sync.yml']
+permissions: { contents: read }
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false, fetch-depth: 1 }
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object dotnet-sdks.txt
+          if(-not(Select-String dotnet-sdks.txt -Pattern '^10\.')){throw '.NET 10 SDK missing'}
+      - name: Download exact YMM4 4.55.1.1 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.55.1.1/YukkuriMovieMaker_v4.55.1.1_Lite.zip
+          if($LASTEXITCODE-ne0){throw 'YMM4 download failed'}
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash-ne'125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'){throw "hash mismatch: $hash"}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not$exe){throw 'YMM4 exe missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build and install probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe|Out-Null
+          dotnet build experiments/ymm4/timeline-playback-start-sync/src/Ymm4TimelinePlaybackStartSyncProbe/Ymm4TimelinePlaybackStartSyncProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/build.txt
+          if($LASTEXITCODE-ne0){throw 'Probe build failed'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4TimelinePlaybackStartSyncProbe'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/probe/Ymm4TimelinePlaybackStartSyncProbe.dll $d
+      - name: Run real-host playback-start observation
+        shell: pwsh
+        run: ./experiments/ymm4/timeline-playback-start-sync/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - name: Record provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          $event=Get-Content -Raw $env:GITHUB_EVENT_PATH|ConvertFrom-Json
+          $sourceHead=if($env:GITHUB_EVENT_NAME-eq'pull_request'){$event.pull_request.head.sha}else{$env:GITHUB_SHA}
+          $status=if(Test-Path out/evidence/result.json){(Get-Content -Raw out/evidence/result.json|ConvertFrom-Json).status}else{'NO_RESULT'}
+          [ordered]@{
+            schema='chat-native-work-lab.provenance.v1';experiment='timeline-playback-start-sync';source_head=$sourceHead;checkout_sha=$env:GITHUB_SHA;
+            checkout_tree=(git rev-parse 'HEAD^{tree}');run_id=$env:GITHUB_RUN_ID;run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID";
+            ymm4_version='4.55.1.1 Lite';ymm4_zip_sha256='125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b';result=$status
+          }|ConvertTo-Json -Depth 4|Set-Content out/evidence/provenance.json
+      - name: Print evidence
+        if: always()
+        shell: pwsh
+        run: |
+          foreach($f in @('result.json','trace.txt','trigger.txt','preview-surface.txt','error.txt','host-log.txt','provenance.json')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-timeline-playback-start-sync
+          path: |
+            out/evidence/
+            out/build.txt
+            dotnet-sdks.txt
+          retention-days: 14
