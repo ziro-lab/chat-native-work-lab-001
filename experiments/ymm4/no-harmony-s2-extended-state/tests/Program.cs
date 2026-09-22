@@ -183,6 +183,23 @@ Check("replace_core_prunes_orphan_option",
 Check("replace_core_keeps_live_option",
     FolderProductStateRules.FindOption(pruned, "scene-a", B)?.Hidden == true);
 
+var rawUnknown = "{\"schemaVersion\":999,\"future\":{\"keep\":true}}";
+var session = new Ymm4NoHarmonyFolderLayoutProbe.FolderPersistenceSession();
+var sessionUnknown = session.Load(rawUnknown);
+Check("session_unknown_blocks_editing",
+    !sessionUnknown.Success && session.IsRecoveryBlocked);
+Check("session_unknown_preserved_exactly",
+    session.Save() == rawUnknown);
+
+var sessionV1 = new Ymm4NoHarmonyFolderLayoutProbe.FolderPersistenceSession();
+var sessionV1Result = sessionV1.Load(v1Text);
+Check("session_v1_migrates",
+    sessionV1Result.Success && sessionV1.LastLoadMigratedFromV1);
+var sessionV2Text = sessionV1.Save();
+Check("session_v1_resaves_as_v2",
+    sessionV2Text is not null
+    && sessionV2Text.Contains("\"schemaVersion\":2", StringComparison.Ordinal));
+
 var unknown = FolderProductStateCodec.Load(
     "{\"schemaVersion\":999,\"core\":{}}");
 Check("unknown_v2plus_rejected",
