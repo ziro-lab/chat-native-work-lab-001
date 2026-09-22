@@ -23,7 +23,7 @@ It does not reference:
 
 That keeps structural folder policy testable without launching YMM4.
 
-## P1.2 policy candidate
+## P1.2 policy — FROZEN
 
 Folders are treated as **positional contiguous ranges**, not as ownership attached to a particular YMM4 row object.
 
@@ -84,10 +84,15 @@ Run:
 dotnet run --project experiments/ymm4/no-harmony-folder-range-tracker/tests/TrackerTests.csproj -c Release
 ```
 
-The P1.2 gate is green only when the pure Linux runner reports:
+The P1.2 gate is frozen green:
 
-- `status=PASS_FOLDER_RANGE_TRACKER`;
-- all policy/boundary assertions pass;
-- the project remains non-Windows and has no YMM4 references.
+- source: `0124fdaf86862927608121b296c3520f66ca0efe`;
+- run: `35681179713`;
+- status: `PASS_FOLDER_RANGE_TRACKER`;
+- assertions: **41/41**;
+- artifact: `10674367679`;
+- ZIP SHA256: `99f66fb0b839ab59d402a50aa906f4170ac21119a1d12735e6e658a08c0038eb`;
+- pure Linux build;
+- host-independent boundary check passed.
 
-After this gate freezes, P1.3 translates observed host behavior into these structural edit values.
+P1.3 now translates observed YMM4 host behavior into these frozen structural edit values.
