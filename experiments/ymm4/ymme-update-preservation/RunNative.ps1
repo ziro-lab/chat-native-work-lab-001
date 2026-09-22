@@ -112,22 +112,22 @@ function Write-WindowSnapshot([string]$phase) {
     }
 }
 
-function Wait-ForInstalledVersion([string]$version, [int]$seconds) {
+function Wait-ForInstalledDllHash([string]$expectedHash, [string]$version, [int]$seconds) {
     for ($i = 0; $i -lt $seconds; $i++) {
         Write-WindowSnapshot "wait-$version-$i"
-        $markers = @(Get-ChildItem (Join-Path $Ymm4Dir 'user\plugin') -Recurse -Filter 'package-version.txt' -ErrorAction SilentlyContinue)
-        foreach ($marker in $markers) {
-            $value = (Get-Content -Raw $marker.FullName).Trim()
-            if ($value -eq $version) { return $marker.Directory.FullName }
+        $dlls = @(Get-ChildItem (Join-Path $Ymm4Dir 'user\plugin') -Recurse -Filter 'Ymm4PortableSettingsProbe.dll' -ErrorAction SilentlyContinue)
+        foreach ($installedDll in $dlls) {
+            $hash = (Get-FileHash $installedDll.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -eq $expectedHash) { return $installedDll.Directory.FullName }
         }
         Start-Sleep -Seconds 1
     }
     return $null
 }
 
-function Start-InstallerAttempt([string]$package, [string]$version, [string]$mode) {
+function Start-InstallerAttempt([string]$package, [string]$version, [string]$expectedHash, [string]$mode) {
     Stop-Ymm4
-    "installer-attempt mode=$mode package=$package version=$version" | Add-Content $windowLog
+    "installer-attempt mode=$mode package=$package version=$version expected_sha256=$expectedHash" | Add-Content $windowLog
     if ($mode -eq 'argument') {
         Start-Process -FilePath $exe -ArgumentList @('"' + $package + '"') -WorkingDirectory $Ymm4Dir | Out-Null
     } elseif ($mode -eq 'shell') {
@@ -135,17 +135,17 @@ function Start-InstallerAttempt([string]$package, [string]$version, [string]$mod
     } else {
         throw "Unknown installer mode: $mode"
     }
-    return Wait-ForInstalledVersion $version 60
+    return Wait-ForInstalledDllHash $expectedHash $version 60
 }
 
-function Install-Package([string]$package, [string]$version) {
-    $root = Start-InstallerAttempt $package $version 'argument'
+function Install-Package([string]$package, [string]$version, [string]$expectedHash) {
+    $root = Start-InstallerAttempt $package $version $expectedHash 'argument'
     if ($root) { return [pscustomobject]@{ Root = $root; Mode = 'argument' } }
 
-    $root = Start-InstallerAttempt $package $version 'shell'
+    $root = Start-InstallerAttempt $package $version $expectedHash 'shell'
     if ($root) { return [pscustomobject]@{ Root = $root; Mode = 'shell' } }
 
-    throw "Real .ymme install did not reach package version '$version'. See installer-windows.txt."
+    throw "Real .ymme install did not reach DLL hash for '$version'. See installer-windows.txt."
 }
 
 function New-ProbePackage([string]$dll, [string]$version, [string]$packagePath) {
@@ -182,7 +182,7 @@ $v2Package = Join-Path $OutputDir 'Ymm4PortableSettingsProbe-v2.ymme'
 New-ProbePackage $V1Dll 'v1' $v1Package
 New-ProbePackage $V2Dll 'v2' $v2Package
 
-$v1 = Install-Package $v1Package 'v1'
+$v1 = Install-Package $v1Package 'v1' $v1Hash
 $pluginRoot = [System.IO.Path]::GetFullPath($v1.Root)
 Stop-Ymm4
 
@@ -190,6 +190,8 @@ $installedV1Dll = Join-Path $pluginRoot 'Ymm4PortableSettingsProbe.dll'
 if (-not (Test-Path $installedV1Dll)) { throw 'v1 installed marker exists but probe DLL is missing.' }
 $installedV1Hash = (Get-FileHash $installedV1Dll -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($installedV1Hash -ne $v1Hash) { throw 'Installed v1 DLL hash does not match package v1 DLL.' }
+$v1PackageVersionTextInstalled = Test-Path (Join-Path $pluginRoot 'package-version.txt')
+$v1ObsoleteTextInstalled = Test-Path (Join-Path $pluginRoot 'obsolete-v1.txt')
 
 $pluginData = Join-Path $pluginRoot 'Data\settings-probe.json'
 $pluginNested = Join-Path $pluginRoot 'Data\nested\keep.txt'
@@ -208,7 +210,7 @@ $before = [ordered]@{
     user_sibling_sha256 = (Get-FileHash $userSibling -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-$v2 = Install-Package $v2Package 'v2'
+$v2 = Install-Package $v2Package 'v2' $v2Hash
 Stop-Ymm4
 
 if ([System.IO.Path]::GetFullPath($v2.Root) -ne $pluginRoot) {
@@ -236,9 +238,11 @@ $result = [ordered]@{
     v2_dll_sha256 = $v2Hash
     installed_v1_dll_sha256 = $installedV1Hash
     installed_v2_dll_sha256 = $installedV2Hash
-    installed_package_version = $versionText
-    v2_only_file_present = $v2Only
-    obsolete_v1_package_file_preserved = $obsoleteV1
+    package_text_v1_installed = $v1PackageVersionTextInstalled
+    obsolete_text_v1_installed = $v1ObsoleteTextInstalled
+    package_version_text_after_v2 = $versionText
+    v2_text_file_installed = $v2Only
+    obsolete_v1_text_present_after_v2 = $obsoleteV1
     plugin_data_file_preserved = (Test-Preserved $pluginData $before.plugin_data_sha256)
     plugin_nested_data_file_preserved = (Test-Preserved $pluginNested $before.plugin_nested_sha256)
     plugin_root_unknown_file_preserved = (Test-Preserved $pluginRootUserFile $before.plugin_root_user_sha256)
@@ -246,8 +250,6 @@ $result = [ordered]@{
 }
 
 if ($installedV2Hash -ne $v2Hash) { throw 'Installed v2 DLL hash does not match package v2 DLL.' }
-if ($versionText -ne 'v2') { throw "Expected installed package-version v2, got '$versionText'." }
-if (-not $v2Only) { throw 'v2-only package file was not installed.' }
 
 $result | ConvertTo-Json -Depth 4 | Set-Content $resultPath
 
