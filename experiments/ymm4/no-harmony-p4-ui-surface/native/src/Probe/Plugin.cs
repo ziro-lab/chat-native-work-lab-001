@@ -307,6 +307,62 @@ internal static class Probe
         }
     }
 
+    private sealed class LayerLabelInputRouter : IDisposable
+    {
+        private readonly FrameworkElement labels;
+        private readonly DirectDisplay display;
+        private readonly MouseButtonEventHandler handler;
+        private bool disposed;
+
+        internal int RightMaps { get; private set; }
+        internal int LastLogicalLayer { get; private set; } = -1;
+        internal ContextMenu? LastMenu { get; private set; }
+
+        internal LayerLabelInputRouter(FrameworkElement labels, DirectDisplay display)
+        {
+            this.labels = labels;
+            this.display = display;
+            handler = OnPreviewMouseDown;
+            labels.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
+        }
+
+        private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (disposed || e.ChangedButton != MouseButton.Right)
+                return;
+
+            var point = e.GetPosition(labels);
+            if (point.X < 0 || point.X >= labels.ActualWidth
+                || point.Y < 0 || point.Y >= labels.ActualHeight)
+                return;
+
+            var logical = display.Layout.DisplayYToLogical(point.Y, display.Height);
+            var owner = FindLayerContextOwner(labels, logical);
+            var menu = owner.ContextMenu;
+            if (menu is null)
+                return;
+
+            e.Handled = true;
+            menu.PlacementTarget = owner;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+            menu.IsOpen = true;
+
+            RightMaps++;
+            LastLogicalLayer = logical;
+            LastMenu = menu;
+            Log($"label_right_map display={point} logical={logical} owner={owner.GetType().Name}");
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            labels.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
+            if (LastMenu?.IsOpen == true)
+                LastMenu.IsOpen = false;
+        }
+    }
+
     private sealed class FolderOwnerAdorner : Adorner
     {
         private readonly VisualCollection children;
@@ -432,6 +488,7 @@ internal static class Probe
         FolderMenuLease? menuLease = null;
         FolderOwnerAdorner? adorner = null;
         FolderToggleInputLease? toggleLease = null;
+        LayerLabelInputRouter? labelRouter = null;
         AdornerLayer? adornerLayer = null;
         try
         {
@@ -483,13 +540,6 @@ internal static class Probe
             timeline.SelectedItems = ImmutableList<IItem>.Empty;
             await Task.Delay(700);
 
-            display = new DirectDisplay(host, Log);
-            var span = new CollapsedSpan(2, 5);
-            display.SetSpans([span]);
-            await Task.Delay(700);
-            display.ThrowIfFailed();
-
-            Check("fixture_folded", display.Layout.IsHidden(3) && !display.Layout.IsHidden(2));
             var labels = FindLabels(window, timeline);
             Fact("labels_type", labels.GetType().FullName);
             Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
@@ -500,8 +550,30 @@ internal static class Probe
             Fact("layer6_context_owner", contextOwner.GetType().FullName);
             Fact("layer6_context_menu_type", nativeMenu.GetType().FullName);
 
-            var nativePoint = await FindContextMenuPoint(labels, 6, nativeMenu);
-            Fact("layer6_native_point", nativePoint);
+            // Control: before folding, the real YMM4 row opens its own native
+            // ContextMenu through an OS right-click.
+            var identityMenuPoint = await FindContextMenuPoint(labels, 6, nativeMenu);
+            Fact("layer6_identity_menu_point", identityMenuPoint);
+            Check("identity_native_context_menu", identityMenuPoint.X >= 0);
+
+            display = new DirectDisplay(host, Log);
+            var span = new CollapsedSpan(2, 5);
+            display.SetSpans([span]);
+            await Task.Delay(700);
+            display.ThrowIfFailed();
+            Check("fixture_folded", display.Layout.IsHidden(3) && !display.Layout.IsHidden(2));
+
+            // The label views are visually compacted by DirectDisplay. Route only
+            // the label-column right-click Y coordinate back through FoldMap while
+            // keeping YMM4's existing ContextMenu instance/commands.
+            labelRouter = new LayerLabelInputRouter(labels, display);
+
+            var foldedRow6 = FindLayerElement(labels, 6);
+            var foldedRect6 = Host.ScreenRect(foldedRow6);
+            var nativePoint = new Point(
+                Math.Max(foldedRect6.Left + 4, Math.Min(foldedRect6.Right - 4, identityMenuPoint.X)),
+                foldedRect6.Y + foldedRect6.Height / 2);
+            Fact("layer6_folded_menu_point", nativePoint);
 
             DependencyObject? baselineSource = null;
             var baselineLeftDown = 0;
@@ -560,6 +632,10 @@ internal static class Probe
             await Native.Click(nativePoint, right: true);
             await Task.Delay(500);
             Check("context_open_observed", menuLease.Openings == 1 && menuLease.LastLayer == 6);
+            Check("label_right_map_exact",
+                labelRouter.RightMaps == 1
+                && labelRouter.LastLogicalLayer == 6
+                && ReferenceEquals(labelRouter.LastMenu, nativeMenu));
             Check("native_menu_preserved_and_extended",
                 menuLease.LastMenu is { IsOpen: true }
                 && menuLease.LastMenu.Items.Count >= menuLease.LastOriginalCount + 2
@@ -579,6 +655,8 @@ internal static class Probe
             menuLease = null;
             toggleLease.Dispose();
             toggleLease = null;
+            labelRouter.Dispose();
+            labelRouter = null;
             adornerLayer.Remove(adorner);
             adorner = null;
             await Task.Delay(250);
@@ -601,6 +679,7 @@ internal static class Probe
             {
                 menuLease?.Dispose();
                 toggleLease?.Dispose();
+                labelRouter?.Dispose();
                 if (adorner is not null && adornerLayer is not null)
                     adornerLayer.Remove(adorner);
                 display?.Dispose();
