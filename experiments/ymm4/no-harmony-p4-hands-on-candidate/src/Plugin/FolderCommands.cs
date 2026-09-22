@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using Ymm4NoHarmonyFolderRanges;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyState;
@@ -15,6 +16,19 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 /// </summary>
 internal sealed class FolderCommands
 {
+    internal static readonly IReadOnlyList<(string Name, string? Color)> ColorChoices =
+    [
+        ("赤", "#FFE05A5A"),
+        ("橙", "#FFE89A3C"),
+        ("黄", "#FFD9C23A"),
+        ("緑", "#FF5CB85C"),
+        ("水", "#FF4CB5C9"),
+        ("青", "#FF4F7FE0"),
+        ("紫", "#FF9B6BD6"),
+        ("灰", "#FF8A8A8A"),
+        ("既定", null)
+    ];
+
     private readonly Window window;
     private readonly Host host;
     private readonly Timeline timeline;
@@ -74,15 +88,36 @@ internal sealed class FolderCommands
                 $"Folder creation rejected: {decision.Status}");
         }
 
+        var existingCount =
+            FolderDocumentRules.FindTimeline(
+                state.Document,
+                TimelineKey)
+            ?.Folders.Count ?? 0;
+        var initialColor =
+            ColorChoices[existingCount % (ColorChoices.Count - 1)].Color;
+
         if (!decision.NeedsAdditionalLayer)
         {
-            CommitCore(
-                document => FolderUxCommands.CreateFolder(
-                    document,
-                    TimelineKey,
-                    decision,
-                    folderId,
-                    name),
+            CommitState(
+                current =>
+                {
+                    var core = FolderUxCommands.CreateFolder(
+                        current.Core,
+                        TimelineKey,
+                        decision,
+                        folderId,
+                        name);
+                    var withCore =
+                        FolderSessionDocumentRules.ReplaceCore(
+                            current,
+                            core);
+                    return FolderSessionDocumentRules.SetFolderOption(
+                        withCore,
+                        TimelineKey,
+                        folderId,
+                        initialColor,
+                        hidden: false);
+                },
                 "create");
 
             timeline.LayerSelection.Clear();
@@ -126,6 +161,13 @@ internal sealed class FolderCommands
                 afterCore,
                 TimelineKey,
                 structuralPlan);
+
+        afterState = FolderSessionDocumentRules.SetFolderOption(
+            afterState,
+            TimelineKey,
+            folderId,
+            initialColor,
+            hidden: false);
 
         using var composite = structural.PrepareCompositeOverride(
             CommandType.AddLayer,
@@ -206,6 +248,112 @@ internal sealed class FolderCommands
                 color,
                 option?.Hidden ?? false),
             "set_color");
+    }
+
+    internal void SetHidden(Guid folderId, bool hidden)
+    {
+        EnsureEditable();
+
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        var visibility = Enumerable.Range(
+                folder.Start,
+                folder.End - folder.Start + 1)
+            .ToDictionary(
+                layer => layer,
+                layer => timeline.LayerSettings.IsVisibles[layer]);
+
+        var before =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+        var transition = FolderVisibilityRules.SetFolderHidden(
+            before,
+            TimelineKey,
+            folderId,
+            hidden,
+            visibility);
+        var after =
+            FolderSessionDocumentRules.NormalizeAndValidate(
+                transition.State);
+
+        if (FolderSessionDocumentCodec.Save(before)
+            == FolderSessionDocumentCodec.Save(after))
+            return;
+
+        foreach (var write in transition.Writes)
+        {
+            if (timeline.LayerSettings.IsVisibles[write.Layer]
+                != write.Visible)
+            {
+                timeline.LayerSettings.IsVisibles[write.Layer] =
+                    write.Visible;
+            }
+        }
+
+        state.ReplaceState(after);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceState(before),
+            () => state.ReplaceState(after)));
+        undo.Record();
+
+        log(
+            $"folder_command hidden id={folderId} hidden={hidden} " +
+            $"writes={transition.Writes.Count} timeline={TimelineKey}");
+    }
+
+    internal void ApplyColorToLayers(Guid folderId)
+    {
+        EnsureEditable();
+
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var option = FolderSessionDocumentRules.FindOption(
+            state.State,
+            TimelineKey,
+            folderId);
+        var color = ParseColor(option?.Color);
+
+        var changed = false;
+        for (var layer = folder.Start; layer <= folder.End; layer++)
+        {
+            if (timeline.LayerSettings.Colors[layer] == color)
+                continue;
+
+            timeline.LayerSettings.Colors[layer] = color;
+            changed = true;
+        }
+
+        if (!changed)
+            return;
+
+        // LayerSettings color setters enlist their native Undo commands; the
+        // exact-host S2 surface probe proves one Record() commits them.
+        undo.Record();
+
+        log(
+            $"folder_command apply_color id={folderId} " +
+            $"range={folder.Start}-{folder.End} timeline={TimelineKey}");
+    }
+
+    private static Color ParseColor(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Colors.Transparent;
+
+        var value = text.AsSpan();
+        if (value.Length != 9 || value[0] != '#')
+            throw new ArgumentException("Color must use #AARRGGBB format.");
+
+        static byte ParseByte(ReadOnlySpan<char> hex) =>
+            Convert.ToByte(hex.ToString(), 16);
+
+        return Color.FromArgb(
+            ParseByte(value.Slice(1, 2)),
+            ParseByte(value.Slice(3, 2)),
+            ParseByte(value.Slice(5, 2)),
+            ParseByte(value.Slice(7, 2)));
     }
 
     internal void SelectItems(Guid folderId)
