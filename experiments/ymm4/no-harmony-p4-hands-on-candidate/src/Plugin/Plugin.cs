@@ -58,64 +58,26 @@ public sealed class FolderToolViewModel : IToolViewModel
 {
     internal const string DisplayTitle = "レイヤーフォルダ (no-Harmony)";
 
-    private readonly FolderPersistenceSession session = new();
-
-    internal static FolderToolViewModel? Current { get; private set; }
-    internal static event EventHandler? StateChanged;
-
-    public FolderToolViewModel()
-    {
-        Current = this;
-        RaiseStateChanged();
-    }
+    private static FolderStateStore Store => FolderStateStore.Shared;
 
     public string Title => DisplayTitle;
 
     public string StatusText =>
-        session.IsRecoveryBlocked
+        Store.IsRecoveryBlocked
             ? "保存済みフォルダ情報を読み込めません。元データは保持されています。"
             : "タイムライン左側のレイヤー名列から操作できます。";
 
-    internal FolderDocument Document => session.Document;
-    internal bool IsRecoveryBlocked => session.IsRecoveryBlocked;
-    internal FolderDocumentLoadStatus LastLoadStatus => session.LastLoadStatus;
-    internal string? LastError => session.LastError;
-
     public void LoadState(ToolState stateData)
     {
-        session.Load(stateData.SavedState);
-        RaiseStateChanged();
+        Store.LoadRaw(stateData.SavedState);
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusText)));
     }
 
     public ToolState SaveState() => new()
     {
         Title = Title,
-        SavedState = session.Save()
+        SavedState = Store.SaveRaw()
     };
-
-    internal void SyncRaw(string? savedState)
-    {
-        session.Load(savedState);
-        RaiseStateChanged();
-    }
-
-    internal void ReplaceDocument(FolderDocument document)
-    {
-        session.Replace(document);
-        RaiseStateChanged();
-    }
-
-    internal void ResetDocument()
-    {
-        session.Reset();
-        RaiseStateChanged();
-    }
-
-    private void RaiseStateChanged()
-    {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusText)));
-        StateChanged?.Invoke(this, EventArgs.Empty);
-    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested
@@ -137,13 +99,15 @@ internal static class HandsOnRuntime
     private static Guid lastProjectTimelineId;
     private static bool smokeProjectRequested;
     private static bool smokeTimelinePrepared;
+    private static bool synchronizingToolArea;
+    private static string? lastProjectSignature;
 
     internal static void Start()
     {
         if (started) return;
         started = true;
 
-        FolderToolViewModel.StateChanged += OnFolderStateChanged;
+        FolderStateStore.Shared.Changed += OnFolderStateChanged;
         timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(450)
@@ -192,6 +156,7 @@ internal static class HandsOnRuntime
                 window = currentWindow;
                 root = currentRoot;
                 AttachProjectSignal(currentRoot);
+                lastProjectSignature = null;
                 Diagnostic("main_root_attached");
             }
 
@@ -210,6 +175,8 @@ internal static class HandsOnRuntime
                     ?.Invoke(currentRoot, null);
                 Diagnostic("smoke_create_project_requested");
             }
+
+            TrySynchronizeCurrentProjectState();
 
             if (smokeEnabled && !smokeTimelinePrepared)
                 TryPrepareSmokeTimeline(currentWindow, currentRoot);
@@ -293,36 +260,10 @@ internal static class HandsOnRuntime
 
     private static void SynchronizeProjectState()
     {
-        if (root is null)
-            return;
-
         try
         {
-            var active = HandsOnHostAccess.ActiveTimelineViewModel(root);
-            var timeline = HandsOnHostAccess.TimelineOf(active);
-            var tool = FolderToolViewModel.Current;
-            if (timeline is null || tool is null)
-                return;
-
-            var path = HandsOnHostAccess.ProjectFilePath(root);
-            if (string.IsNullOrWhiteSpace(path) && HandsOnHostAccess.IsEmptyProject(root))
-            {
-                if (timeline.ID != Guid.Empty && timeline.ID != lastProjectTimelineId)
-                {
-                    HandsOnHostAccess.WriteToolAreaSavedState(root, null);
-                    tool.ResetDocument();
-                    lastProjectTimelineId = timeline.ID;
-                    Diagnostic($"new_project_reset timeline={timeline.ID:D}");
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(path))
-            {
-                var raw = HandsOnHostAccess.ReadToolAreaSavedState(root);
-                tool.SyncRaw(raw);
-                lastProjectTimelineId = timeline.ID;
-                Diagnostic($"project_sync path={path} timeline={timeline.ID:D}");
-            }
-
+            lastProjectSignature = null;
+            TrySynchronizeCurrentProjectState(force: true);
             EnsureController(force: true);
         }
         catch (Exception ex)
@@ -331,21 +272,84 @@ internal static class HandsOnRuntime
         }
     }
 
+    private static void TrySynchronizeCurrentProjectState(bool force = false)
+    {
+        if (root is null)
+            return;
+
+        var active = HandsOnHostAccess.ActiveTimelineViewModel(root);
+        var timeline = HandsOnHostAccess.TimelineOf(active);
+        if (timeline is null || timeline.ID == Guid.Empty)
+            return;
+
+        var path = HandsOnHostAccess.ProjectFilePath(root);
+        var signature =
+            (string.IsNullOrWhiteSpace(path) ? "<unsaved>" : path)
+            + "|" + timeline.ID.ToString("D");
+
+        if (!force && string.Equals(signature, lastProjectSignature, StringComparison.Ordinal))
+            return;
+
+        try
+        {
+            synchronizingToolArea = true;
+
+            if (string.IsNullOrWhiteSpace(path)
+                && (HandsOnHostAccess.IsEmptyProject(root)
+                    || timeline.ID != lastProjectTimelineId))
+            {
+                HandsOnHostAccess.WriteToolAreaSavedState(root, null);
+                FolderStateStore.Shared.ResetDocument();
+                lastProjectTimelineId = timeline.ID;
+                Diagnostic($"new_project_reset timeline={timeline.ID:D}");
+            }
+            else if (!string.IsNullOrWhiteSpace(path))
+            {
+                var raw = HandsOnHostAccess.ReadToolAreaSavedState(root);
+                FolderStateStore.Shared.LoadRaw(raw);
+                lastProjectTimelineId = timeline.ID;
+                Diagnostic($"project_sync path={path} timeline={timeline.ID:D}");
+            }
+
+            lastProjectSignature = signature;
+        }
+        catch (Exception ex)
+        {
+            Diagnostic("project_state_retry=" + ex.Message);
+        }
+        finally
+        {
+            synchronizingToolArea = false;
+        }
+    }
+
     private static void OnFolderStateChanged(object? sender, EventArgs e)
     {
         try
         {
             controller?.RefreshFromDocument();
+
+            if (root is null || synchronizingToolArea)
+                return;
+
+            synchronizingToolArea = true;
+            HandsOnHostAccess.WriteToolAreaSavedState(
+                root,
+                FolderStateStore.Shared.SaveRaw());
         }
         catch (Exception ex)
         {
             Diagnostic("state_refresh_error=" + ex);
         }
+        finally
+        {
+            synchronizingToolArea = false;
+        }
     }
 
     private static void EnsureController(bool force = false)
     {
-        if (window is null || root is null || FolderToolViewModel.Current is null)
+        if (window is null || root is null)
         {
             DetachController();
             return;
@@ -374,7 +378,7 @@ internal static class HandsOnRuntime
                 labels,
                 host,
                 manager,
-                FolderToolViewModel.Current);
+                FolderStateStore.Shared);
             lastProjectTimelineId = timeline.ID;
             Diagnostic($"controller_attached timeline={timeline.ID:D}");
 
