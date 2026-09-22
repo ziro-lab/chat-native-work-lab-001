@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/FolderProductState.cs" Link="FolderProductState.cs" />
+    <Compile Include="../src/FolderProductStateCodec.cs" Link="FolderProductStateCodec.cs" />
+    <Compile Include="../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
+    <Compile Include="../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
+    <Compile Include="../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
+  </ItemGroup>
+</Project>
