@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Data;
 using System.Windows.Media;
 using YukkuriMovieMaker.Plugin;
@@ -181,6 +182,99 @@ internal static class HandsOnHostAccess
         current is Visual or System.Windows.Media.Media3D.Visual3D
             ? VisualTreeHelper.GetParent(current)
             : LogicalTreeHelper.GetParent(current);
+
+    private static IEnumerable<IInputElement> CommandTargets(
+        Host host,
+        Window window)
+    {
+        if (Keyboard.FocusedElement is IInputElement focused)
+            yield return focused;
+        yield return host.Source;
+        yield return host.View;
+        yield return window;
+    }
+
+    internal static bool CanExecuteTimelineCommand(
+        Host host,
+        Window window,
+        CommandType type,
+        object? parameter)
+    {
+        ICommand command = CommandSettings.Default[type]
+            ?? throw new InvalidOperationException("Command missing: " + type);
+
+        foreach (var target in CommandTargets(host, window))
+        {
+            if (command is RoutedCommand routed)
+            {
+                try
+                {
+                    if (routed.CanExecute(parameter, target))
+                        return true;
+                }
+                catch
+                {
+                }
+
+                continue;
+            }
+
+            try
+            {
+                if (command.CanExecute(parameter))
+                    return true;
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool TryExecuteTimelineCommand(
+        Host host,
+        Window window,
+        CommandType type,
+        object? parameter)
+    {
+        ICommand command = CommandSettings.Default[type]
+            ?? throw new InvalidOperationException("Command missing: " + type);
+
+        foreach (var target in CommandTargets(host, window))
+        {
+            if (command is RoutedCommand routed)
+            {
+                bool can;
+                try
+                {
+                    can = routed.CanExecute(parameter, target);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!can)
+                    continue;
+
+                routed.Execute(parameter, target);
+                HandsOnRuntime.Diagnostic(
+                    $"host_command type={type} target={target.GetType().Name} parameter={parameter ?? "<null>"}");
+                return true;
+            }
+
+            if (!command.CanExecute(parameter))
+                continue;
+
+            command.Execute(parameter);
+            HandsOnRuntime.Diagnostic(
+                $"host_command type={type} target=<direct> parameter={parameter ?? "<null>"}");
+            return true;
+        }
+
+        return false;
+    }
 
     internal static FrameworkElement FindLayerElement(FrameworkElement labels, int layer)
     {
