@@ -44,12 +44,12 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Build failed'}
           $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_StructuralMutation'
           New-Item -ItemType Directory -Force $d|Out-Null
-          Copy-Item out/probe/Ymm4NoHarmonyStructuralMutationProbe.dll $d
+          Copy-Item out/probe/Ymm4StructuralMutationProbe.dll $d
           if(Test-Path out/probe/0Harmony.dll){throw 'Unexpected Harmony'}
           New-Item -ItemType Directory -Force out/evidence|Out-Null
           $checkout=git rev-parse HEAD
           $tree=git rev-parse 'HEAD^{tree}'
-          @("source_head=$env:SOURCE_HEAD","checkout=$checkout","tree=$tree","host_version=$env:HOST_VERSION","host_zip_sha256=$env:HOST_HASH","probe_sha256=$((Get-FileHash out/probe/Ymm4NoHarmonyStructuralMutationProbe.dll -Algorithm SHA256).Hash)","run=$env:GITHUB_RUN_ID")|Set-Content out/evidence/manifest.txt
+          @("source_head=$env:SOURCE_HEAD","checkout=$checkout","tree=$tree","host_version=$env:HOST_VERSION","host_zip_sha256=$env:HOST_HASH","probe_sha256=$((Get-FileHash out/probe/Ymm4StructuralMutationProbe.dll -Algorithm SHA256).Hash)","run=$env:GITHUB_RUN_ID")|Set-Content out/evidence/manifest.txt
       - name: Execute structural semantics
         shell: pwsh
         run: ./experiments/ymm4/no-harmony-structural-mutation/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
