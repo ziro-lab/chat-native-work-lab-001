@@ -19,3 +19,13 @@ Each mutation must change the marker map, emit at least one public Timeline/Laye
 The output records target-item sets, layer maps, layer selection and event counts. These facts will define the FolderRangeTracker rules in the next commit. No folder policy is frozen until both YMM4 4.55.1.1 and 4.56.1.0 agree.
 
 No Harmony or product UI/persistence is introduced here.
+
+## Product-boundary note
+
+The operation-specific structural probe in this directory is intentionally Lab-only evidence.
+
+The product-facing P1.2 `FolderRangeTracker` must stay independent from YMM4/WPF host types. Add/Delete/Move command observation belongs outside the tracker and is translated into small structural deltas first.
+
+Likewise, this probe does not establish a requirement for one product adapter per structural command. P1.3 will compare the standard routed-command evidence with a generalized Harmony-free before/after delta observer (including the Timeline/LayerSettings + UndoRedoManager pattern used by prior LayerPatan-style tracking) before freezing the product observation boundary.
+
+See `docs/YMM4_NO_HARMONY_FULL_COMPLETION_ROADMAP.md`, especially the Product architecture convergence rules and P1.6 Architecture Convergence Gate.

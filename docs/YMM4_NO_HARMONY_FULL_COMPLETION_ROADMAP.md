@@ -1,4 +1,4 @@
-# YMM4 no-Harmony Full — Completion Roadmap v0.1
+# YMM4 no-Harmony Full — Completion Roadmap v0.1.1
 
 Status: **planning freeze for the remaining technical and product gates**.
 
@@ -32,6 +32,55 @@ Unknown product-policy choices are not guessed early. They are frozen only after
 - Keep exact pinned-host verification on **YMM4 4.55.1.1 Lite** and **4.56.1.0 Lite** until the compatibility phase deliberately expands that matrix.
 - Frozen evidence from earlier phases remains unchanged. Follow-on work is stacked rather than rewriting historical proof.
 - `main` is not the exploration branch. Lab gates stay isolated until their acceptance conditions are met.
+
+### Product architecture convergence rules
+
+The Lab architecture is intentionally more fragmented than the intended product architecture.
+
+**Lab separation is evidence structure, not product structure.** Operation-specific probes/adapters may exist to isolate failures, but the Full product must not inherit a permanent one-adapter-per-probe design.
+
+The product should converge toward this dependency direction:
+
+```text
+FolderDocument
+    │
+    ├── FolderRangeTracker
+    │
+    ▼
+FoldMap
+logical Layer <-> display Row
+    │
+    ├──────────────────────┐
+    ▼                      ▼
+FoldDisplay          InteractionRouter
+                         ├─ placement
+                         ├─ navigation
+                         └─ native gesture lease
+    │                      │
+    └──────────┬───────────┘
+               ▼
+          YmmHostAccess
+               │
+               ▼
+              YMM4
+
+Persistence <-> FolderDocument
+```
+
+This diagram is a **target boundary**, not a requirement to refactor green Lab probes immediately.
+
+Required convergence principles:
+
+- **One mapping authority.** Display-row <-> logical-layer conversion belongs to FoldMap/FolderLayout semantics and must not be reimplemented independently by FileDrop, right-click, navigation or future add routes.
+- **No adapter proliferation in the product.** Similar placement actions should flow through a shared placement route rather than permanent FileDrop/AddTemplate/AddCharacter-specific mapping implementations.
+- **YMM4-private knowledge is centralized.** Reflection, nonpublic setters, exact view-model access, viewport mutation and other version-sensitive host access should converge behind `YmmHostAccess`.
+- **Necessary drag complexity is encapsulated, not deleted.** Direct-geometry freeze, temporary viewport lease, RenderTransform compensation and deterministic restore remain because P0 proved they are behaviorally necessary. Product code should hide them behind a gesture-lifetime abstraction such as `GestureLease`.
+- **Lab instrumentation does not become product architecture.** Mutation counters, render audits, assertion budgets and evidence logging remain in test/probe layers unless a minimal diagnostic is independently justified.
+- **Prefer shared mechanisms over operation-specific exceptions.** A newly discovered YMM4 route first asks whether it fits placement, navigation, gesture or host-access boundaries before adding a new product abstraction.
+
+Do **not** optimize `FolderLayout` representation yet merely for code-size reasons. Immutable collections can remain while correctness work is active. Array-backed `logicalToRow / rowToLogical / owner` tables are a later implementation option if they materially simplify or speed the product without weakening invariants.
+
+Do **not** freeze the original LayerPatan `TimelineTracker / ShiftDetector` approach as the product mechanism yet. Its Harmony-free observation pattern is a strong candidate to compare during P1.3/P1.4, alongside routed-command observation and public UndoRedoManager signals.
 
 ## 3. Common phase workflow
 
@@ -143,7 +192,14 @@ Direct `Timeline.AddLayer/DeleteLayer/MoveLayer` calls are **not** treated as eq
 
 ### P1.2 FolderRangeTracker model
 
-Build a small deterministic tracker separate from WPF display code.
+Build a small deterministic tracker separate from WPF display code **and separate from YMM4 host types**.
+
+P1.2 is a product-boundary gate as well as a correctness gate:
+
+- `FolderRangeTracker` may depend on logical folder/span state and structural operations such as Insert/Delete/Swap;
+- it must not depend on `TimelineView`, `TimelineViewModel`, RoutedCommand, WPF coordinates, reflection or DirectDisplay;
+- host observation is translated into small structural-operation values before the tracker sees it;
+- the same tracker must be testable without launching YMM4.
 
 It must define and test structural transforms for:
 
@@ -183,6 +239,14 @@ Preferred order:
 
 Do not reimplement standard Add/Delete/Move merely to make the tracker easier.
 
+P1.3 must also compare **general structural-delta observation** against command-specific observation. The existing Harmony-free LayerPatan-style approach—watching Timeline / LayerSettings plus UndoRedoManager Recorded/Undoed/Redoed and comparing before/after Layer/LayerSetting state—is a candidate because it could cover several structural operations without adding one adapter per command.
+
+Selection rule:
+
+- prefer the smallest observation mechanism that reliably identifies the structural delta needed by FolderRangeTracker;
+- command-specific hooks are acceptable as Lab evidence, but should not multiply product adapters when a shared delta observer is equally reliable;
+- if routed-command observation and state-delta observation are combined, each must have a clear responsibility rather than duplicate folder logic.
+
 ### P1.4 Undo/Redo synchronization
 
 Folder-range state must move with the same user-visible history step as the YMM4 structural operation.
@@ -216,6 +280,25 @@ Verify after Add/Delete/Move and Undo/Redo:
 - FileDrop;
 - no stale hidden rows;
 - detach / restore.
+
+### P1.6 Architecture Convergence Gate
+
+After the integrated P1 behavior is green, but **before P1 is frozen**, review the product-facing structure.
+
+This gate does not require rewriting every Lab probe. It requires proving that the intended product implementation can converge without losing the verified behavior.
+
+Checklist:
+
+- FolderRangeTracker is host/WPF-independent.
+- FoldMap/FolderLayout remains the single coordinate-mapping authority.
+- right-click, FileDrop and future placement paths can share one placement boundary instead of permanent operation-specific mapping code.
+- YMM4 version-sensitive reflection/nonpublic access has a defined `YmmHostAccess` boundary.
+- native drag complexity can be encapsulated behind one gesture-lifetime boundary without removing the P0 protections.
+- Lab-only counters/audits/logging are clearly separable from runtime product code.
+- no new P1 component duplicates mapping, Undo or host-access logic already owned elsewhere.
+- a convergence refactor, if needed, reruns the integrated P1 suite before freeze.
+
+Only after this gate is green should P1 be frozen and P2 add more host-interaction routes.
 
 ### P1 exit gate
 
@@ -437,6 +520,7 @@ P0 Core Spine                 DONE
   -> P1.3 operation observe
   -> P1.4 Undo synchronization
   -> P1.5 Track C integration
+  -> P1.6 architecture convergence
   -> P1 freeze
   -> P2 interaction coverage
   -> P3 persistence
@@ -457,6 +541,8 @@ To avoid turning the Full exploration into an unbounded rewrite:
 - A phase can add a new sub-gate, but must not silently expand an already-frozen earlier gate.
 - If a host behavior cannot be supported safely without Harmony, document the exact missing surface before considering architectural escalation.
 - Simpler architecture wins when it preserves the same verified behavior.
+- Lab class/file count is not a product-design target. Simplification should remove duplicated entry paths and centralize ownership, not erase proven behavioral safeguards.
+- Do not perform a broad P0 rewrite merely to match the target diagram. Converge incrementally at phase boundaries and rerun the relevant integrated gate.
 
 # 7. Definition of “Full is feasible” vs “Full is complete”
 
