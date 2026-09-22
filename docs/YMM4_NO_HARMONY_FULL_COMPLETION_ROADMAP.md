@@ -577,6 +577,8 @@ P1 is therefore **COMPLETE / FROZEN**. P2 may add host interaction routes withou
 
 ## P2 — Host Interaction Coverage
 
+**Status: COMPLETE / FROZEN.**
+
 **Purpose:** eliminate remaining places where folded display coordinates can diverge from YMM4's logical coordinates.
 
 ### Scope
@@ -590,6 +592,8 @@ P1 is therefore **COMPLETE / FROZEN**. P2 may add host interaction routes withou
 - context-menu actions that derive a layer from cursor position.
 
 ### Exit gate
+
+**SATISFIED / FROZEN.** See `docs/YMM4_NO_HARMONY_P2_INTERACTION_MATRIX.md`.
 
 A documented interaction matrix is green on both pinned hosts, with every supported route classified as:
 
@@ -771,8 +775,8 @@ P0 Core Spine                 DONE
   -> P1.5 Track C integration DONE
   -> P1.6 architecture convergence DONE
   -> P1 freeze                DONE
-  -> P2 interaction coverage  NEXT
-  -> P3 persistence
+  -> P2 interaction coverage  DONE
+  -> P3 persistence           NEXT
   -> P4 UX
   -> P5 compatibility
   -> P6 hardening
