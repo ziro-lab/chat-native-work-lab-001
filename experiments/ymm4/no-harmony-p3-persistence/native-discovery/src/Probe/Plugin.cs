@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -33,7 +34,8 @@ public sealed class DiscoveryToolView : UserControl
 
 public sealed class DiscoveryToolViewModel : IToolViewModel
 {
-    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested;
+    event EventHandler<CreateNewToolViewRequestedEventArgs>? IToolViewModel.CreateNewToolViewRequested { add { } remove { } }
+    event PropertyChangedEventHandler? INotifyPropertyChanged.PropertyChanged { add { } remove { } }
     public string Title => "CNWL P3 ToolState";
     public void LoadState(ToolState stateData) { }
     public ToolState SaveState() => new() { Title = Title, SavedState = "{\"probe\":true}" };
