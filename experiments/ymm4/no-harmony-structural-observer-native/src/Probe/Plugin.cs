@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -162,7 +163,8 @@ internal static class Probe
 
     private static StructuralDetection DetectHostDelta(
         HostSnapshot before,
-        HostSnapshot after)
+        HostSnapshot after,
+        bool layerSettingsSignaled)
     {
         var pairs = new List<LayerPair>();
         var survivingOldLayers = new HashSet<int>();
@@ -198,18 +200,18 @@ internal static class Probe
             vanished,
             insertedHints);
 
-        var settingsChanged = !ReferenceEquals(before.Settings, after.Settings);
+        var settingsReferenceChanged = !ReferenceEquals(before.Settings, after.Settings);
 
         if (detection.Status == StructuralDetectionStatus.Exact
             && detection.Edits.Any(x => x is InsertLayers or DeleteLayers)
-            && !settingsChanged)
+            && !layerSettingsSignaled)
         {
             detection = StructuralDetection.Ambiguous(
-                "Insert/delete-like item motion without LayerSettings replacement.");
+                "Insert/delete-like item motion without LayerSettings signal.");
         }
 
         Log(
-            $"detect settings_changed={settingsChanged} pairs={string.Join(",", pairs.Select(x => $"{x.OldLayer}>{x.NewLayer}"))} " +
+            $"detect settings_signal={layerSettingsSignaled} settings_ref_changed={settingsReferenceChanged} pairs={string.Join(",", pairs.Select(x => $"{x.OldLayer}>{x.NewLayer}"))} " +
             $"vanished={string.Join(",", vanished.OrderBy(x => x))} inserted={string.Join(",", insertedHints.OrderBy(x => x))} " +
             $"status={detection.Status} edits={EditText(detection)} reason={detection.Reason}");
 
@@ -327,11 +329,13 @@ internal static class Probe
         Timeline timeline,
         Func<int> recorded,
         Func<int> undoed,
+        Func<int> settingsSignals,
         string baseline)
     {
         var before = Snapshot(timeline);
         var recordedBefore = recorded();
         var undoedBefore = undoed();
+        var settingsBefore = settingsSignals();
 
         timeline.SelectedItems = ImmutableList<IItem>.Empty;
         timeline.LayerSelection.SelectedLayers = ImmutableList.Create(layer);
@@ -351,7 +355,10 @@ internal static class Probe
 
         await Task.Delay(150);
         var after = Snapshot(timeline);
-        var forward = DetectHostDelta(before, after);
+        var forward = DetectHostDelta(
+            before,
+            after,
+            settingsSignals() > settingsBefore);
 
         Fact(name + "_route", route);
         Fact(name + "_forward", EditText(forward));
@@ -360,6 +367,7 @@ internal static class Probe
 
         window.Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
+        var undoSettingsBefore = settingsSignals();
         await Native.Key(0x5A, true);
 
         await WaitUntil(
@@ -368,7 +376,10 @@ internal static class Probe
 
         await Task.Delay(150);
         var restored = Snapshot(timeline);
-        var reverse = DetectHostDelta(after, restored);
+        var reverse = DetectHostDelta(
+            after,
+            restored,
+            settingsSignals() > undoSettingsBefore);
 
         Fact(name + "_undo", EditText(reverse));
         Check(name + "_undo_exact", reverse.Status == StructuralDetectionStatus.Exact);
@@ -382,6 +393,7 @@ internal static class Probe
         EventHandler? recordedHandler = null;
         EventHandler? undoedHandler = null;
         EventHandler? redoedHandler = null;
+        PropertyChangedEventHandler? layerSettingsHandler = null;
 
         try
         {
@@ -440,6 +452,7 @@ internal static class Probe
             var recordedCount = 0;
             var undoedCount = 0;
             var redoedCount = 0;
+            var layerSettingsSignals = 0;
 
             recordedHandler = (_, _) =>
             {
@@ -457,9 +470,16 @@ internal static class Probe
                 Log("manager_redoed=" + redoedCount);
             };
 
+            layerSettingsHandler = (_, e) =>
+            {
+                layerSettingsSignals++;
+                Log($"layer_settings_signal={layerSettingsSignals} property={e.PropertyName ?? "<null>"}");
+            };
+
             manager.Recorded += recordedHandler;
             manager.Undoed += undoedHandler;
             manager.Redoed += redoedHandler;
+            timeline.LayerSettings.PropertyChanged += layerSettingsHandler;
 
             var baseline = MarkerSnapshot(timeline);
             Fact("baseline", baseline);
@@ -476,6 +496,7 @@ internal static class Probe
                 timeline,
                 () => recordedCount,
                 () => undoedCount,
+                () => layerSettingsSignals,
                 baseline);
 
             await Exercise(
@@ -490,6 +511,7 @@ internal static class Probe
                 timeline,
                 () => recordedCount,
                 () => undoedCount,
+                () => layerSettingsSignals,
                 baseline);
 
             await Exercise(
@@ -504,6 +526,7 @@ internal static class Probe
                 timeline,
                 () => recordedCount,
                 () => undoedCount,
+                () => layerSettingsSignals,
                 baseline);
 
             await Exercise(
@@ -518,6 +541,7 @@ internal static class Probe
                 timeline,
                 () => recordedCount,
                 () => undoedCount,
+                () => layerSettingsSignals,
                 baseline);
 
             // Strong false-positive check: imitate an insertion-like coordinated
@@ -530,11 +554,15 @@ internal static class Probe
 
             await Task.Delay(150);
             var afterFake = Snapshot(timeline);
-            var fake = DetectHostDelta(beforeFake, afterFake);
+            var fakeSignalsBefore = layerSettingsSignals;
+            var fake = DetectHostDelta(
+                beforeFake,
+                afterFake,
+                layerSettingsSignals > fakeSignalsBefore);
 
             Fact("coordinated_item_shift", EditText(fake));
             Check("coordinated_item_shift_not_exact", fake.Status == StructuralDetectionStatus.Ambiguous);
-            Check("coordinated_item_shift_settings_same", ReferenceEquals(beforeFake.Settings, afterFake.Settings));
+            Check("coordinated_item_shift_no_settings_signal", layerSettingsSignals == fakeSignalsBefore);
 
             Check("manager_recorded_observed", recordedCount >= 4);
             Check("manager_undoed_observed", undoedCount >= 4);
@@ -573,6 +601,19 @@ internal static class Probe
                         manager.Undoed -= undoedHandler;
                     if (redoedHandler is not null)
                         manager.Redoed -= redoedHandler;
+                }
+
+                if (layerSettingsHandler is not null)
+                {
+                    var visible = Host.Elements(window)
+                        .FirstOrDefault(x => x.GetType().Name == "TimelineView" && x.IsVisible);
+                    if (visible?.DataContext is TimelineViewModel visibleVm)
+                    {
+                        var visibleTimeline = Host.Get(visibleVm, "Timeline") as Timeline
+                            ?? visibleVm.GetType().GetField("timeline", Host.Flags)?.GetValue(visibleVm) as Timeline;
+                        if (visibleTimeline is not null)
+                            visibleTimeline.LayerSettings.PropertyChanged -= layerSettingsHandler;
+                    }
                 }
 
                 Native.Release();
