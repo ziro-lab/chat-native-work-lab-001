@@ -33,6 +33,43 @@ Unknown product-policy choices are not guessed early. They are frozen only after
 - Frozen evidence from earlier phases remains unchanged. Follow-on work is stacked rather than rewriting historical proof.
 - `main` is not the exploration branch. Lab gates stay isolated until their acceptance conditions are met.
 
+### CWT operation routing
+
+This project uses Chat Work Tools only as a **common operation layer**. CWT does not own folder semantics, YMM4-specific architecture, acceptance policy, or product UX.
+
+Default routing for this roadmap:
+
+- **Direct Work** — small source/docs/test changes that can be completed and verified in one pass.
+- **Managed Work** — iterative implementation where regression, rollback or revision history matters.
+- **Protected Execution** — only when a local task is genuinely long-running, expensive to recompute, or materially benefits from resumable checkpoints.
+- **Native Validation** — exact YMM4/Windows behavior is part of acceptance. Local or pure tests do not substitute for this.
+- **Public Lab** — the default place for redistribution-safe, shareable YMM4 host probes and reproducible CI evidence.
+- **Project / Capability / Playbook** — folder semantics, YMM4-specific implementation choices, UX and compatibility decisions remain here rather than moving into CWT Core.
+
+Operational precedence for this project:
+
+```text
+Safety / platform policy
+  ↓
+this Lab's Evidence / YMM4 host-observation rules
+  ↓
+this Completion Roadmap and phase acceptance
+  ↓
+CWT Default Work Policy
+```
+
+Practical consequences:
+
+- do not force every small edit through workers, ledgers or checkpoints;
+- do not stop useful independent work merely because CI is queued/in-progress;
+- before retrying an uncertain operation, observe branch/commit/run/artifact/checkpoint state first;
+- runner-start/quota/provider failures are not product-code failures;
+- use pure Linux tests for host-independent logic such as FolderRangeTracker / StructuralDeltaDetector;
+- spend native Windows/YMM4 runs only where host behavior is actually part of the claim;
+- record expensive or difficult-to-reproduce progress at durable phase/freeze boundaries;
+- CWT policy must not introduce YMM4-specific branches into its Core, and this project must not duplicate CWT's generic execution policy locally beyond the needed deltas.
+
+
 ### Product architecture convergence rules
 
 The Lab architecture is intentionally more fragmented than the intended product architecture.
