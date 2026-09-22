@@ -42,7 +42,8 @@ jobs:
         run: |
           dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/plugin --nologo -warnaserror
           if($LASTEXITCODE -ne 0){throw 'Candidate build failed'}
-          if(Get-ChildItem out/plugin -Filter '*Harmony*.dll'){throw 'Unexpected Harmony dependency'}
+          $harmony=Get-ChildItem out/plugin -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }
+          if($harmony){throw ('Unexpected Harmony dependency: ' + ($harmony.Name -join ','))}
 
           $package=Join-Path $PWD 'out/package/Ymm4NoHarmonyFolderHandsOn'
           New-Item -ItemType Directory -Force $package|Out-Null
