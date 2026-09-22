@@ -254,11 +254,6 @@ internal static class Probe
             this.display = display;
             this.span = span;
 
-            // The visual is deliberately input-transparent. Input ownership is
-            // handled on the underlying LayerLabels route for the tiny toggle
-            // rectangle only, so every other point is native YMM4.
-            IsHitTestVisible = false;
-
             toggle = new Button
             {
                 Content = "▶",
@@ -266,10 +261,14 @@ internal static class Probe
                 Width = 22,
                 Height = Math.Max(18, display.Height - 6),
                 ToolTip = "CNWL folder toggle",
-                Focusable = false,
-                IsHitTestVisible = false
+                Focusable = false
             };
             children = new VisualCollection(this) { toggle };
+
+            // Set this only after the visual collection exists: WPF may query
+            // VisualChildrenCount while propagating inherited hit-test state.
+            // The visual is display-only; input is handled on LayerLabels.
+            IsHitTestVisible = false;
         }
 
         internal Rect ToggleRect =>
