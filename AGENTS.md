@@ -2,6 +2,13 @@
 
 Keep this repository a small public experiment lab.
 
+## CWT common operation
+
+このLabは Chat Work Tools の Default Work Policy における標準Public Labとして使う。
+CWTは lifecycle / execution / validation routing のdefaultだけを担当し、このRepoのLab/Evidence/Host観測ルールがより具体的な場合はそちらを優先する。
+
+公開可能なCI再現・host probe・redistribution-safe fixture検証をここへ置く。private固有コード、秘密情報、非公開assetは持ち出さない。LabのPASSは実験で検証した境界だけのEvidenceで、Product側のAcceptance/Release PASSへ自動昇格しない。
+
 ## Rules
 
 - One experiment should answer one concrete native-host question.
