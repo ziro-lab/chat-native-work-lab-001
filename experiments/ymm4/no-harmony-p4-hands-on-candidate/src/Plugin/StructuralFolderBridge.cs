@@ -24,6 +24,7 @@ internal sealed class StructuralFolderBridge : IDisposable
     private readonly FolderStateStore state;
     private readonly Action<string> log;
     private readonly ExecutedRoutedEventHandler previewHandler;
+    private CompositeOverrideLease? compositeOverride;
     private bool disposed;
 
     internal int PendingEdits { get; private set; }
@@ -48,6 +49,63 @@ internal sealed class StructuralFolderBridge : IDisposable
             CommandManager.PreviewExecutedEvent,
             previewHandler,
             true);
+    }
+
+    internal CompositeOverrideLease PrepareCompositeOverride(
+        CommandType type,
+        int layer,
+        FolderDocument before,
+        FolderDocument after)
+    {
+        if (disposed)
+            throw new ObjectDisposedException(nameof(StructuralFolderBridge));
+        if (compositeOverride is not null)
+            throw new InvalidOperationException("A structural composite override is already active.");
+
+        var lease = new CompositeOverrideLease(
+            this,
+            type,
+            layer,
+            FolderDocumentRules.NormalizeAndValidate(before),
+            FolderDocumentRules.NormalizeAndValidate(after));
+        compositeOverride = lease;
+        return lease;
+    }
+
+    private void ReleaseCompositeOverride(CompositeOverrideLease lease)
+    {
+        if (ReferenceEquals(compositeOverride, lease))
+            compositeOverride = null;
+    }
+
+    private void ApplyPendingDocument(
+        FolderDocument before,
+        FolderDocument after,
+        string reason)
+    {
+        if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
+        {
+            log("structural_noop reason=" + reason);
+            return;
+        }
+
+        state.ReplaceDocument(after);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () =>
+            {
+                UndoCallbacks++;
+                state.ReplaceDocument(before);
+            },
+            () =>
+            {
+                RedoCallbacks++;
+                state.ReplaceDocument(after);
+            }));
+
+        PendingEdits++;
+        log(
+            $"structural_pending reason={reason} " +
+            $"timeline={timeline.ID:D}");
     }
 
     private static bool TryStructuralEdit(
@@ -100,6 +158,24 @@ internal sealed class StructuralFolderBridge : IDisposable
             || edit is null)
             return;
 
+        if (compositeOverride is { } composite
+            && composite.Matches(type, layer))
+        {
+            var current = FolderDocumentRules.NormalizeAndValidate(state.Document);
+            if (FolderDocumentCodec.Save(current) != FolderDocumentCodec.Save(composite.Before))
+            {
+                throw new InvalidOperationException(
+                    "Folder state changed while a composite structural command was pending.");
+            }
+
+            ApplyPendingDocument(
+                composite.Before,
+                composite.After,
+                $"composite:{type}:L{layer}");
+            composite.MarkApplied();
+            return;
+        }
+
         var key = timeline.ID.ToString("D");
         var timelineState = FolderDocumentRules.FindTimeline(state.Document, key);
         if (timelineState is null || timelineState.Folders.Count == 0)
@@ -130,35 +206,14 @@ internal sealed class StructuralFolderBridge : IDisposable
             key,
             nextFolders);
 
-        if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
-        {
-            log($"structural_noop type={type} layer={layer} timeline={key}");
-            return;
-        }
-
-        state.ReplaceDocument(after);
-
-        undo.AddCommand(new UndoRedoActionCommand(
-            () =>
-            {
-                UndoCallbacks++;
-                state.ReplaceDocument(before);
-            },
-            () =>
-            {
-                RedoCallbacks++;
-                state.ReplaceDocument(after);
-            }));
-
-        PendingEdits++;
+        ApplyPendingDocument(
+            before,
+            after,
+            $"standard:{type}:L{layer}:folders={beforeFolders.Length}->{nextFolders.Length}");
 
         // Frozen P1 contract: the host's structural command owns Record().
         // Adding a second Record() here would split one user action into two
         // undo units.
-        log(
-            $"structural_pending type={type} layer={layer} " +
-            $"folders_before={beforeFolders.Length} folders_after={nextFolders.Length} " +
-            $"timeline={key}");
     }
 
     public void Dispose()
@@ -171,6 +226,46 @@ internal sealed class StructuralFolderBridge : IDisposable
             CommandManager.PreviewExecutedEvent,
             previewHandler);
 
+        compositeOverride = null;
         log("structural_bridge_detached");
+    }
+
+    internal sealed class CompositeOverrideLease : IDisposable
+    {
+        private readonly StructuralFolderBridge owner;
+        private bool disposed;
+
+        internal CompositeOverrideLease(
+            StructuralFolderBridge owner,
+            CommandType type,
+            int layer,
+            FolderDocument before,
+            FolderDocument after)
+        {
+            this.owner = owner;
+            Type = type;
+            Layer = layer;
+            Before = before;
+            After = after;
+        }
+
+        internal CommandType Type { get; }
+        internal int Layer { get; }
+        internal FolderDocument Before { get; }
+        internal FolderDocument After { get; }
+        internal bool Applied { get; private set; }
+
+        internal bool Matches(CommandType type, int layer) =>
+            !disposed && Type == type && Layer == layer;
+
+        internal void MarkApplied() => Applied = true;
+
+        public void Dispose()
+        {
+            if (disposed)
+                return;
+            disposed = true;
+            owner.ReleaseCompositeOverride(this);
+        }
     }
 }
