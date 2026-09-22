@@ -246,7 +246,6 @@ internal static class Probe
         private readonly CollapsedSpan span;
         private readonly Button toggle;
 
-        internal int Clicks { get; private set; }
         internal Button Toggle => toggle;
 
         internal FolderOwnerAdorner(UIElement adornedElement, DirectDisplay display, CollapsedSpan span)
@@ -254,6 +253,12 @@ internal static class Probe
         {
             this.display = display;
             this.span = span;
+
+            // The visual is deliberately input-transparent. Input ownership is
+            // handled on the underlying LayerLabels route for the tiny toggle
+            // rectangle only, so every other point is native YMM4.
+            IsHitTestVisible = false;
+
             toggle = new Button
             {
                 Content = "▶",
@@ -261,25 +266,24 @@ internal static class Probe
                 Width = 22,
                 Height = Math.Max(18, display.Height - 6),
                 ToolTip = "CNWL folder toggle",
-                Focusable = false
-            };
-            toggle.Click += (_, _) =>
-            {
-                Clicks++;
-                var collapsed = display.Layout.IsHidden(span.Start + 1);
-                display.SetSpans(collapsed ? [] : [span]);
-                toggle.Content = collapsed ? "▼" : "▶";
-                InvalidateArrange();
+                Focusable = false,
+                IsHitTestVisible = false
             };
             children = new VisualCollection(this) { toggle };
         }
 
-        private Rect ToggleRect() =>
+        internal Rect ToggleRect =>
             new(
                 2,
                 display.Layout.VisualRowOfLogical(span.Start) * display.Height + 3,
                 toggle.Width,
                 toggle.Height);
+
+        internal void SetCollapsed(bool collapsed)
+        {
+            toggle.Content = collapsed ? "▶" : "▼";
+            InvalidateArrange();
+        }
 
         protected override int VisualChildrenCount => children.Count;
         protected override Visual GetVisualChild(int index) => children[index];
@@ -292,17 +296,58 @@ internal static class Probe
 
         protected override Size ArrangeOverride(Size finalSize)
         {
-            toggle.Arrange(ToggleRect());
+            toggle.Arrange(ToggleRect);
             return finalSize;
         }
+    }
 
-        protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
+    private sealed class FolderToggleInputLease : IDisposable
+    {
+        private readonly FrameworkElement labels;
+        private readonly DirectDisplay display;
+        private readonly CollapsedSpan span;
+        private readonly FolderOwnerAdorner adorner;
+        private readonly MouseButtonEventHandler handler;
+        private bool disposed;
+
+        internal int Clicks { get; private set; }
+
+        internal FolderToggleInputLease(
+            FrameworkElement labels,
+            DirectDisplay display,
+            CollapsedSpan span,
+            FolderOwnerAdorner adorner)
         {
-            // This Adorner is full-size only so its child can track folded rows.
-            // It contains no full-size Canvas: only the explicit button owns input.
-            return ToggleRect().Contains(hitTestParameters.HitPoint)
-                ? base.HitTestCore(hitTestParameters)
-                : null;
+            this.labels = labels;
+            this.display = display;
+            this.span = span;
+            this.adorner = adorner;
+            handler = OnPreviewMouseDown;
+            labels.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
+        }
+
+        private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (disposed || e.ChangedButton != MouseButton.Left)
+                return;
+
+            var point = e.GetPosition(labels);
+            if (!adorner.ToggleRect.Contains(point))
+                return;
+
+            e.Handled = true;
+            var wasCollapsed = display.Layout.IsHidden(span.Start + 1);
+            var nowCollapsed = !wasCollapsed;
+            display.SetSpans(nowCollapsed ? [span] : []);
+            adorner.SetCollapsed(nowCollapsed);
+            Clicks++;
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            labels.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
         }
     }
 
@@ -319,6 +364,7 @@ internal static class Probe
         DirectDisplay? display = null;
         FolderMenuLease? menuLease = null;
         FolderOwnerAdorner? adorner = null;
+        FolderToggleInputLease? toggleLease = null;
         AdornerLayer? adornerLayer = null;
         try
         {
@@ -385,19 +431,21 @@ internal static class Probe
                 ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
             adorner = new FolderOwnerAdorner(labels, display, span);
             adornerLayer.Add(adorner);
+            toggleLease = new FolderToggleInputLease(labels, display, span, adorner);
             await Task.Delay(500);
             Check("adorner_attached", adornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
+            Check("adorner_input_transparent", !adorner.IsHitTestVisible && !adorner.Toggle.IsHitTestVisible);
             Check("toggle_on_screen", Host.ScreenRect(labels).Contains(Center(adorner.Toggle)));
 
             await Native.Click(Center(adorner.Toggle));
             await Task.Delay(500);
             display.ThrowIfFailed();
-            Check("native_toggle_expands", adorner.Clicks == 1 && !display.Layout.IsHidden(3));
+            Check("native_toggle_expands", toggleLease.Clicks == 1 && !display.Layout.IsHidden(3));
 
             await Native.Click(Center(adorner.Toggle));
             await Task.Delay(500);
             display.ThrowIfFailed();
-            Check("native_toggle_collapses", adorner.Clicks == 2 && display.Layout.IsHidden(3));
+            Check("native_toggle_collapses", toggleLease.Clicks == 2 && display.Layout.IsHidden(3));
 
             var row6 = FindLayerElement(labels, 6);
             var rowRect = Host.ScreenRect(row6);
@@ -427,6 +475,8 @@ internal static class Probe
 
             menuLease.Dispose();
             menuLease = null;
+            toggleLease.Dispose();
+            toggleLease = null;
             adornerLayer.Remove(adorner);
             adorner = null;
             await Task.Delay(250);
@@ -448,6 +498,7 @@ internal static class Probe
             try
             {
                 menuLease?.Dispose();
+                toggleLease?.Dispose();
                 if (adorner is not null && adornerLayer is not null)
                     adornerLayer.Remove(adorner);
                 display?.Dispose();
