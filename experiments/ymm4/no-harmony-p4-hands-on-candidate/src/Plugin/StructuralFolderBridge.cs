@@ -3,7 +3,9 @@ using System.Windows.Input;
 using Ymm4NoHarmonyFolderRanges;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
+using Ymm4NoHarmonyStructuralConvenience;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
 
@@ -31,6 +33,7 @@ internal sealed class StructuralFolderBridge : IDisposable
     internal int PendingEdits { get; private set; }
     internal int UndoCallbacks { get; private set; }
     internal int RedoCallbacks { get; private set; }
+    internal int GroupRangeCorrections { get; private set; }
 
     internal StructuralFolderBridge(
         Window root,
@@ -56,7 +59,8 @@ internal sealed class StructuralFolderBridge : IDisposable
         CommandType type,
         int layer,
         FolderDocument before,
-        FolderDocument after)
+        FolderDocument after,
+        Action? beforeHostMutation = null)
     {
         if (disposed)
             throw new ObjectDisposedException(nameof(StructuralFolderBridge));
@@ -68,7 +72,8 @@ internal sealed class StructuralFolderBridge : IDisposable
             type,
             layer,
             FolderDocumentRules.NormalizeAndValidate(before),
-            FolderDocumentRules.NormalizeAndValidate(after));
+            FolderDocumentRules.NormalizeAndValidate(after),
+            beforeHostMutation);
         compositeOverride = lease;
         return lease;
     }
@@ -199,6 +204,7 @@ internal sealed class StructuralFolderBridge : IDisposable
                 compositeBeforeProduct,
                 compositeAfterProduct,
                 $"composite:{type}:L{layer}");
+            composite.ApplyBeforeHostMutation();
             composite.MarkApplied();
             return;
         }
@@ -210,6 +216,25 @@ internal sealed class StructuralFolderBridge : IDisposable
 
         var beforeProduct = state.ProductState;
         var before = beforeProduct.Core;
+
+        var groupItems = timeline.Items
+            .OfType<GroupItem>()
+            .ToArray();
+        var groupSpans = groupItems
+            .Select(group => new GroupSpan(
+                group.Layer,
+                group.GroupRange))
+            .ToArray();
+        var plannedGroupRanges =
+            StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+                before,
+                key,
+                edit,
+                groupSpans);
+        GroupRangeCorrections += HandsOnHostAccess.ApplyGroupRanges(
+            groupItems,
+            plannedGroupRanges);
+
         var beforeFolders = timelineState.Folders.ToArray();
         var beforeById = beforeFolders.ToDictionary(x => x.Id);
 
@@ -276,23 +301,31 @@ internal sealed class StructuralFolderBridge : IDisposable
             CommandType type,
             int layer,
             FolderDocument before,
-            FolderDocument after)
+            FolderDocument after,
+            Action? beforeHostMutation)
         {
             this.owner = owner;
             Type = type;
             Layer = layer;
             Before = before;
             After = after;
+            BeforeHostMutation = beforeHostMutation;
         }
 
         internal CommandType Type { get; }
         internal int Layer { get; }
         internal FolderDocument Before { get; }
         internal FolderDocument After { get; }
+        private Action? BeforeHostMutation { get; }
         internal bool Applied { get; private set; }
 
         internal bool Matches(CommandType type, int layer) =>
             !disposed && Type == type && Layer == layer;
+
+        internal void ApplyBeforeHostMutation()
+        {
+            BeforeHostMutation?.Invoke();
+        }
 
         internal void MarkApplied() => Applied = true;
 
