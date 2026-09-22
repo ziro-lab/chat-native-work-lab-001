@@ -214,13 +214,15 @@ internal static class Probe
         window.Activate();
         SetForegroundWindow(new WindowInteropHelper(window).Handle);
 
-        var targets = new List<IInputElement>();
-        if (label is not null) targets.Add(label);
-        if (Keyboard.FocusedElement is IInputElement focused) targets.Add(focused);
-        targets.Add(timelineView);
-        targets.Add(window);
+        var targets = new List<(string Name, IInputElement Target)>();
+        if (label is not null) targets.Add(("LayerLabel", label));
+        if (Keyboard.FocusedElement is IInputElement focused) targets.Add(("Focused", focused));
+        targets.Add(("TimelineView", timelineView));
+        targets.Add(("Window", window));
 
-        foreach (var target in targets.Distinct(ReferenceEqualityComparer.Instance))
+        foreach (var (targetName, target) in targets
+            .GroupBy(x => x.Target, ReferenceEqualityComparer.Instance)
+            .Select(x => x.First()))
         {
             foreach (var parameter in new object?[] { layer, null, labelVm, timeline })
             {
@@ -229,7 +231,7 @@ internal static class Probe
                 catch { continue; }
                 if (!can) continue;
                 routed.Execute(parameter, target);
-                facts["add_route"] = target.GetType().Name + ":" + (parameter?.GetType().Name ?? "<null>");
+                facts["add_route"] = targetName + ":" + (parameter?.GetType().Name ?? "<null>");
                 return;
             }
         }
