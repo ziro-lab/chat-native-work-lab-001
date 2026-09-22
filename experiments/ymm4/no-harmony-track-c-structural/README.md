@@ -70,3 +70,44 @@ Then it proves:
 - post-correction places the new item on logical L10;
 - FileDrop Undo/Redo/reset works while folder state stays unchanged;
 - folded geometry/extent/no-hidden-view invariants remain green throughout.
+
+
+## P1.5b result
+
+Source `0cfc6026dd3011f35a1858ad40d1ca13d422adea`, run `35694253060`.
+
+Both pinned hosts passed `PASS_TRACK_C_STRUCTURAL` with **156/156** assertions.
+
+After a real standard Add L3 structural mutation:
+
+- folded native drag maps the C owner from logical L7 to L10;
+- native Frame delta remains +35 on both hosts;
+- drag Undo/Redo/reset is exact and Folder state remains unchanged;
+- real PNG FileDrop maps to logical L10;
+- native AddFileItem executes and the added item is post-corrected to L10;
+- FileDrop Undo/Redo/reset is exact;
+- Folder state stays unchanged;
+- geometry, extent, no-reentry and no-hidden-view invariants remain green.
+
+Artifacts:
+
+- 4.55.1.1: `10680220486`, SHA256 `f9436ddfd2f135b033d86cc57fc1bc2117725b6829b699bc9055265fbdfbc826`;
+- 4.56.1.0: `10680200520`, SHA256 `574e2b7e497bd4b6b6d15808156953d28b49af7db41aa8efd2922042ea36a810`.
+
+## P1.5c — Full structural acceptance
+
+The final P1.5 gate adds the remaining roadmap exit coverage:
+
+- standard MoveUp;
+- Add exactly at an outer folder owner boundary;
+- Delete an outer owner with nested-head normalization;
+- a repeated four-operation sequence:
+  - Add owner;
+  - Delete inserted layer;
+  - MoveUp;
+  - inverse MoveDown;
+- four exact Ctrl+Z traversals;
+- four exact Ctrl+Y traversals;
+- folded geometry/extent/no-hidden-view checks at every history state;
+- native click/right interaction after the entire history traversal;
+- no Harmony.

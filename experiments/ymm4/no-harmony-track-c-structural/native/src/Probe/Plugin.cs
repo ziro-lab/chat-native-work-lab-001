@@ -793,6 +793,95 @@ internal static class Probe
             name + "_reset_display");
     }
 
+    private sealed record SequenceState(
+        string Timeline,
+        string Folders);
+
+    private static async Task<SequenceState> ApplySequenceStep(
+        string name,
+        CommandType commandType,
+        int layer,
+        string expectedFolderAfter,
+        string expectedEdit,
+        Host host,
+        TimelineViewModel vm,
+        DirectDisplay display,
+        StructuralFolderBridge bridge,
+        Func<int> recordedCount)
+    {
+        var before = Capture(host.Timeline);
+        var recordedBefore = recordedCount();
+
+        bridge.ResetLast();
+        host.Timeline.SelectedItems =
+            ImmutableList<IItem>.Empty;
+        host.Timeline.LayerSelection.SelectedLayers =
+            ImmutableList.Create(layer);
+
+        ExecuteStandardLayerCommand(
+            commandType,
+            host.Window,
+            host.View,
+            vm,
+            host.Timeline,
+            layer);
+
+        await WaitUntil(
+            name + " sequence forward",
+            () =>
+                recordedCount() > recordedBefore
+                && Capture(host.Timeline).Text != before.Text
+                && FolderText(bridge.State) ==
+                    expectedFolderAfter);
+
+        var after = Capture(host.Timeline);
+        var preview = bridge.Last
+            ?? throw new InvalidOperationException(
+                name + " sequence preview missing");
+
+        var detected = Detect(
+            before,
+            after,
+            layer);
+
+        Fact(
+            name + "_sequence_predicted",
+            EditText(preview.Edit));
+        Fact(
+            name + "_sequence_detected",
+            DetectionText(detected));
+        Fact(
+            name + "_sequence_folder",
+            FolderText(bridge.State));
+
+        Check(
+            name + "_sequence_single_record",
+            recordedCount() - recordedBefore == 1);
+        Check(
+            name + "_sequence_predicted",
+            EditText(preview.Edit) == expectedEdit);
+        Check(
+            name + "_sequence_detected",
+            detected.Status ==
+                StructuralDetectionStatus.Exact
+            && detected.Edits.Count == 1
+            && EditText(detected.Edits[0]) ==
+                expectedEdit);
+        Check(
+            name + "_sequence_folder_exact",
+            FolderText(bridge.State) ==
+                expectedFolderAfter);
+
+        await Sample(
+            host,
+            display,
+            name + "_sequence_display");
+
+        return new SequenceState(
+            after.Text,
+            FolderText(bridge.State));
+    }
+
     private static async Task Run(Window window)
     {
         DirectDisplay? display = null;
@@ -1428,6 +1517,316 @@ internal static class Probe
                 FolderText(bridge.State) ==
                     structuralFolderState);
 
+            // P1.5c acceptance: first return the deliberately retained Add L3
+            // structural state to the original baseline using its inverse native
+            // Delete L3. This starts the final acceptance cases from the same
+            // baseline without depending on older click/context history entries.
+            var p15cCleanupRecorded = recorded;
+            bridge.ResetLast();
+            timeline.SelectedItems =
+                ImmutableList<IItem>.Empty;
+            timeline.LayerSelection.SelectedLayers =
+                ImmutableList.Create(3);
+
+            ExecuteStandardLayerCommand(
+                CommandType.DeleteLayer,
+                window,
+                view,
+                vm,
+                timeline,
+                3);
+
+            await WaitUntil(
+                "p15c cleanup to baseline",
+                () =>
+                    recorded > p15cCleanupRecorded
+                    && Capture(timeline).Text ==
+                        timelineBaseline
+                    && FolderText(bridge.State) ==
+                        folderBaseline);
+
+            Check(
+                "p15c_cleanup_single_record",
+                recorded - p15cCleanupRecorded == 1);
+            Check(
+                "p15c_cleanup_timeline_baseline",
+                Capture(timeline).Text ==
+                    timelineBaseline);
+            Check(
+                "p15c_cleanup_folder_baseline",
+                FolderText(bridge.State) ==
+                    folderBaseline);
+
+            await Sample(
+                host,
+                display,
+                "p15c_cleanup_display");
+
+            // Explicit MoveUp coverage: L4 -> L3/L4 adjacent swap.
+            await Exercise(
+                "p15c_move_up_L4",
+                CommandType.MoveUpLayer,
+                4,
+                folderBaseline,
+                "S:3",
+                host,
+                vm,
+                display,
+                bridge,
+                target,
+                timelineBaseline,
+                folderBaseline,
+                () => recorded,
+                () => undone,
+                () => redone);
+
+            // Boundary: insert exactly at outer owner L1. Folder heads follow
+            // their previous content downward.
+            await Exercise(
+                "p15c_add_at_owner_L1",
+                CommandType.AddLayer,
+                1,
+                "A:2-6|B:3-5|C:7-9",
+                "I:1:1",
+                host,
+                vm,
+                display,
+                bridge,
+                target,
+                timelineBaseline,
+                folderBaseline,
+                () => recorded,
+                () => undone,
+                () => redone);
+
+            // Boundary: delete outer owner L1. The surviving A owner stays L1,
+            // nested B is normalized to a unique head L2, C shifts to L5..7.
+            await Exercise(
+                "p15c_delete_owner_L1",
+                CommandType.DeleteLayer,
+                1,
+                "A:1-4|B:2-3|C:5-7",
+                "D:1:1",
+                host,
+                vm,
+                display,
+                bridge,
+                target,
+                timelineBaseline,
+                folderBaseline,
+                () => recorded,
+                () => undone,
+                () => redone);
+
+            Check(
+                "p15c_individual_cases_reset_timeline",
+                Capture(timeline).Text ==
+                    timelineBaseline);
+            Check(
+                "p15c_individual_cases_reset_folder",
+                FolderText(bridge.State) ==
+                    folderBaseline);
+
+            // Repeated native structural sequence. The four operations return
+            // the visible model to baseline while leaving four distinct native
+            // history units. Then traverse the entire stack backward/forward.
+            var seqRecordedBefore = recorded;
+            var seqAddedUndoBefore =
+                bridge.AddedUndoCommands;
+            var seqUndoCallbacksBefore =
+                bridge.UndoCallbacks;
+            var seqRedoCallbacksBefore =
+                bridge.RedoCallbacks;
+
+            var seq0 = new SequenceState(
+                timelineBaseline,
+                folderBaseline);
+
+            var seq1 = await ApplySequenceStep(
+                "p15c_seq_add_owner",
+                CommandType.AddLayer,
+                1,
+                "A:2-6|B:3-5|C:7-9",
+                "I:1:1",
+                host,
+                vm,
+                display,
+                bridge,
+                () => recorded);
+
+            var seq2 = await ApplySequenceStep(
+                "p15c_seq_delete_inserted",
+                CommandType.DeleteLayer,
+                1,
+                folderBaseline,
+                "D:1:1",
+                host,
+                vm,
+                display,
+                bridge,
+                () => recorded);
+
+            var seq3 = await ApplySequenceStep(
+                "p15c_seq_move_up",
+                CommandType.MoveUpLayer,
+                4,
+                folderBaseline,
+                "S:3",
+                host,
+                vm,
+                display,
+                bridge,
+                () => recorded);
+
+            var seq4 = await ApplySequenceStep(
+                "p15c_seq_move_down",
+                CommandType.MoveDownLayer,
+                3,
+                folderBaseline,
+                "S:3",
+                host,
+                vm,
+                display,
+                bridge,
+                () => recorded);
+
+            Check(
+                "p15c_sequence_four_records",
+                recorded - seqRecordedBefore == 4);
+            Check(
+                "p15c_sequence_final_timeline_baseline",
+                seq4.Timeline == timelineBaseline);
+            Check(
+                "p15c_sequence_final_folder_baseline",
+                seq4.Folders == folderBaseline);
+            Check(
+                "p15c_sequence_plugin_commands_two",
+                bridge.AddedUndoCommands -
+                    seqAddedUndoBefore == 2);
+
+            var sequenceStates = new[]
+            {
+                seq0,
+                seq1,
+                seq2,
+                seq3,
+                seq4
+            };
+
+            // Four Undo operations must walk exactly S4->S3->S2->S1->S0.
+            for (var step = 3; step >= 0; step--)
+            {
+                host.Activate();
+                await Task.Delay(100);
+                var beforeUndoEvent = undone;
+                await Native.Key(0x5A, true);
+
+                var expected = sequenceStates[step];
+
+                await WaitUntil(
+                    "p15c sequence undo " + step,
+                    () =>
+                        undone > beforeUndoEvent
+                        && Capture(timeline).Text ==
+                            expected.Timeline
+                        && FolderText(bridge.State) ==
+                            expected.Folders);
+
+                Check(
+                    "p15c_sequence_undo_event_" + step,
+                    undone - beforeUndoEvent == 1);
+                Check(
+                    "p15c_sequence_undo_timeline_" + step,
+                    Capture(timeline).Text ==
+                        expected.Timeline);
+                Check(
+                    "p15c_sequence_undo_folder_" + step,
+                    FolderText(bridge.State) ==
+                        expected.Folders);
+
+                await Sample(
+                    host,
+                    display,
+                    "p15c_sequence_undo_" + step);
+            }
+
+            Check(
+                "p15c_sequence_undo_callbacks_two",
+                bridge.UndoCallbacks -
+                    seqUndoCallbacksBefore == 2);
+            Check(
+                "p15c_sequence_after_all_undo_baseline",
+                Capture(timeline).Text ==
+                    timelineBaseline
+                && FolderText(bridge.State) ==
+                    folderBaseline);
+
+            // Four Redo operations must walk S0->S1->S2->S3->S4.
+            for (var step = 1; step <= 4; step++)
+            {
+                host.Activate();
+                await Task.Delay(100);
+                var beforeRedoEvent = redone;
+                await Native.Key(0x59, true);
+
+                var expected = sequenceStates[step];
+
+                await WaitUntil(
+                    "p15c sequence redo " + step,
+                    () =>
+                        redone > beforeRedoEvent
+                        && Capture(timeline).Text ==
+                            expected.Timeline
+                        && FolderText(bridge.State) ==
+                            expected.Folders);
+
+                Check(
+                    "p15c_sequence_redo_event_" + step,
+                    redone - beforeRedoEvent == 1);
+                Check(
+                    "p15c_sequence_redo_timeline_" + step,
+                    Capture(timeline).Text ==
+                        expected.Timeline);
+                Check(
+                    "p15c_sequence_redo_folder_" + step,
+                    FolderText(bridge.State) ==
+                        expected.Folders);
+
+                await Sample(
+                    host,
+                    display,
+                    "p15c_sequence_redo_" + step);
+            }
+
+            Check(
+                "p15c_sequence_redo_callbacks_two",
+                bridge.RedoCallbacks -
+                    seqRedoCallbacksBefore == 2);
+            Check(
+                "p15c_sequence_after_all_redo_baseline",
+                Capture(timeline).Text ==
+                    timelineBaseline
+                && FolderText(bridge.State) ==
+                    folderBaseline);
+
+            // Native interaction after the full history traversal. Keep this
+            // after all history assertions because click/right are host-owned
+            // history-producing interactions.
+            await Sample(
+                host,
+                display,
+                "p15c_post_history_display");
+            await ClickAndRight(
+                host,
+                display,
+                target,
+                "p15c_post_history_input");
+
+            Check(
+                "p15c_post_history_folder_stable",
+                FolderText(bridge.State) ==
+                    folderBaseline);
+
             Check(
                 "no_harmony_loaded",
                 !AppDomain.CurrentDomain
@@ -1459,7 +1858,7 @@ internal static class Probe
                                 "HarmonyLib",
                                 StringComparison.OrdinalIgnoreCase)));
 
-            Log("P1.5a Track C structural integration complete");
+            Log("P1.5c Full structural acceptance complete");
         }
         catch (Exception ex)
         {
