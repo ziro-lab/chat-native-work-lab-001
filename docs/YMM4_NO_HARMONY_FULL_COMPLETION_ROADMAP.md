@@ -121,6 +121,8 @@ Do **not** freeze the original LayerPatan `TimelineTracker / ShiftDetector` appr
 
 ## 3. Common phase workflow
 
+Validation depth for P2-P7 is governed by [`YMM4_NO_HARMONY_VALIDATION_POLICY.md`](YMM4_NO_HARMONY_VALIDATION_POLICY.md). Frozen P0/P1 native suites are golden regression assets, not the default inner-loop test set.
+
 Every technical phase follows the same sequence unless there is a documented reason not to:
 
 **Discovery -> isolated proof -> integrated proof -> freeze**
