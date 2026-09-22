@@ -30,6 +30,9 @@ try {
       $s=New-Object System.Text.StringBuilder 1024
       [void][P3NewProjectWindow]::GetWindowText($w,$s,1024)
       $title=$s.ToString()
+      if(-not [string]::IsNullOrWhiteSpace($title)){
+        Add-Content -Path (Join-Path $OutputDir 'windows.txt') -Value (([DateTime]::UtcNow.ToString('O')) + "\t" + $title)
+      }
       if($title -like '*Check for updates*' -or $title -like '*About YukkuriMovieMaker*'){
         [void][P3NewProjectWindow]::PostMessage($w,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
       }elseif($title -eq 'Confirm'){
