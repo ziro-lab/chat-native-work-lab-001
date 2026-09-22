@@ -117,11 +117,17 @@ internal static class Probe
         Log("fact " + line);
     }
 
-    private static HostSnapshot Snapshot(Timeline timeline) =>
-        new(
-            timeline.Items.ToDictionary(x => x, x => x.Layer, ReferenceEqualityComparer.Instance),
+    private static HostSnapshot Snapshot(Timeline timeline)
+    {
+        var itemLayers = new Dictionary<IItem, int>(ReferenceEqualityComparer.Instance);
+        foreach (var item in timeline.Items)
+            itemLayers[item] = item.Layer;
+
+        return new HostSnapshot(
+            itemLayers,
             timeline.LayerSettings.Items,
             timeline.LayerSelection.SelectedLayers);
+    }
 
     private static string MarkerSnapshot(Timeline timeline) =>
         string.Join(
