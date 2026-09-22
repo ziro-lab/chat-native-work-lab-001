@@ -87,6 +87,17 @@ internal static class Program
 
         result = StructuralDeltaDetector.Detect(
             sparse,
+            operationPositionHints: new HashSet<int> { 3 });
+        Equal("insert_sparse_operation_hint_status", StructuralDetectionStatus.Exact, result.Status);
+        Equal("insert_sparse_operation_hint_position", "I:3:1", Edits(result));
+
+        result = StructuralDeltaDetector.Detect(
+            sparse,
+            operationPositionHints: new HashSet<int> { 2, 3 });
+        Equal("insert_sparse_multiple_operation_hints_stay_ambiguous", StructuralDetectionStatus.Ambiguous, result.Status);
+
+        result = StructuralDeltaDetector.Detect(
+            sparse,
             insertedHints: new HashSet<int> { 3 });
 
         Equal("insert_sparse_hint_status", StructuralDetectionStatus.Exact, result.Status);
@@ -132,6 +143,17 @@ internal static class Program
 
         result = StructuralDeltaDetector.Detect(sparse);
         Equal("delete_sparse_without_hint_is_ambiguous", StructuralDetectionStatus.Ambiguous, result.Status);
+
+        result = StructuralDeltaDetector.Detect(
+            sparse,
+            operationPositionHints: new HashSet<int> { 3 });
+        Equal("delete_sparse_operation_hint_status", StructuralDetectionStatus.Exact, result.Status);
+        Equal("delete_sparse_operation_hint_position", "D:3:1", Edits(result));
+
+        result = StructuralDeltaDetector.Detect(
+            sparse,
+            operationPositionHints: new HashSet<int> { 2, 3 });
+        Equal("delete_sparse_multiple_operation_hints_stay_ambiguous", StructuralDetectionStatus.Ambiguous, result.Status);
 
         result = StructuralDeltaDetector.Detect(
             sparse,

@@ -41,7 +41,8 @@ public static class StructuralDeltaDetector
     public static StructuralDetection Detect(
         IEnumerable<LayerPair> pairs,
         IReadOnlySet<int>? vanishedLayers = null,
-        IReadOnlySet<int>? insertedHints = null)
+        IReadOnlySet<int>? insertedHints = null,
+        IReadOnlySet<int>? operationPositionHints = null)
     {
         ArgumentNullException.ThrowIfNull(pairs);
 
@@ -98,7 +99,8 @@ public static class StructuralDeltaDetector
                     low,
                     high,
                     count,
-                    insertedHints);
+                    insertedHints,
+                    operationPositionHints);
 
                 if (position is null)
                 {
@@ -123,7 +125,8 @@ public static class StructuralDeltaDetector
                     previousOld,
                     oldLayer,
                     count,
-                    vanishedLayers);
+                    vanishedLayers,
+                    operationPositionHints);
 
                 if (deleted is null)
                 {
@@ -188,7 +191,8 @@ public static class StructuralDeltaDetector
         int low,
         int high,
         int count,
-        IReadOnlySet<int>? insertedHints)
+        IReadOnlySet<int>? insertedHints,
+        IReadOnlySet<int>? operationPositionHints)
     {
         if (low > high)
             return null;
@@ -196,38 +200,44 @@ public static class StructuralDeltaDetector
         if (low == high)
             return low;
 
-        if (insertedHints is null || insertedHints.Count == 0)
-            return null;
-
-        var candidates = insertedHints
-            .Where(x => low <= x && x <= high)
-            .OrderBy(x => x)
-            .ToArray();
-
-        if (candidates.Length == 0)
-            return null;
-
-        // For a multi-layer insert, prefer a contiguous hinted block.
-        for (var i = 0; i < candidates.Length; i++)
+        if (insertedHints is { Count: > 0 })
         {
-            var start = candidates[i];
-            var contiguous = true;
+            var candidates = insertedHints
+                .Where(x => low <= x && x <= high)
+                .OrderBy(x => x)
+                .ToArray();
 
-            for (var offset = 1; offset < count; offset++)
+            for (var i = 0; i < candidates.Length; i++)
             {
-                if (!insertedHints.Contains(start + offset))
+                var start = candidates[i];
+                var contiguous = true;
+
+                for (var offset = 1; offset < count; offset++)
                 {
-                    contiguous = false;
-                    break;
+                    if (!insertedHints.Contains(start + offset))
+                    {
+                        contiguous = false;
+                        break;
+                    }
                 }
+
+                if (contiguous)
+                    return start;
             }
 
-            if (contiguous)
-                return start;
+            if (count == 1 && candidates.Length == 1)
+                return candidates[0];
         }
 
-        return count == 1 && candidates.Length == 1
-            ? candidates[0]
+        var operationCandidates = operationPositionHints?
+            .Where(x => low <= x && x <= high)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToArray()
+            ?? Array.Empty<int>();
+
+        return operationCandidates.Length == 1
+            ? operationCandidates[0]
             : null;
     }
 
@@ -235,7 +245,8 @@ public static class StructuralDeltaDetector
         int previousOld,
         int oldLayer,
         int count,
-        IReadOnlySet<int>? vanishedLayers)
+        IReadOnlySet<int>? vanishedLayers,
+        IReadOnlySet<int>? operationPositionHints)
     {
         var candidates = vanishedLayers?
             .Where(x => previousOld < x && x < oldLayer)
@@ -251,7 +262,19 @@ public static class StructuralDeltaDetector
         if (gap == count)
             return Enumerable.Range(oldLayer - count, count).ToArray();
 
-        return null;
+        var operationCandidates = operationPositionHints?
+            .Where(x =>
+                previousOld < x
+                && x < oldLayer
+                && x + count - 1 < oldLayer)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToArray()
+            ?? Array.Empty<int>();
+
+        return operationCandidates.Length == 1
+            ? Enumerable.Range(operationCandidates[0], count).ToArray()
+            : null;
     }
 
     private static bool IsContiguous(IReadOnlyList<int> values)

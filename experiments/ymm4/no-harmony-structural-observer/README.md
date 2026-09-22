@@ -105,3 +105,33 @@ Strict native acceptance on both pinned hosts requires the same observer to clas
 - no Harmony.
 
 The fixture also places sparse markers at L20/L30 and records standard Add/Delete at L24. Those sparse results are discovery facts in the first native run, not yet a strict product-policy assertion. They decide whether state-delta observation alone is sufficient or whether P1.3 needs one generic RoutedCommand-position fallback.
+
+## P1.3b native shared observer — PASS
+
+Source `55ef1c12b379b7a31253e457ff0ea7440819ced0`, run `35689361090`.
+
+Both pinned hosts passed **62/62** strict assertions.
+
+- dense Add/Delete/MoveDown are classified exactly by the same snapshot detector;
+- Undo/Redo/reset produce exact inverse/swap deltas;
+- `UndoRedoManager.Recorded / Undoed / Redoed` are usable common transaction triggers;
+- sparse Add L24 is exact because YMM4 adds an empty LayerSetting hint at L24;
+- sparse Delete empty L24 is genuinely ambiguous from state delta alone on both hosts.
+
+Artifacts:
+
+- 4.55.1.1: `10677727515`, SHA256 `404b359dbdcc646b2e1c7f6c1931756d653605139d05ebf375714ac020d67192`;
+- 4.56.1.0: `10678401894`, SHA256 `6f95107d738a5f87dc3c2d7f9043d6a7a39704bee67c172345edf4a0341aa781`.
+
+## P1.3c generic structural command-position hint
+
+The remaining sparse-delete ambiguity is intentionally not solved by adding a DeleteLayer adapter.
+
+One handled-events-too WPF RoutedCommand observer records only:
+
+- which recognized standard structural command ran;
+- its integer layer parameter.
+
+That layer is passed to the pure detector as an optional operation-position hint. The detector accepts the hint only when it uniquely resolves an already-observed structural gap. Multiple/conflicting hints stay Ambiguous.
+
+Dense state-delta classification remains independent of the hint. The hint is a precision fallback, not the source of folder policy.

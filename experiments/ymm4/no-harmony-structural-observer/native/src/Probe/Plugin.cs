@@ -43,6 +43,55 @@ internal static class StructuralObserverProbe
         string Parameter,
         bool Executed);
 
+    private sealed record StructuralCommandHint(
+        CommandType CommandType,
+        int Layer);
+
+    private sealed class RoutedStructuralHintObserver : IDisposable
+    {
+        private readonly FrameworkElement root;
+        private readonly ExecutedRoutedEventHandler handler;
+
+        public RoutedStructuralHintObserver(FrameworkElement root)
+        {
+            this.root = root;
+            handler = OnExecuted;
+            root.AddHandler(CommandManager.ExecutedEvent, handler, true);
+        }
+
+        public StructuralCommandHint? Last { get; private set; }
+        public int SeenCount { get; private set; }
+
+        public void Reset() => Last = null;
+
+        private void OnExecuted(object sender, ExecutedRoutedEventArgs e)
+        {
+            if (e.Parameter is not int layer)
+                return;
+
+            foreach (var type in new[]
+            {
+                CommandType.AddLayer,
+                CommandType.DeleteLayer,
+                CommandType.MoveUpLayer,
+                CommandType.MoveDownLayer
+            })
+            {
+                var configured = CommandSettings.Default[type];
+                if (configured is null || !ReferenceEquals(e.Command, configured))
+                    continue;
+
+                Last = new StructuralCommandHint(type, layer);
+                SeenCount++;
+                Log($"routed_structural_hint command={type} layer={layer} count={SeenCount}");
+                return;
+            }
+        }
+
+        public void Dispose() =>
+            root.RemoveHandler(CommandManager.ExecutedEvent, handler);
+    }
+
     internal static void Schedule()
     {
         var path = Environment.GetEnvironmentVariable("CNWL_STRUCTURAL_OBSERVER_DIR");
@@ -151,7 +200,10 @@ internal static class StructuralObserverProbe
             text);
     }
 
-    private static StructuralDetection Detect(HostSnapshot before, HostSnapshot after)
+    private static StructuralDetection Detect(
+        HostSnapshot before,
+        HostSnapshot after,
+        IReadOnlySet<int>? operationPositionHints = null)
     {
         var pairs = new List<LayerPair>();
         var survivingOldLayers = new HashSet<int>();
@@ -176,7 +228,8 @@ internal static class StructuralObserverProbe
         return StructuralDeltaDetector.Detect(
             pairs,
             vanishedLayers: vanished,
-            insertedHints: insertedHints);
+            insertedHints: insertedHints,
+            operationPositionHints: operationPositionHints);
     }
 
     private static string Describe(StructuralDetection detection) =>
@@ -343,6 +396,7 @@ internal static class StructuralObserverProbe
         TimelineViewModel vm,
         Timeline timeline,
         UndoRedoManager manager,
+        RoutedStructuralHintObserver commandHints,
         int layer,
         Func<int> recordedCount,
         Func<int> undoCount,
@@ -356,6 +410,7 @@ internal static class StructuralObserverProbe
         var before = Capture(timeline);
         Check(name + "_starts_at_baseline", before.Text == baselineText);
 
+        commandHints.Reset();
         var recordedBefore = recordedCount();
         var route = ExecuteStandardLayerCommand(
             commandType,
@@ -371,8 +426,14 @@ internal static class StructuralObserverProbe
 
         var after = Capture(timeline);
         var forward = Detect(before, after);
+        var commandHint = commandHints.Last;
 
         Fact(name + "_after", after.Text);
+        Fact(
+            name + "_command_hint",
+            commandHint is null
+                ? "<none>"
+                : $"{commandHint.CommandType}:{commandHint.Layer}");
         Fact(name + "_forward", Describe(forward));
         Fact(name + "_settings_before", EmptySettings(before));
         Fact(name + "_settings_after", EmptySettings(after));
@@ -381,6 +442,11 @@ internal static class StructuralObserverProbe
             !ReferenceEquals(before.SettingsIdentity, after.SettingsIdentity));
 
         Check(name + "_route_executed", route.Executed);
+        Check(
+            name + "_command_hint_seen",
+            commandHint is not null
+            && commandHint.CommandType == commandType
+            && commandHint.Layer == layer);
         Check(name + "_recorded_trigger", recordedCount() > recordedBefore);
         Check(name + "_forward_exact", forward.Status == StructuralDetectionStatus.Exact);
         Check(name + "_forward_edit", Describe(forward) == "Exact:" + expectedForward);
@@ -438,7 +504,10 @@ internal static class StructuralObserverProbe
         FrameworkElement timelineView,
         TimelineViewModel vm,
         Timeline timeline,
+        RoutedStructuralHintObserver commandHints,
         int layer,
+        StructuralDetectionStatus expectedRawStatus,
+        string expectedHintedEdit,
         Func<int> recordedCount,
         Func<int> undoCount,
         string baselineText)
@@ -450,6 +519,7 @@ internal static class StructuralObserverProbe
         var before = Capture(timeline);
         Check(name + "_starts_at_baseline", before.Text == baselineText);
 
+        commandHints.Reset();
         var recordedBefore = recordedCount();
         ExecuteStandardLayerCommand(
             commandType,
@@ -464,10 +534,22 @@ internal static class StructuralObserverProbe
             () => recordedCount() > recordedBefore && Capture(timeline).Text != before.Text);
 
         var after = Capture(timeline);
-        var detection = Detect(before, after);
+        var rawDetection = Detect(before, after);
+        var commandHint = commandHints.Last;
+        IReadOnlySet<int>? operationHints = commandHint is null
+            ? null
+            : new HashSet<int> { commandHint.Layer };
+        var hintedDetection = Detect(before, after, operationHints);
 
-        Fact(name + "_detection", Describe(detection));
-        Fact(name + "_reason", detection.Reason);
+        Fact(name + "_raw_detection", Describe(rawDetection));
+        Fact(name + "_raw_reason", rawDetection.Reason);
+        Fact(
+            name + "_command_hint",
+            commandHint is null
+                ? "<none>"
+                : $"{commandHint.CommandType}:{commandHint.Layer}");
+        Fact(name + "_hinted_detection", Describe(hintedDetection));
+        Fact(name + "_hinted_reason", hintedDetection.Reason);
         Fact(name + "_settings_before", EmptySettings(before));
         Fact(name + "_settings_after", EmptySettings(after));
         Fact(
@@ -475,7 +557,16 @@ internal static class StructuralObserverProbe
             !ReferenceEquals(before.SettingsIdentity, after.SettingsIdentity));
 
         Check(name + "_recorded_trigger", recordedCount() > recordedBefore);
+        Check(
+            name + "_command_hint_seen",
+            commandHint is not null
+            && commandHint.CommandType == commandType
+            && commandHint.Layer == layer);
+        Check(name + "_raw_status", rawDetection.Status == expectedRawStatus);
+        Check(name + "_hinted_exact", hintedDetection.Status == StructuralDetectionStatus.Exact);
+        Check(name + "_hinted_edit", Describe(hintedDetection) == "Exact:" + expectedHintedEdit);
 
+        commandHints.Reset();
         window.Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
 
@@ -494,6 +585,7 @@ internal static class StructuralObserverProbe
         EventHandler? undoHandler = null;
         EventHandler? redoHandler = null;
         UndoRedoManager? manager = null;
+        RoutedStructuralHintObserver? commandHints = null;
 
         try
         {
@@ -588,6 +680,7 @@ internal static class StructuralObserverProbe
             manager.Recorded += recordedHandler;
             manager.Undoed += undoHandler;
             manager.Redoed += redoHandler;
+            commandHints = new RoutedStructuralHintObserver(window);
 
             var baseline = Capture(timeline);
             Fact("baseline", baseline.Text);
@@ -604,6 +697,7 @@ internal static class StructuralObserverProbe
                 vm,
                 timeline,
                 manager,
+                commandHints,
                 3,
                 () => recorded,
                 () => undone,
@@ -620,6 +714,7 @@ internal static class StructuralObserverProbe
                 vm,
                 timeline,
                 manager,
+                commandHints,
                 3,
                 () => recorded,
                 () => undone,
@@ -636,6 +731,7 @@ internal static class StructuralObserverProbe
                 vm,
                 timeline,
                 manager,
+                commandHints,
                 3,
                 () => recorded,
                 () => undone,
@@ -649,7 +745,10 @@ internal static class StructuralObserverProbe
                 timelineView,
                 vm,
                 timeline,
+                commandHints,
                 24,
+                StructuralDetectionStatus.Exact,
+                "I:24:1",
                 () => recorded,
                 () => undone,
                 baseline.Text);
@@ -661,7 +760,10 @@ internal static class StructuralObserverProbe
                 timelineView,
                 vm,
                 timeline,
+                commandHints,
                 24,
+                StructuralDetectionStatus.Ambiguous,
+                "D:24:1",
                 () => recorded,
                 () => undone,
                 baseline.Text);
@@ -694,6 +796,8 @@ internal static class StructuralObserverProbe
         {
             try
             {
+                commandHints?.Dispose();
+
                 if (manager is not null)
                 {
                     if (recordedHandler is not null)

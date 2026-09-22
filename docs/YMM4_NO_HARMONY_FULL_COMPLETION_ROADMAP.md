@@ -295,6 +295,18 @@ Selection rule:
 - command-specific hooks are acceptable as Lab evidence, but should not multiply product adapters when a shared delta observer is equally reliable;
 - if routed-command observation and state-delta observation are combined, each must have a clear responsibility rather than duplicate folder logic.
 
+#### P1.3 current evidence
+
+- **P1.3a pure detector:** run `35681491437`, **31/31** green before the position-hint extension.
+- **P1.3b exact-host shared observer:** source `55ef1c12b379b7a31253e457ff0ea7440819ced0`, run `35689361090`, **62/62** on both pinned hosts.
+- dense Add/Delete/Move and their Undo/Redo deltas are exact through one shared observer;
+- sparse Add is exact via native empty-LayerSetting hint;
+- sparse deletion of a completely empty row is underdetermined from state delta alone on both hosts.
+- **P1.3c active:** prove one generic WPF RoutedCommand position-hint observer as the bounded fallback for the underdetermined sparse-delete case. It must feed the same pure detector and must not own folder semantics.
+
+P1.3 is not frozen until P1.3c is native-green on both pinned hosts.
+
+
 ### P1.4 Undo/Redo synchronization
 
 Folder-range state must move with the same user-visible history step as the YMM4 structural operation.
