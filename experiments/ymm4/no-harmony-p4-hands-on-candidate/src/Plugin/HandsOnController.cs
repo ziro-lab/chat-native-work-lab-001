@@ -72,6 +72,188 @@ internal sealed class HandsOnController : IDisposable
         RefreshFromDocument();
         ScheduleS0IntegrationSmoke();
         ScheduleS1IntegrationSmoke();
+        ScheduleS2MetadataSurfaceSmoke();
+    }
+
+    private void ScheduleS2MetadataSurfaceSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S2_METADATA_SURFACE_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS2MetadataSurfaceSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS2MetadataSurfaceSmokeAsync()
+    {
+        EventHandler? recorded = null;
+        EventHandler? undone = null;
+        EventHandler? redone = null;
+
+        var recordedCount = 0;
+        var undoCount = 0;
+        var redoCount = 0;
+
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+            {
+                throw new InvalidOperationException(
+                    "S2 metadata surface smoke must start resource-free.");
+            }
+
+            // Flush any host initialization unit before observing setter history.
+            undo.Record();
+
+            recorded = (_, _) => recordedCount++;
+            undone = (_, _) => undoCount++;
+            redone = (_, _) => redoCount++;
+            undo.Recorded += recorded;
+            undo.Undoed += undone;
+            undo.Redoed += redone;
+
+            var visibilityLayer = 1;
+            var originalVisible =
+                timeline.LayerSettings.IsVisibles[visibilityLayer];
+            var changedVisible = !originalVisible;
+
+            timeline.LayerSettings.IsVisibles[visibilityLayer] =
+                changedVisible;
+            var visibilityAfterSetter =
+                timeline.LayerSettings.IsVisibles[visibilityLayer];
+
+            var recordedBeforeVisibilityCommit = recordedCount;
+            undo.Record();
+            var visibilityRecordDelta =
+                recordedCount - recordedBeforeVisibilityCommit;
+
+            var visibilityUndoRestored = false;
+            var visibilityRedoRestored = false;
+
+            if (visibilityRecordDelta > 0)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+                visibilityUndoRestored =
+                    timeline.LayerSettings.IsVisibles[visibilityLayer]
+                    == originalVisible;
+
+                ExecuteHostCommand(CommandType.Redo, null);
+                await Task.Delay(250);
+                visibilityRedoRestored =
+                    timeline.LayerSettings.IsVisibles[visibilityLayer]
+                    == changedVisible;
+            }
+
+            // Return to the baseline before probing color.
+            if (visibilityRedoRestored)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+            }
+            else
+            {
+                timeline.LayerSettings.IsVisibles[visibilityLayer] =
+                    originalVisible;
+                undo.Record();
+            }
+
+            var colorLayer = 2;
+            var originalColor = timeline.LayerSettings.Colors[colorLayer];
+            var changedColor = Color.FromArgb(255, 79, 127, 224);
+
+            if (changedColor == originalColor)
+                changedColor = Color.FromArgb(255, 224, 90, 90);
+
+            timeline.LayerSettings.Colors[colorLayer] = changedColor;
+            var colorAfterSetter =
+                timeline.LayerSettings.Colors[colorLayer];
+
+            var recordedBeforeColorCommit = recordedCount;
+            undo.Record();
+            var colorRecordDelta =
+                recordedCount - recordedBeforeColorCommit;
+
+            var colorUndoRestored = false;
+            var colorRedoRestored = false;
+
+            if (colorRecordDelta > 0)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+                colorUndoRestored =
+                    timeline.LayerSettings.Colors[colorLayer]
+                    == originalColor;
+
+                ExecuteHostCommand(CommandType.Redo, null);
+                await Task.Delay(250);
+                colorRedoRestored =
+                    timeline.LayerSettings.Colors[colorLayer]
+                    == changedColor;
+            }
+
+            // Leave the disposable project at baseline.
+            if (colorRedoRestored)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+            }
+            else
+            {
+                timeline.LayerSettings.Colors[colorLayer] =
+                    originalColor;
+                undo.Record();
+            }
+
+            WriteS2MetadataSurfaceResult(
+                "PASS_S2_METADATA_SURFACE\n" +
+                $"visibility_setter_changed={visibilityAfterSetter == changedVisible}\n" +
+                $"visibility_record_delta={visibilityRecordDelta}\n" +
+                $"visibility_undo_restored={visibilityUndoRestored}\n" +
+                $"visibility_redo_restored={visibilityRedoRestored}\n" +
+                $"color_setter_changed={colorAfterSetter == changedColor}\n" +
+                $"color_record_delta={colorRecordDelta}\n" +
+                $"color_undo_restored={colorUndoRestored}\n" +
+                $"color_redo_restored={colorRedoRestored}\n" +
+                $"recorded_events={recordedCount}\n" +
+                $"undo_events={undoCount}\n" +
+                $"redo_events={redoCount}\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "s2_metadata_surface_smoke_error=" + ex);
+            WriteS2MetadataSurfaceResult(
+                "FAIL_S2_METADATA_SURFACE\n" + ex + "\n");
+        }
+        finally
+        {
+            if (recorded is not null)
+                undo.Recorded -= recorded;
+            if (undone is not null)
+                undo.Undoed -= undone;
+            if (redone is not null)
+                undo.Redoed -= redone;
+        }
+    }
+
+    private static void WriteS2MetadataSurfaceResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "s2-metadata-surface-result.txt"),
+            text);
     }
 
     private void ScheduleS1IntegrationSmoke()
