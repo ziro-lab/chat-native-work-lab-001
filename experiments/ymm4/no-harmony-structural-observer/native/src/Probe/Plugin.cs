@@ -15,7 +15,7 @@ using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
 using YukkuriMovieMaker.ViewModels;
 
-namespace Ymm4NoHarmonyStructuralObserverNative;
+namespace Ymm4NoHarmonyFolderLayoutProbe;
 
 public sealed class StructuralObserverEntry : ILocalizePlugin
 {
