@@ -222,12 +222,11 @@ public static class FolderProductStateRules
         });
     }
 
-    public static FolderProductState SetFolderOption(
+    public static FolderProductState SetFolderColor(
         FolderProductState state,
         string timelineKey,
         Guid folderId,
-        string? color = null,
-        bool? hidden = null)
+        string? color)
     {
         var normalized = NormalizeAndValidate(state);
         var key = timelineKey.Trim();
@@ -236,16 +235,48 @@ public static class FolderProductStateRules
         {
             TimelineKey = key,
             FolderId = folderId,
-            Color = color ?? existing?.Color,
-            Hidden = hidden ?? existing?.Hidden ?? false
+            Color = color,
+            Hidden = existing?.Hidden ?? false
         };
 
-        var options = normalized.FolderOptions
-            .Where(x => !(x.TimelineKey == key && x.FolderId == folderId))
+        return ReplaceOption(normalized, next);
+    }
+
+    public static FolderProductState SetFolderHidden(
+        FolderProductState state,
+        string timelineKey,
+        Guid folderId,
+        bool hidden)
+    {
+        var normalized = NormalizeAndValidate(state);
+        var key = timelineKey.Trim();
+        var existing = FindOption(normalized, key, folderId);
+        var next = new FolderOptionState
+        {
+            TimelineKey = key,
+            FolderId = folderId,
+            Color = existing?.Color,
+            Hidden = hidden
+        };
+
+        return ReplaceOption(normalized, next);
+    }
+
+    private static FolderProductState ReplaceOption(
+        FolderProductState state,
+        FolderOptionState next)
+    {
+        var options = state.FolderOptions
+            .Where(x => !(
+                x.TimelineKey == next.TimelineKey
+                && x.FolderId == next.FolderId))
             .Append(next)
             .ToArray();
 
-        return NormalizeAndValidate(normalized with { FolderOptions = options });
+        return NormalizeAndValidate(state with
+        {
+            FolderOptions = options
+        });
     }
 
     public static FolderProductState ReplaceRestoreMap(
