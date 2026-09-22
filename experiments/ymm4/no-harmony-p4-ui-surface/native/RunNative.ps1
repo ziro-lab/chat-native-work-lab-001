@@ -49,7 +49,7 @@ try {
   Get-Content $result|Write-Host
   if($r.status -ne 'PASS_P4_UI_SURFACE'){throw 'P4 UI surface failed'}
   $required=@(
-    'fixture_folded','layer_labels_found','adorner_attached','toggle_on_screen',
+    'fixture_folded','layer_labels_found','adorner_attached','adorner_input_transparent','toggle_on_screen',
     'native_toggle_expands','native_toggle_collapses',
     'outside_overlay_preserves_native_layer_click',
     'context_open_observed','native_menu_preserved_and_extended',
