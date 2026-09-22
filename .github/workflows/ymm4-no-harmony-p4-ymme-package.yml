@@ -1,0 +1,122 @@
+name: YMM4 no-Harmony P4 ymme package
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
+      - '.github/workflows/ymm4-no-harmony-p4-ymme-package.yml'
+      - 'docs/YMM4_NO_HARMONY_VS_LAYERPATAN.md'
+permissions: { contents: read }
+concurrency:
+  group: p4-ymme-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ymme:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    env:
+      HOST_VERSION: '4.56.1.0'
+      HOST_HASH: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Acquire pinned host
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build exact candidate and .ymme
+        shell: pwsh
+        env:
+          SOURCE_HEAD: '${{ github.event.pull_request.head.sha || github.sha }}'
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" "-p:PackYmme=true" -o out/plugin --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Candidate/ymme build failed'}
+
+          $dll='out/plugin/Ymm4NoHarmonyFolderHandsOn.dll'
+          $ymme='publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme'
+          if(-not(Test-Path $dll)){throw 'Candidate DLL missing'}
+          if(-not(Test-Path $ymme)){throw 'Candidate .ymme missing'}
+
+          $harmony=Get-ChildItem out/plugin -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }
+          if($harmony){throw ('Unexpected Harmony dependency: ' + ($harmony.Name -join ','))}
+
+          New-Item -ItemType Directory -Force out/evidence,out/package|Out-Null
+          Copy-Item $ymme out/package/
+
+          $zip='out/evidence/package-inspect.zip'
+          Copy-Item $ymme $zip
+          $extract='out/evidence/package-inspect'
+          Expand-Archive $zip $extract
+          $root=Join-Path $extract 'Ymm4NoHarmonyFolderHandsOn'
+          if(-not(Test-Path (Join-Path $root 'Ymm4NoHarmonyFolderHandsOn.dll'))){throw 'ymme root DLL missing'}
+          if(-not(Test-Path (Join-Path $root 'README.md'))){throw 'ymme README missing'}
+          if(-not(Test-Path (Join-Path $root 'HANDS_ON.md'))){throw 'ymme HANDS_ON missing'}
+          if(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){throw 'Harmony file present inside .ymme'}
+
+          @(
+            "source_head=$env:SOURCE_HEAD",
+            "checkout=$(git rev-parse HEAD)",
+            "tree=$(git rev-parse 'HEAD^{tree}')",
+            "host_version=$env:HOST_VERSION",
+            "host_zip_sha256=$env:HOST_HASH",
+            "candidate_dll_sha256=$((Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant())",
+            "ymme_sha256=$((Get-FileHash $ymme -Algorithm SHA256).Hash.ToLowerInvariant())",
+            "run=$env:GITHUB_RUN_ID",
+            "level=P4-ymme-real-install"
+          )|Set-Content out/evidence/manifest.txt
+
+      - name: Exercise real YMM4 .ymme installation and startup
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunYmmeInstall.ps1 -Ymm4Dir $env:YMM4_DIR -Package (Join-Path $PWD 'publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme') -ExpectedDll (Join-Path $PWD 'out/plugin/Ymm4NoHarmonyFolderHandsOn.dll') -OutputDir (Join-Path $PWD 'out/evidence/install')
+
+      - name: Verify install/package identity
+        shell: pwsh
+        run: |
+          $result=Get-Content out/evidence/install/ymme-install-result.json -Raw|ConvertFrom-Json
+          if($result.status -ne 'PASS_P4_YMME_INSTALL'){throw 'ymme install marker failed'}
+
+          $built=(Get-FileHash out/plugin/Ymm4NoHarmonyFolderHandsOn.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($result.expected_dll_sha256 -ne $built -or $result.installed_dll_sha256 -ne $built){throw 'Installed DLL identity differs from built candidate'}
+
+          $ymme=(Get-FileHash publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($result.package_sha256 -ne $ymme){throw 'Installed .ymme identity mismatch'}
+
+          'PASS_P4_YMME_PACKAGE'|Set-Content out/evidence/PASS_P4_YMME_PACKAGE.txt
+          "installed_dll_sha256=$($result.installed_dll_sha256)"|Add-Content out/evidence/manifest.txt
+          "installed_ymme_sha256=$($result.package_sha256)"|Add-Content out/evidence/manifest.txt
+
+      - if: always()
+        name: Show evidence
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence/manifest.txt){Get-Content out/evidence/manifest.txt}
+          if(Test-Path out/evidence/install/ymme-install-result.json){Get-Content out/evidence/install/ymme-install-result.json}
+          if(Test-Path out/evidence/install/startup/runtime.log){Get-Content out/evidence/install/startup/runtime.log -Tail 120}
+          if(Test-Path out/evidence/install/installer-windows.txt){Get-Content out/evidence/install/installer-windows.txt -Tail 160}
+
+      - if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-folder-P4.4-ymme
+          path: out/package/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme
+          retention-days: 30
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-folder-P4.4-ymme-evidence
+          path: out/evidence/
+          retention-days: 30
