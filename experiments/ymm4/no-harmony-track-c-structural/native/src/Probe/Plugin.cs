@@ -714,10 +714,32 @@ internal static class Probe
 
         var timelineAfter = after.Text;
 
+        Fact(
+            name + "_recorded_before_undo_delta",
+            recordedCount() - recordedBefore);
+
         host.Activate();
         await Task.Delay(100);
         var undoBefore = undoCount();
         await Native.Key(0x5A, true);
+
+        await Task.Delay(900);
+
+        Fact(
+            name + "_undo_diag_event_delta",
+            undoCount() - undoBefore);
+        Fact(
+            name + "_undo_diag_timeline",
+            Capture(host.Timeline).Text);
+        Fact(
+            name + "_undo_diag_folder",
+            FolderText(bridge.State));
+        Fact(
+            name + "_undo_diag_expected_timeline",
+            timelineBaseline);
+        Fact(
+            name + "_undo_diag_expected_folder",
+            folderBaseline);
 
         await WaitUntil(
             name + " undo",
@@ -726,7 +748,8 @@ internal static class Probe
                 && Capture(host.Timeline).Text ==
                     timelineBaseline
                 && FolderText(bridge.State) ==
-                    folderBaseline);
+                    folderBaseline,
+            4000);
 
         Check(
             name + "_undo_event_one",
