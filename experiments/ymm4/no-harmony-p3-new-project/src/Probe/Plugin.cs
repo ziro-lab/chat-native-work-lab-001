@@ -60,6 +60,9 @@ internal static class Probe
     private static readonly Dictionary<string, bool> checks = [];
     private static readonly Dictionary<string, string> facts = [];
 
+    private static void Progress(string value) =>
+        File.AppendAllText(Path.Combine(output, "progress.txt"), $"{DateTime.UtcNow:O}\t{value}{Environment.NewLine}");
+
     internal static void Schedule()
     {
         var path = Environment.GetEnvironmentVariable("CNWL_P3_NEW_PROJECT_DIR");
@@ -184,6 +187,7 @@ internal static class Probe
     {
         try
         {
+            Progress("run_start");
             var timeline = GetTimeline(root) ?? throw new InvalidOperationException("Timeline missing.");
             var oldId = timeline.ID;
             Check("old_timeline_id_nonempty", oldId != Guid.Empty);
@@ -193,7 +197,9 @@ internal static class Probe
             Check("old_area_seeded", ReadArea(root) == seeded);
 
             var oldPath = Path.Combine(output, "p3-new-project-old.ymmp");
+            Progress("save_old_before");
             PublicMethod(root, "SaveProject", typeof(string)).Invoke(root, [oldPath]);
+            Progress("save_old_after");
             await Task.Delay(800);
             Check("old_project_saved", File.Exists(oldPath));
             Check("old_project_reports_saved", PublicProperty(root, "IsSaved") is true);
@@ -201,7 +207,9 @@ internal static class Probe
             facts["before_timeline_id"] = oldId.ToString("D");
             facts["before_load_count"] = ToolViewModel.LoadCount.ToString(CultureInfo.InvariantCulture);
 
+            Progress("create_project_before");
             PublicMethod(root, "CreateProject", Type.EmptyTypes).Invoke(root, null);
+            Progress("create_project_after");
             await Task.Delay(2500);
 
             var current = GetTimeline(root);
@@ -222,7 +230,8 @@ internal static class Probe
             Check("no_harmony_loaded", !AppDomain.CurrentDomain.GetAssemblies()
                 .Any(x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
         }
-        catch (Exception ex) { Fail(ex); }
+        catch (Exception ex) { Progress("failure=" + ex.GetType().Name); Fail(ex); }
+        Progress("finish");
         Finish();
     }
 
