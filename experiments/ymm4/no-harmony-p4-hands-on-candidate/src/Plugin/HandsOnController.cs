@@ -99,6 +99,10 @@ internal sealed class HandsOnController : IDisposable
                     string.Join(",", markers.Select(x => x.Layer)));
             }
 
+            // Match the frozen P1 native gate: commit any fixture setup first so
+            // the measured structural action owns a clean history unit.
+            undo.Record();
+
             var key = timeline.ID.ToString("D");
             var folderId = Guid.Parse("10101010-2020-3030-4040-505050505050");
             state.ReplaceDocument(FolderDocumentRules.ReplaceTimeline(
