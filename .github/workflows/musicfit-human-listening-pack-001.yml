@@ -1,0 +1,65 @@
+name: musicfit-human-listening-pack-001
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/audio/musicfit-human-listening-pack-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - '.github/workflows/musicfit-human-listening-pack-001.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/audio/musicfit-human-listening-pack-001/**'
+      - 'experiments/audio/music-fit-core-001/**'
+      - '.github/workflows/musicfit-human-listening-pack-001.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Music Fit CPU dependencies
+        run: python -m pip install -r experiments/audio/music-fit-core-001/requirements.txt
+      - name: Build blind CC0 listening pack
+        working-directory: experiments/audio/musicfit-human-listening-pack-001
+        run: python build_pack.py
+      - name: Validate pack contract
+        working-directory: experiments/audio/musicfit-human-listening-pack-001
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('out/listening-pack')
+          m=json.loads((p/'manifest.json').read_text())
+          u=json.loads((p/'unblind.json').read_text())
+          assert m['source_count']==6
+          assert m['case_count']==12
+          assert 0 <= m['candidate_count'] <= 36
+          assert 0 <= m['no_candidate_case_count'] <= 12
+          assert m['license_policy']=='CC0-1.0 only'
+          assert m['source_overlap_with_holdout_or_tuning']==0
+          assert len(u['cases'])==12
+          assert (p/'review.html').is_file()
+          assert sum(1 for _ in p.rglob('candidate-*.wav'))==m['candidate_count']
+          print({'sources':6,'cases':12,'candidates':m['candidate_count'],
+                 'no_candidate_cases':m['no_candidate_case_count']})
+          PY
+      - name: Upload CC0 listening pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: musicfit-human-listening-pack-001
+          path: experiments/audio/musicfit-human-listening-pack-001/out/listening-pack/**
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 3
