@@ -1,6 +1,6 @@
 using Ymm4NoHarmonyFolderRanges;
 
-static class T
+internal static class Program
 {
     private static int assertions;
 
@@ -55,7 +55,7 @@ static class T
         throw new InvalidOperationException($"{name}: expected {typeof(TException).Name}");
     }
 
-    public static int Run()
+    public static int Main()
     {
         try
         {
@@ -248,5 +248,3 @@ static class T
         True("sequence_remains_valid", true);
     }
 }
-
-return T.Run();
