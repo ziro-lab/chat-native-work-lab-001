@@ -22,6 +22,7 @@ public readonly record struct GroupIssue(
 
 public sealed record StructuralConveniencePlan(
     FolderDocument Core,
+    StructuralEdit Edit,
     Func<int, int> MapLayer,
     IReadOnlyList<int> GroupRanges);
 
@@ -131,6 +132,7 @@ public static class StructuralConvenienceRules
 
         return new(
             next,
+            new InsertLayers(position, count),
             standard.MapLayer,
             Array.AsReadOnly(groupRanges));
     }
@@ -191,6 +193,7 @@ public static class StructuralConvenienceRules
 
         return new(
             next,
+            new DeleteLayers(position, count),
             standard.MapLayer,
             Array.AsReadOnly(groupRanges));
     }
