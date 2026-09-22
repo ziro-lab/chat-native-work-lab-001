@@ -117,7 +117,6 @@ internal sealed class HandsOnController : IDisposable
                 await Task.Delay(120);
             }
 
-            var baselineMaxLayer = timeline.MaxLayer;
             var key = timeline.ID.ToString("D");
             var folderA = Guid.Parse(
                 "44444444-4444-4444-4444-444444444444");
@@ -176,6 +175,9 @@ internal sealed class HandsOnController : IDisposable
             undo.Record();
             await Task.Delay(250);
 
+            var baselineItemMaxLayer = timeline.MaxLayer;
+            var baselineSettingsMaxLayer = timeline.LayerSettings.MaxLayer;
+
             // S2 + S3 composition: a row inserted into a hidden folder must
             // become hidden and get one restore entry before the same Record().
             commands.SetHidden(folderA, true);
@@ -206,22 +208,35 @@ internal sealed class HandsOnController : IDisposable
                     "Inserted tail row did not join hidden/restore ownership.");
             }
 
-            if (timeline.MaxLayer != baselineMaxLayer + 1)
+            if (timeline.LayerSettings.MaxLayer
+                    != baselineSettingsMaxLayer + 1)
+            {
                 throw new InvalidOperationException(
-                    $"Tail insert MaxLayer mismatch: {timeline.MaxLayer}.");
+                    "Tail insert LayerSettings.MaxLayer mismatch: " +
+                    $"{timeline.LayerSettings.MaxLayer} != {baselineSettingsMaxLayer + 1}.");
+            }
+
+            if (timeline.MaxLayer != baselineItemMaxLayer)
+            {
+                throw new InvalidOperationException(
+                    "Tail insert unexpectedly changed item-derived Timeline.MaxLayer: " +
+                    $"{timeline.MaxLayer} != {baselineItemMaxLayer}.");
+            }
 
             ExecuteHostCommand(CommandType.Undo, null);
             await Task.Delay(350);
             AssertS3Folder(folderA, 1, 3, "tail_undo_A");
             AssertS3Folder(folderB, 5, 6, "tail_undo_B");
             if (groupA.GroupRange != 2
-                || timeline.MaxLayer != baselineMaxLayer)
+                || timeline.MaxLayer != baselineItemMaxLayer
+                || timeline.LayerSettings.MaxLayer != baselineSettingsMaxLayer)
             {
                 throw new InvalidOperationException(
                     "Tail insert Undo did not restore host/group structure: " +
                     $"group_range={groupA.GroupRange} expected=2; " +
-                    $"max_layer={timeline.MaxLayer} expected={baselineMaxLayer}; " +
-                    $"settings_max={timeline.LayerSettings.MaxLayer}.");
+                    $"item_max={timeline.MaxLayer} expected={baselineItemMaxLayer}; " +
+                    $"settings_max={timeline.LayerSettings.MaxLayer} " +
+                    $"expected={baselineSettingsMaxLayer}.");
             }
 
             var restoreAfterTailUndo = FolderProductStateRules.RestoreMap(
@@ -238,13 +253,15 @@ internal sealed class HandsOnController : IDisposable
             AssertS3Folder(folderA, 1, 4, "tail_redo_A");
             AssertS3Folder(folderB, 6, 7, "tail_redo_B");
             if (groupA.GroupRange != 3
-                || timeline.MaxLayer != baselineMaxLayer + 1)
+                || timeline.MaxLayer != baselineItemMaxLayer
+                || timeline.LayerSettings.MaxLayer != baselineSettingsMaxLayer + 1)
             {
                 throw new InvalidOperationException(
                     "Tail insert Redo did not reapply host/group structure: " +
                     $"group_range={groupA.GroupRange} expected=3; " +
-                    $"max_layer={timeline.MaxLayer} expected={baselineMaxLayer + 1}; " +
-                    $"settings_max={timeline.LayerSettings.MaxLayer}.");
+                    $"item_max={timeline.MaxLayer} expected={baselineItemMaxLayer}; " +
+                    $"settings_max={timeline.LayerSettings.MaxLayer} " +
+                    $"expected={baselineSettingsMaxLayer + 1}.");
             }
 
             var restoreAfterTailRedo = FolderProductStateRules.RestoreMap(
@@ -347,7 +364,8 @@ internal sealed class HandsOnController : IDisposable
 
             // Destructive folder delete must remove metadata + rows + YmmGroupItem
             // and come back with one Undo.
-            var maxBeforeDelete = timeline.MaxLayer;
+            var itemMaxBeforeDelete = timeline.MaxLayer;
+            var settingsMaxBeforeDelete = timeline.LayerSettings.MaxLayer;
             commands.DeleteFolderContents(folderB);
             await Task.Delay(400);
 
@@ -361,28 +379,39 @@ internal sealed class HandsOnController : IDisposable
                 throw new InvalidOperationException(
                     "Destructive folder delete left GroupItems in removed rows.");
             }
-            if (timeline.MaxLayer != maxBeforeDelete - 3)
+            if (timeline.LayerSettings.MaxLayer
+                    != settingsMaxBeforeDelete - 3)
+            {
                 throw new InvalidOperationException(
-                    "Destructive folder delete did not remove three logical rows.");
+                    "Destructive folder delete did not remove three logical rows: " +
+                    $"{timeline.LayerSettings.MaxLayer} != {settingsMaxBeforeDelete - 3}.");
+            }
 
             ExecuteHostCommand(CommandType.Undo, null);
             await Task.Delay(400);
             AssertS3Folder(folderB, 7, 9, "delete_undo_B");
             if (timeline.Items.OfType<YmmGroupItem>().Count() != 2
-                || timeline.MaxLayer != maxBeforeDelete)
+                || timeline.LayerSettings.MaxLayer != settingsMaxBeforeDelete
+                || timeline.MaxLayer != itemMaxBeforeDelete)
             {
                 throw new InvalidOperationException(
-                    "Destructive delete Undo did not restore host state.");
+                    "Destructive delete Undo did not restore host state: " +
+                    $"groups={timeline.Items.OfType<YmmGroupItem>().Count()}; " +
+                    $"settings_max={timeline.LayerSettings.MaxLayer}/{settingsMaxBeforeDelete}; " +
+                    $"item_max={timeline.MaxLayer}/{itemMaxBeforeDelete}.");
             }
 
             ExecuteHostCommand(CommandType.Redo, null);
             await Task.Delay(400);
             if (commands.FindFolder(folderB) is not null
                 || timeline.Items.OfType<YmmGroupItem>().Count() != 1
-                || timeline.MaxLayer != maxBeforeDelete - 3)
+                || timeline.LayerSettings.MaxLayer != settingsMaxBeforeDelete - 3)
             {
                 throw new InvalidOperationException(
-                    "Destructive delete Redo did not reapply host state.");
+                    "Destructive delete Redo did not reapply host state: " +
+                    $"groups={timeline.Items.OfType<YmmGroupItem>().Count()}; " +
+                    $"settings_max={timeline.LayerSettings.MaxLayer}/" +
+                    $"{settingsMaxBeforeDelete - 3}.");
             }
 
             WriteS3Result(
