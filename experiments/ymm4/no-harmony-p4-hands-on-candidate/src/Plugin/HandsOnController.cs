@@ -218,7 +218,10 @@ internal sealed class HandsOnController : IDisposable
                 || timeline.MaxLayer != baselineMaxLayer)
             {
                 throw new InvalidOperationException(
-                    "Tail insert Undo did not restore host/group structure.");
+                    "Tail insert Undo did not restore host/group structure: " +
+                    $"group_range={groupA.GroupRange} expected=2; " +
+                    $"max_layer={timeline.MaxLayer} expected={baselineMaxLayer}; " +
+                    $"settings_max={timeline.LayerSettings.MaxLayer}.");
             }
 
             var restoreAfterTailUndo = FolderProductStateRules.RestoreMap(
@@ -238,7 +241,10 @@ internal sealed class HandsOnController : IDisposable
                 || timeline.MaxLayer != baselineMaxLayer + 1)
             {
                 throw new InvalidOperationException(
-                    "Tail insert Redo did not reapply host/group structure.");
+                    "Tail insert Redo did not reapply host/group structure: " +
+                    $"group_range={groupA.GroupRange} expected=3; " +
+                    $"max_layer={timeline.MaxLayer} expected={baselineMaxLayer + 1}; " +
+                    $"settings_max={timeline.LayerSettings.MaxLayer}.");
             }
 
             var restoreAfterTailRedo = FolderProductStateRules.RestoreMap(
