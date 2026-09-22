@@ -71,6 +71,191 @@ internal sealed class HandsOnController : IDisposable
         window.AddHandler(Mouse.PreviewMouseDownEvent, mouseHandler, true);
         RefreshFromDocument();
         ScheduleS0IntegrationSmoke();
+        ScheduleS1IntegrationSmoke();
+    }
+
+    private void ScheduleS1IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S1_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS1IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS1IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+            {
+                throw new InvalidOperationException(
+                    "S1 create smoke must start from a resource-free Timeline.");
+            }
+
+            var baselineSettingsCount = timeline.LayerSettings.Items.Count;
+            undo.Record();
+
+            timeline.LayerSelection.Clear();
+            var folderId = Guid.Parse(
+                "11111111-2222-3333-4444-555555555555");
+
+            var decision = commands.CreateFromContext(
+                clickedLayer: 1,
+                folderId,
+                "S1 Smoke");
+
+            await Task.Delay(500);
+
+            if (!decision.NeedsAdditionalLayer
+                || decision.Start != 1
+                || decision.End != 1)
+            {
+                throw new InvalidOperationException(
+                    "S1 one-row decision did not request the insertion convenience.");
+            }
+
+            AssertS1CreateState(
+                "after_create",
+                folderId,
+                expectedFolder: (1, 2, false),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            if (structural.PendingEdits != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Expected one composite history command, got {structural.PendingEdits}.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            AssertS1CreateState(
+                "after_undo",
+                folderId,
+                expectedFolder: null,
+                expectedSettingsCount: baselineSettingsCount);
+
+            if (structural.UndoCallbacks != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Expected one composite Undo callback, got {structural.UndoCallbacks}.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            AssertS1CreateState(
+                "after_redo",
+                folderId,
+                expectedFolder: (1, 2, false),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            if (structural.RedoCallbacks != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Expected one composite Redo callback, got {structural.RedoCallbacks}.");
+            }
+
+            commands.SetAllCollapsed(true);
+            await Task.Delay(250);
+            AssertS1CreateState(
+                "after_collapse_all",
+                folderId,
+                expectedFolder: (1, 2, true),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            commands.SetAllCollapsed(false);
+            await Task.Delay(250);
+            AssertS1CreateState(
+                "after_expand_all",
+                folderId,
+                expectedFolder: (1, 2, false),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            WriteS1Result(
+                "PASS_S1_INTEGRATION\n" +
+                $"timeline={timeline.ID:D}\n" +
+                $"baseline_settings={baselineSettingsCount}\n" +
+                $"after_create_settings={timeline.LayerSettings.Items.Count}\n" +
+                $"pending={structural.PendingEdits}\n" +
+                $"undo_callbacks={structural.UndoCallbacks}\n" +
+                $"redo_callbacks={structural.RedoCallbacks}\n" +
+                "single_row_create=true\n" +
+                "bulk_collapse_expand=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic("s1_integration_smoke_error=" + ex);
+            WriteS1Result("FAIL_S1_INTEGRATION\n" + ex + "\n");
+        }
+    }
+
+    private void AssertS1CreateState(
+        string phase,
+        Guid folderId,
+        (int Start, int End, bool Collapsed)? expectedFolder,
+        int expectedSettingsCount)
+    {
+        var timelineState = FolderDocumentRules.FindTimeline(
+            state.Document,
+            timeline.ID.ToString("D"));
+        var folder = timelineState?.Folders
+            .FirstOrDefault(x => x.Id == folderId);
+
+        if (expectedFolder is null)
+        {
+            if (folder is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{phase}: folder should not exist but was " +
+                    $"{folder.Start}-{folder.End}.");
+            }
+        }
+        else
+        {
+            var expected = expectedFolder.Value;
+            if (folder is null
+                || folder.Start != expected.Start
+                || folder.End != expected.End
+                || folder.IsCollapsed != expected.Collapsed)
+            {
+                throw new InvalidOperationException(
+                    $"{phase}: folder mismatch: " +
+                    (folder is null
+                        ? "<null>"
+                        : $"{folder.Start}-{folder.End}:collapsed={folder.IsCollapsed}"));
+            }
+        }
+
+        var settingsCount = timeline.LayerSettings.Items.Count;
+        if (settingsCount != expectedSettingsCount)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: LayerSettings count mismatch: " +
+                $"{settingsCount} != {expectedSettingsCount}");
+        }
+
+        display.ThrowIfFailed();
+        HandsOnRuntime.Diagnostic(
+            $"s1_state phase={phase} settings={settingsCount} " +
+            $"folder={(folder is null ? "<null>" : $"{folder.Start}-{folder.End}:{folder.IsCollapsed}")}");
+    }
+
+    private static void WriteS1Result(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "s1-result.txt"), text);
     }
 
     private void ScheduleS0IntegrationSmoke()
