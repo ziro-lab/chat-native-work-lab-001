@@ -51,7 +51,7 @@ try {
   $r=Get-Content $result -Raw|ConvertFrom-Json -AsHashtable
   Get-Content $result|Write-Host
   if($r.status -ne 'PASS_P3_NEW_PROJECT'){throw 'P3 new-project lifecycle failed'}
-  $required=@('old_timeline_id_nonempty','old_area_seeded','old_project_saved','old_project_reports_saved','new_project_has_timeline','new_project_identity_is_fresh','new_project_does_not_inherit_folder_state','new_project_folder_state_empty','old_project_file_survives','no_harmony_loaded')
+  $required=@('old_timeline_id_nonempty','old_area_seeded','old_project_saved','old_project_reports_saved','new_project_has_timeline','new_project_identity_is_fresh','new_project_path_signal_observed','new_project_state_clear_applied','new_project_does_not_inherit_folder_state','new_project_folder_state_empty','old_project_file_survives','no_harmony_loaded')
   foreach($name in $required){if(-not $r.checks.ContainsKey($name) -or $r.checks[$name] -ne $true){throw "Missing/failed assertion: $name"}}
 } finally {
   if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
