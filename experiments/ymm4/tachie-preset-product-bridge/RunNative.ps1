@@ -114,11 +114,13 @@ try{
    'animationCharacterResolution','psdCharacterResolution','modernItemPropertyBinding',
    'syntheticFingerprintStable','animationFingerprintStable','psdFingerprintStable',
    'animationItemRoundtrip','psdItemRoundtrip',
-   'animationEditorCleanup','psdEditorCleanup'
+   'animationEditorCleanup','psdEditorCleanup',
+   'animationExpressionItemPresetSurface','psdExpressionItemPresetSurface'
  )){
    if(-not$r.assertions.$name){throw "P0 assertion failed: $name"}
  }
  Write-Output "PASS_TACHIE_PRESET_PRODUCT_BRIDGE_P0"
+ Write-Output "PASS_EXPRESSION_ITEM_PRESET_SURFACE"
 }finally{
  if(-not$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
  Remove-Item Env:CNWL_TACHIE_PRESET_BRIDGE_OUTPUT -ErrorAction SilentlyContinue
