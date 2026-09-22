@@ -394,8 +394,19 @@ internal sealed class HandsOnController : IDisposable
                 throw new InvalidOperationException(
                     "S2 runtime did not save outer schema v2.");
 
+            var root = window.DataContext
+                ?? throw new InvalidOperationException(
+                    "Main window DataContext is missing.");
+            HandsOnHostAccess.WriteToolAreaSavedState(root, raw);
+            var toolAreaRaw = HandsOnHostAccess.ReadToolAreaSavedState(root);
+            if (!string.Equals(raw, toolAreaRaw, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "S2 v2 ToolArea SavedState roundtrip changed the payload.");
+            }
+
             var reloaded = new FolderPersistenceSession();
-            var load = reloaded.Load(raw);
+            var load = reloaded.Load(toolAreaRaw);
             if (!load.Success)
                 throw new InvalidOperationException(
                     "S2 v2 runtime reload failed: " + load.Error);
@@ -427,6 +438,7 @@ internal sealed class HandsOnController : IDisposable
                 "folder_color_undo_redo=true\n" +
                 "layer_color_apply=true\n" +
                 "layer_color_undo_redo=true\n" +
+                "toolstate_v2_roundtrip=true\n" +
                 "schema_v2_reload=true\n");
         }
         catch (Exception ex)
