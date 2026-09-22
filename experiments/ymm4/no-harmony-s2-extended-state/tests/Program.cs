@@ -133,6 +133,26 @@ Check("restore_map_exact",
             [6] = true
         }.OrderBy(x => x.Key)));
 
+var insertedRestore = FolderProductStateRules.RemapRestoreLayers(
+    state,
+    "scene-a",
+    layer => layer >= 2 ? layer + 1 : layer);
+Check("restore_map_insert_remap",
+    FolderProductStateRules.RestoreMap(insertedRestore, "scene-a")
+        .OrderBy(x => x.Key)
+        .Select(x => x.Key)
+        .SequenceEqual(new[] { 1, 3, 4, 5, 6, 7 }));
+
+var deletedRestore = FolderProductStateRules.RemapRestoreLayers(
+    state,
+    "scene-a",
+    layer => layer == 3 ? -1 : layer > 3 ? layer - 1 : layer);
+Check("restore_map_delete_remap",
+    FolderProductStateRules.RestoreMap(deletedRestore, "scene-a")
+        .OrderBy(x => x.Key)
+        .Select(x => x.Key)
+        .SequenceEqual(new[] { 1, 2, 3, 4, 5 }));
+
 var v2Text = FolderProductStateCodec.Save(state);
 var loadedV2 = FolderProductStateCodec.Load(v2Text);
 Check("v2_load_success", loadedV2.Success && !loadedV2.MigratedFromV1);
