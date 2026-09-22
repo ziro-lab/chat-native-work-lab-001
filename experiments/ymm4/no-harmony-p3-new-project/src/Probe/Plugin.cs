@@ -161,6 +161,74 @@ internal static class Probe
         return state.GetType().GetProperty("SavedState", BindingFlags.Instance | BindingFlags.Public)?.GetValue(state) as string;
     }
 
+    private sealed class NewProjectStateCoordinator : IDisposable
+    {
+        private readonly object root;
+        private readonly Guid previousTimelineId;
+        private readonly INotifyPropertyChanged projectPath;
+        private readonly PropertyChangedEventHandler handler;
+        private bool disposed;
+
+        public int Signals { get; private set; }
+        public int Clears { get; private set; }
+
+        public NewProjectStateCoordinator(object root, Guid previousTimelineId)
+        {
+            this.root = root;
+            this.previousTimelineId = previousTimelineId;
+            projectPath = PublicProperty(root, "ProjectFilePath") as INotifyPropertyChanged
+                ?? throw new InvalidOperationException("ProjectFilePath has no public change notification.");
+            handler = (_, _) =>
+            {
+                Signals++;
+                Application.Current.Dispatcher.BeginInvoke(
+                    new Action(TryClearForNewProject),
+                    DispatcherPriority.ContextIdle);
+            };
+            projectPath.PropertyChanged += handler;
+        }
+
+        private void TryClearForNewProject()
+        {
+            if (disposed)
+                return;
+
+            var current = GetTimeline(root);
+            var isEmpty = PublicProperty(root, "IsEmptyProject") is true;
+            var path = ProjectPath(root);
+
+            if (!string.IsNullOrWhiteSpace(path)
+                || !isEmpty
+                || current is null
+                || current.ID == Guid.Empty
+                || current.ID == previousTimelineId)
+                return;
+
+            var area = FindArea(root);
+            var load = area.GetType().GetMethod(
+                "LoadState",
+                BindingFlags.Instance | BindingFlags.Public,
+                [typeof(ToolState)])
+                ?? throw new MissingMethodException(area.GetType().FullName, "LoadState(ToolState)");
+
+            load.Invoke(area, [new ToolState
+            {
+                Title = "CNWL P3 New Project State",
+                SavedState = null
+            }]);
+
+            Clears++;
+            Progress($"new_project_state_cleared id={current.ID:D}");
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            projectPath.PropertyChanged -= handler;
+        }
+    }
+
     private static string Document(Guid timelineId) => FolderDocumentCodec.Save(new FolderDocument
     {
         Timelines =
@@ -207,10 +275,14 @@ internal static class Probe
             facts["before_timeline_id"] = oldId.ToString("D");
             facts["before_load_count"] = ToolViewModel.LoadCount.ToString(CultureInfo.InvariantCulture);
 
+            using var coordinator = new NewProjectStateCoordinator(root, oldId);
             Progress("create_project_before");
             PublicMethod(root, "CreateProject", Type.EmptyTypes).Invoke(root, null);
             Progress("create_project_after");
             await Task.Delay(2500);
+
+            facts["new_project_path_signals"] = coordinator.Signals.ToString(CultureInfo.InvariantCulture);
+            facts["new_project_state_clears"] = coordinator.Clears.ToString(CultureInfo.InvariantCulture);
 
             var current = GetTimeline(root);
             var newId = current?.ID ?? Guid.Empty;
@@ -224,6 +296,8 @@ internal static class Probe
 
             Check("new_project_has_timeline", current is not null && newId != Guid.Empty);
             Check("new_project_identity_is_fresh", newId != oldId);
+            Check("new_project_path_signal_observed", coordinator.Signals > 0);
+            Check("new_project_state_clear_applied", coordinator.Clears > 0);
             Check("new_project_does_not_inherit_folder_state", areaState != seeded);
             Check("new_project_folder_state_empty", string.IsNullOrWhiteSpace(areaState));
             Check("old_project_file_survives", File.Exists(oldPath));
