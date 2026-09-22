@@ -191,6 +191,46 @@ public static class FolderSessionDocumentRules
         });
     }
 
+    public static FolderSessionDocument ReplaceCoreAfterStructuralEdit(
+        FolderSessionDocument document,
+        FolderDocument core,
+        string timelineKey,
+        Ymm4NoHarmonyFolderRanges.FolderRangePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(core);
+        ArgumentException.ThrowIfNullOrWhiteSpace(timelineKey);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        var source = NormalizeAndValidate(document);
+        var key = timelineKey.Trim();
+        var replaced = ReplaceCore(source, core);
+
+        var remappedTarget = source.VisibilityRestore
+            .Where(x =>
+                string.Equals(
+                    x.TimelineKey,
+                    key,
+                    StringComparison.Ordinal))
+            .Select(x => (Entry: x, Layer: plan.MapLayer(x.Layer)))
+            .Where(x => x.Layer >= 0)
+            .Select(x => x.Entry with { Layer = x.Layer });
+
+        var other = replaced.VisibilityRestore
+            .Where(x =>
+                !string.Equals(
+                    x.TimelineKey,
+                    key,
+                    StringComparison.Ordinal));
+
+        return NormalizeAndValidate(replaced with
+        {
+            VisibilityRestore = other
+                .Concat(remappedTarget)
+                .ToArray()
+        });
+    }
+
     public static FolderSessionDocument SetFolderOption(
         FolderSessionDocument document,
         string timelineKey,
