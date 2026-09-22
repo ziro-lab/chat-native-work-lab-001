@@ -49,6 +49,40 @@ function Write-WindowSnapshot([string]$phase) {
         $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
         $isHostUpdater = $title -match '(?i)(UpdateNotiferViewModel|Check for updates|Updating YukkuriMovieMaker4)'
         $isInstallerLike = $title -match '(?i)(plugin|プラグイン|extension|拡張|ymme|install)'
+
+        if ($isInstallerLike) {
+            $all = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($element in $all) {
+                $elementName = $element.Current.Name
+                if ([string]::IsNullOrWhiteSpace($elementName)) { continue }
+                $typeName = $element.Current.ControlType.ProgrammaticName
+                "[$phase]   element type=$typeName name=$elementName id=$($element.Current.AutomationId) class=$($element.Current.ClassName) focusable=$($element.Current.IsKeyboardFocusable)" | Add-Content $windowLog
+
+                if ($element.Current.IsEnabled -and $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox) {
+                    try {
+                        $toggle = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+                        if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) {
+                            $toggle.Toggle()
+                            "[$phase]   toggled-checkbox=$elementName" | Add-Content $windowLog
+                            Start-Sleep -Milliseconds 200
+                        }
+                    } catch {
+                        "[$phase]   checkbox-toggle-failed=$elementName :: $($_.Exception.Message)" | Add-Content $windowLog
+                    }
+                }
+
+                if ($element.Current.IsEnabled -and $elementName -match '(?i)(Notes on plugin installation|プラグインのインストールに関する注意)') {
+                    try {
+                        $element.SetFocus()
+                        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+                        "[$phase]   keyboard-activated=$elementName" | Add-Content $windowLog
+                        Start-Sleep -Milliseconds 250
+                    } catch {
+                        "[$phase]   keyboard-activate-failed=$elementName :: $($_.Exception.Message)" | Add-Content $windowLog
+                    }
+                }
+            }
+        }
         foreach ($button in $buttons) {
             $name = $button.Current.Name
             "[$phase]   button=$name enabled=$($button.Current.IsEnabled)" | Add-Content $windowLog
