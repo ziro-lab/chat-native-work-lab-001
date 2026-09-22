@@ -43,9 +43,31 @@ internal sealed class SelectionNavigationBridge : IDisposable
         if (disposed || (!string.IsNullOrEmpty(e.PropertyName) && e.PropertyName != "SelectedItems"))
             return;
         SelectionSignals++;
+        var selected = host.Timeline.SelectedItems;
+        if (selected.Count == 1)
+            NavigateTo(selected[0]);
+        else
+            CancelPending();
+    }
+
+    // Shared navigation entry for product-owned ScrollToItem-style routes.
+    // It deliberately does not change native selection or CurrentFrame.
+    internal void NavigateTo(IItem target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (disposed)
+            throw new ObjectDisposedException(nameof(SelectionNavigationBridge));
         var ticket = ++revision;
         pending?.Abort();
-        Enqueue(() => Begin(ticket));
+        pending = null;
+        Enqueue(() => Begin(ticket, target));
+    }
+
+    private void CancelPending()
+    {
+        revision++;
+        pending?.Abort();
+        pending = null;
     }
 
     private void Enqueue(Action action)
@@ -64,25 +86,19 @@ internal sealed class SelectionNavigationBridge : IDisposable
         }), DispatcherPriority.ContextIdle);
     }
 
-    private bool TryTarget(long ticket, out IItem? target)
+    private bool TryTarget(long ticket, IItem expected)
     {
-        target = null;
         if (disposed || ticket != revision || display.GestureActive ||
             Mouse.Captured is not null || Mouse.LeftButton != MouseButtonState.Released)
             return false;
-        var selected = host.Timeline.SelectedItems;
-        if (selected.Count != 1) return false;
-        var item = selected[0];
-        if (!host.Timeline.Items.Any(x => ReferenceEquals(x, item))) return false;
-        if (item.Layer < 0 || item.Layer > display.Layout.MaxLayer) return false;
-        target = item;
-        return true;
+        if (!host.Timeline.Items.Any(x => ReferenceEquals(x, expected))) return false;
+        return expected.Layer >= 0 && expected.Layer <= display.Layout.MaxLayer;
     }
 
-    private void Begin(long ticket)
+    private void Begin(long ticket, IItem target)
     {
         display.ThrowIfFailed();
-        if (!TryTarget(ticket, out var target) || target is null) return;
+        if (!TryTarget(ticket, target)) return;
         var layer = target.Layer;
         var current = readCollapsed();
         var next = HiddenDestinationPolicy.RemainingCollapsed(current, layer, display.Layout.MaxLayer);
@@ -101,7 +117,7 @@ internal sealed class SelectionNavigationBridge : IDisposable
     private void Complete(long ticket, IItem expected, int layer)
     {
         display.ThrowIfFailed();
-        if (!TryTarget(ticket, out var current) || !ReferenceEquals(current, expected) || expected.Layer != layer)
+        if (!TryTarget(ticket, expected) || expected.Layer != layer)
             return;
         if (display.Layout.IsHidden(layer))
             throw new InvalidOperationException("Navigation target is still folded after layout settle.");
@@ -123,9 +139,7 @@ internal sealed class SelectionNavigationBridge : IDisposable
     {
         if (disposed) return;
         disposed = true;
-        revision++;
-        pending?.Abort();
-        pending = null;
+        CancelPending();
         changes.PropertyChanged -= Changed;
     }
 }
