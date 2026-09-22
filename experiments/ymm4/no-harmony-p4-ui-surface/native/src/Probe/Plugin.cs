@@ -380,7 +380,7 @@ internal static class Probe
             adorner = new FolderOwnerAdorner(labels, display, span);
             adornerLayer.Add(adorner);
             await Task.Delay(500);
-            Check("adorner_attached", AdornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
+            Check("adorner_attached", adornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
             Check("toggle_on_screen", Host.ScreenRect(labels).Contains(Center(adorner.Toggle)));
 
             await Native.Click(Center(adorner.Toggle));
@@ -424,7 +424,7 @@ internal static class Probe
             adornerLayer.Remove(adorner);
             adorner = null;
             await Task.Delay(250);
-            Check("adorner_detached", AdornerLayer.GetAdorners(labels)?.OfType<FolderOwnerAdorner>().Any() != true);
+            Check("adorner_detached", adornerLayer.GetAdorners(labels)?.OfType<FolderOwnerAdorner>().Any() != true);
             Check("no_display_failure_or_reentry", display.Failure is null && display.Reentries == 0);
             Check("no_harmony_loaded", !AppDomain.CurrentDomain.GetAssemblies()
                 .Any(x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
