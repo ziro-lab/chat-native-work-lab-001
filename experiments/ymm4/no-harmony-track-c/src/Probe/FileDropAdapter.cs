@@ -1,5 +1,6 @@
 using System.Collections;
-using System.Collections.Specialized;
+using System.ComponentModel;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -23,9 +24,10 @@ internal sealed class FileDropMapAdapter : IDisposable
     private readonly DirectDisplay display;
     private readonly TimelineViewModel vm;
     private readonly Action<string> log;
-    private readonly INotifyCollectionChanged itemsNotify;
+    private readonly INotifyPropertyChanged vmNotify;
 
     private int pendingLogicalLayer = -1;
+    private HashSet<IItem>? pendingBefore;
     private bool disposed;
 
     internal int DragEnterCount { get; private set; }
@@ -43,10 +45,10 @@ internal sealed class FileDropMapAdapter : IDisposable
         this.log = log;
         vm = (TimelineViewModel)host.Vm;
 
-        itemsNotify = vm.Items as INotifyCollectionChanged
-            ?? throw new InvalidOperationException("TimelineViewModel.Items is not observable");
+        vmNotify = vm as INotifyPropertyChanged
+            ?? throw new InvalidOperationException("TimelineViewModel does not notify property changes");
 
-        itemsNotify.CollectionChanged += ItemsChanged;
+        vmNotify.PropertyChanged += VmChanged;
         host.View.AddHandler(DragDrop.PreviewDragEnterEvent, new DragEventHandler(DragEnter), true);
         host.View.AddHandler(DragDrop.PreviewDragOverEvent, new DragEventHandler(DragOver), true);
         host.View.AddHandler(DragDrop.PreviewDropEvent, new DragEventHandler(Drop), true);
@@ -108,6 +110,7 @@ internal sealed class FileDropMapAdapter : IDisposable
         SetCursor(mapped, true);
         pendingLogicalLayer = (int)Math.Floor(mapped.Y / display.Height);
         LastLogicalLayer = pendingLogicalLayer;
+        pendingBefore = vm.Items.Select(x => x.Item).ToHashSet(ReferenceEqualityComparer.Instance);
 
         ICommand? command = CommandSettings.Default[CommandType.AddFileItem];
         IInputElement? executedTarget = null;
@@ -135,33 +138,41 @@ internal sealed class FileDropMapAdapter : IDisposable
 
         LastExecutedTarget = executedTarget?.GetType().Name ?? (AddCommandExecutions > 0 ? "<direct>" : "<none>");
         log($"filedrop_command executed={AddCommandExecutions} target={LastExecutedTarget} logical_layer={pendingLogicalLayer} files={paths.Length}");
-
-        // If no collection event happened synchronously, keep the pending layer for
-        // a later asynchronous collection event. It is cleared by ItemsChanged.
+        CorrectPendingNewItems("after_command");
     }
 
-    private void ItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    private void VmChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (disposed || pendingLogicalLayer < 0 || e.NewItems is null)
+        if (disposed || pendingLogicalLayer < 0)
             return;
 
-        var corrected = 0;
-        foreach (var value in e.NewItems.Cast<object>())
-        {
-            var item = Host.Item(value);
-            if (item is null)
-                continue;
+        CorrectPendingNewItems("vm_" + (e.PropertyName ?? "<null>"));
+    }
 
+    private void CorrectPendingNewItems(string source)
+    {
+        if (disposed || pendingLogicalLayer < 0 || pendingBefore is null)
+            return;
+
+        var added = vm.Items
+            .Select(x => x.Item)
+            .Where(item => !pendingBefore.Contains(item))
+            .ToArray();
+
+        if (added.Length == 0)
+            return;
+
+        foreach (var item in added)
+        {
             if (item.Layer != pendingLogicalLayer)
                 item.Layer = pendingLogicalLayer;
 
-            corrected++;
             PostCorrectedItems++;
-            log($"filedrop_post_correct item={item.GetType().Name} layer={item.Layer} frame={item.Frame}");
+            log($"filedrop_post_correct source={source} item={item.GetType().Name} layer={item.Layer} frame={item.Frame}");
         }
 
-        if (corrected > 0)
-            pendingLogicalLayer = -1;
+        pendingLogicalLayer = -1;
+        pendingBefore = null;
     }
 
     public void Dispose()
@@ -171,7 +182,8 @@ internal sealed class FileDropMapAdapter : IDisposable
 
         disposed = true;
         pendingLogicalLayer = -1;
-        itemsNotify.CollectionChanged -= ItemsChanged;
+        pendingBefore = null;
+        vmNotify.PropertyChanged -= VmChanged;
         host.View.RemoveHandler(DragDrop.PreviewDragEnterEvent, new DragEventHandler(DragEnter));
         host.View.RemoveHandler(DragDrop.PreviewDragOverEvent, new DragEventHandler(DragOver));
         host.View.RemoveHandler(DragDrop.PreviewDropEvent, new DragEventHandler(Drop));
