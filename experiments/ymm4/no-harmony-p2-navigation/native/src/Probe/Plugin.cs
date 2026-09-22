@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using Ymm4NoHarmonyFolderRanges;
 using YukkuriMovieMaker.Plugin;
@@ -212,6 +213,25 @@ internal static class Probe
             Check("raw_higher_layer_roundtrips", Math.Abs(rawLayerHigher - rawLayerStart) < 1);
             Check("raw_layer_scroll_preserves_fold_state", collapsed.SequenceEqual(Baseline));
             Check("raw_navigation_methods_preserve_item_state", State(timeline) == original);
+
+            // P2.3: verify the actual historical YMM4 Up/Down shortcut route,
+            // not only the public helper methods above.
+            await Reset();
+            Keyboard.ClearFocus();
+            host.Activate();
+            await Task.Delay(250);
+            var keyScrollStart = scroll.VerticalOffset;
+            await Native.Key(0x28); // VK_DOWN
+            var keyScrollDown = scroll.VerticalOffset;
+            await Native.Key(0x26); // VK_UP
+            var keyScrollUp = scroll.VerticalOffset;
+            Fact("keyboard_layer_scroll_start", keyScrollStart);
+            Fact("keyboard_layer_scroll_down", keyScrollDown);
+            Fact("keyboard_layer_scroll_up", keyScrollUp);
+            Check("keyboard_down_is_one_display_row", Math.Abs((keyScrollDown - keyScrollStart) - display.Height) < 1);
+            Check("keyboard_up_roundtrips", Math.Abs(keyScrollUp - keyScrollStart) < 1);
+            Check("keyboard_layer_scroll_preserves_fold_state", collapsed.SequenceEqual(Baseline));
+            Check("keyboard_layer_scroll_preserves_item_state", State(timeline) == original);
             await Reset();
 
             navigation = new SelectionNavigationBridge(host, display, () => collapsed, x => collapsed = x, Log);
