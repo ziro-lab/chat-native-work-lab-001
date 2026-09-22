@@ -731,14 +731,28 @@ Completed:
 
 S1 freezes command ownership and semantics. S4 still owns management-panel construction and panel-specific keyboard/discoverability UX.
 
-#### S2 — extended project state + visual metadata
+#### S2 — extended project state + visual metadata — COMPLETE / FROZEN
 
-- outer persistence schema for Color / Hidden / visibility restore state;
-- folder colors;
-- apply folder color to YMM4 layer colors;
-- folder hide/show;
-- original per-layer visibility restoration;
-- global preferences through SettingsBase where appropriate.
+Freeze record:
+- `docs/YMM4_NO_HARMONY_S2_VISUAL_METADATA_FREEZE.md`
+
+Completed:
+
+- outer schema v2 over the frozen P3 FolderDocument v1 core;
+- v1 migration and unknown/raw preservation;
+- Folder Color / Hidden keyed by TimelineKey + FolderId without duplicated ranges;
+- eight-color reference palette + default;
+- explicit YMM4 layer-color application with native Undo/Redo;
+- nested folder hide/show with exact original per-layer visibility restoration;
+- external YMM4 eye overrides without immediate re-hide;
+- native eye and folder visibility Undo/Redo convergence;
+- structural remap of visibility-restore keys through the existing FolderRangeTracker mapping;
+- real ToolArea SavedState v2 roundtrip;
+- pure 29/29 PASS;
+- dual-host S2 integration GREEN;
+- S0 / S1 / startup / real .ymme regressions GREEN.
+
+No S2-specific global preference was required, so no new SettingsBase state was introduced.
 
 #### S3 — structural convenience + Group Control
 

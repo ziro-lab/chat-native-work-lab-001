@@ -1,0 +1,29 @@
+name: YMM4 no-Harmony S2 extended state pure
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-s2-extended-state/**'
+      - '.github/workflows/ymm4-no-harmony-s2-pure.yml'
+permissions: { contents: read }
+concurrency:
+  group: no-harmony-s2-pure-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  pure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Reject host dependencies
+        shell: bash
+        run: |
+          if grep -R -n -E 'YukkuriMovieMaker|System\.Windows|PresentationFramework|WindowsBase' experiments/ymm4/no-harmony-s2-extended-state/src; then
+            echo 'S2 state must stay host-independent.'
+            exit 1
+          fi
+      - name: Run S2 pure suite
+        run: dotnet run --project experiments/ymm4/no-harmony-s2-extended-state/tests/S2StateTests.csproj -c Release

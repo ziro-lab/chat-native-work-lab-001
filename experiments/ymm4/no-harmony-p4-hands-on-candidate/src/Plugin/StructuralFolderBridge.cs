@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using Ymm4NoHarmonyFolderRanges;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyProductState;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
@@ -78,28 +79,34 @@ internal sealed class StructuralFolderBridge : IDisposable
             compositeOverride = null;
     }
 
-    private void ApplyPendingDocument(
-        FolderDocument before,
-        FolderDocument after,
+    private void ApplyPendingState(
+        FolderProductState before,
+        FolderProductState after,
         string reason)
     {
-        if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
+        var normalizedBefore =
+            FolderProductStateRules.NormalizeAndValidate(before);
+        var normalizedAfter =
+            FolderProductStateRules.NormalizeAndValidate(after);
+
+        if (FolderProductStateCodec.Save(normalizedBefore)
+            == FolderProductStateCodec.Save(normalizedAfter))
         {
             log("structural_noop reason=" + reason);
             return;
         }
 
-        state.ReplaceDocument(after);
+        state.ReplaceProductState(normalizedAfter);
         undo.AddCommand(new UndoRedoActionCommand(
             () =>
             {
                 UndoCallbacks++;
-                state.ReplaceDocument(before);
+                state.ReplaceProductState(normalizedBefore);
             },
             () =>
             {
                 RedoCallbacks++;
-                state.ReplaceDocument(after);
+                state.ReplaceProductState(normalizedAfter);
             }));
 
         PendingEdits++;
@@ -168,9 +175,29 @@ internal sealed class StructuralFolderBridge : IDisposable
                     "Folder state changed while a composite structural command was pending.");
             }
 
-            ApplyPendingDocument(
+            var compositeBeforeProduct = state.ProductState;
+            var compositeAfterProduct = FolderProductStateRules.ReplaceCore(
+                compositeBeforeProduct,
+                composite.After);
+
+            var compositeKey = timeline.ID.ToString("D");
+            var currentTimeline = FolderDocumentRules.FindTimeline(
                 composite.Before,
-                composite.After,
+                compositeKey);
+            var remapPlan = FolderRangeTracker.Apply(
+                currentTimeline?.Folders.Select(
+                    x => new FolderRange(x.Id, x.Start, x.End))
+                    ?? [],
+                edit);
+
+            compositeAfterProduct = FolderProductStateRules.RemapRestoreLayers(
+                compositeAfterProduct,
+                compositeKey,
+                remapPlan.MapLayer);
+
+            ApplyPendingState(
+                compositeBeforeProduct,
+                compositeAfterProduct,
                 $"composite:{type}:L{layer}");
             composite.MarkApplied();
             return;
@@ -181,7 +208,8 @@ internal sealed class StructuralFolderBridge : IDisposable
         if (timelineState is null || timelineState.Folders.Count == 0)
             return;
 
-        var before = state.Document;
+        var beforeProduct = state.ProductState;
+        var before = beforeProduct.Core;
         var beforeFolders = timelineState.Folders.ToArray();
         var beforeById = beforeFolders.ToDictionary(x => x.Id);
 
@@ -206,9 +234,17 @@ internal sealed class StructuralFolderBridge : IDisposable
             key,
             nextFolders);
 
-        ApplyPendingDocument(
-            before,
-            after,
+        var afterProduct = FolderProductStateRules.ReplaceCore(
+            beforeProduct,
+            after);
+        afterProduct = FolderProductStateRules.RemapRestoreLayers(
+            afterProduct,
+            key,
+            plan.MapLayer);
+
+        ApplyPendingState(
+            beforeProduct,
+            afterProduct,
             $"standard:{type}:L{layer}:folders={beforeFolders.Length}->{nextFolders.Length}");
 
         // Frozen P1 contract: the host's structural command owns Record().

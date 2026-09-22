@@ -27,6 +27,8 @@
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
     <Compile Include="../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
     <Compile Include="../../../no-harmony-p4-ux-policy/src/FolderUxCommands.cs" Link="FolderUxCommands.cs" />
+    <Compile Include="../../../no-harmony-s2-extended-state/src/FolderProductState.cs" Link="FolderProductState.cs" />
+    <Compile Include="../../../no-harmony-s2-extended-state/src/FolderProductStateCodec.cs" Link="FolderProductStateCodec.cs" />
   </ItemGroup>
 
   <Target Name="MakeYmme" AfterTargets="Build" Condition="'$(PackYmme)' == 'true'">
