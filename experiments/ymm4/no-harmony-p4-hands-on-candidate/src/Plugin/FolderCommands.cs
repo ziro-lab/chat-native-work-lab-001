@@ -224,13 +224,72 @@ internal sealed class FolderCommands
                 collapsed),
             collapsed ? "collapse_all" : "expand_all");
 
-    internal void Ungroup(Guid folderId) =>
-        CommitCore(
-            document => FolderUxCommands.Ungroup(
-                document,
+    internal void Ungroup(Guid folderId)
+    {
+        EnsureEditable();
+
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var before =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+        var option = FolderSessionDocumentRules.FindOption(
+            before,
+            TimelineKey,
+            folderId);
+
+        var working = before;
+        IReadOnlyList<LayerVisibilityWrite> writes =
+            Array.Empty<LayerVisibilityWrite>();
+
+        if (option?.Hidden == true)
+        {
+            var visibility = Enumerable.Range(
+                    folder.Start,
+                    folder.End - folder.Start + 1)
+                .ToDictionary(
+                    layer => layer,
+                    layer => timeline.LayerSettings.IsVisibles[layer]);
+
+            var transition = FolderVisibilityRules.SetFolderHidden(
+                working,
                 TimelineKey,
-                folderId),
-            "ungroup");
+                folderId,
+                false,
+                visibility);
+
+            working = transition.State;
+            writes = transition.Writes;
+        }
+
+        var ungroupedCore = FolderUxCommands.Ungroup(
+            working.Core,
+            TimelineKey,
+            folderId);
+        var after = FolderSessionDocumentRules.ReplaceCore(
+            working,
+            ungroupedCore);
+
+        foreach (var write in writes)
+        {
+            if (timeline.LayerSettings.IsVisibles[write.Layer]
+                != write.Visible)
+            {
+                timeline.LayerSettings.IsVisibles[write.Layer] =
+                    write.Visible;
+            }
+        }
+
+        state.ReplaceState(after);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceState(before),
+            () => state.ReplaceState(after)));
+        undo.Record();
+
+        log(
+            $"folder_command ungroup id={folderId} " +
+            $"visibility_writes={writes.Count} timeline={TimelineKey}");
+    }
 
     internal void SetColor(Guid folderId, string? color)
     {
