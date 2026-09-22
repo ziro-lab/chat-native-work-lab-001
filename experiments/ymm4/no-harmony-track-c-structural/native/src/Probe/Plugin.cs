@@ -714,6 +714,8 @@ internal static class Probe
 
         var timelineAfter = after.Text;
 
+        host.Activate();
+        await Task.Delay(100);
         var undoBefore = undoCount();
         await Native.Key(0x5A, true);
 
@@ -739,6 +741,8 @@ internal static class Probe
             display,
             name + "_undo_display");
 
+        host.Activate();
+        await Task.Delay(100);
         var redoBefore = redoCount();
         await Native.Key(0x59, true);
 
@@ -764,6 +768,8 @@ internal static class Probe
             display,
             name + "_redo_display");
 
+        host.Activate();
+        await Task.Delay(100);
         undoBefore = undoCount();
         await Native.Key(0x5A, true);
 
