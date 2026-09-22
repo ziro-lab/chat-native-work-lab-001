@@ -167,6 +167,49 @@ internal static class Probe
             await Task.Delay(650);
             Check("raw_selection_keeps_target_folded", display.Layout.IsHidden(4));
             Fact("raw_selection_target_visible", Visible(host, items[4]));
+
+            // P2.2 discovery: exercise the host's public navigation methods with
+            // the folded display active and no navigation bridge attached.
+            scroll.ScrollToVerticalOffset(0);
+            await Task.Delay(300);
+            var rawScrollBefore = scroll.VerticalOffset;
+            var rawViewportBefore = vm.Viewport.Value;
+            vm.ScrollToItem(items[4]);
+            await Task.Delay(650);
+            Fact("raw_scrolltoitem_hidden_vertical_before", rawScrollBefore);
+            Fact("raw_scrolltoitem_hidden_vertical_after", scroll.VerticalOffset);
+            Fact("raw_scrolltoitem_hidden_viewport_before", rawViewportBefore);
+            Fact("raw_scrolltoitem_hidden_viewport_after", vm.Viewport.Value);
+            Fact("raw_scrolltoitem_hidden_visible", Visible(host, items[4]));
+            Check("raw_scrolltoitem_hidden_keeps_fold_state", display.Layout.IsHidden(4));
+            Check("raw_scrolltoitem_hidden_preserves_item_state", State(timeline) == original);
+
+            await Reset();
+            timeline.SelectedItems = ImmutableList.Create(items[45]);
+            await Task.Delay(300);
+            var rawVisibleBefore = scroll.VerticalOffset;
+            vm.ScrollToItem(items[45]);
+            await Task.Delay(650);
+            Fact("raw_scrolltoitem_visible_vertical_before", rawVisibleBefore);
+            Fact("raw_scrolltoitem_visible_vertical_after", scroll.VerticalOffset);
+            Fact("raw_scrolltoitem_visible_viewport_after", vm.Viewport.Value);
+            Fact("raw_scrolltoitem_visible_target_visible", Visible(host, items[45]));
+            Check("raw_scrolltoitem_visible_preserves_fold_state", collapsed.SequenceEqual(Baseline));
+
+            await Reset();
+            var rawLayerStart = scroll.VerticalOffset;
+            vm.ScrollToLowerLayer();
+            await Task.Delay(450);
+            var rawLayerLower = scroll.VerticalOffset;
+            vm.ScrollToHigherLayer();
+            await Task.Delay(450);
+            var rawLayerHigher = scroll.VerticalOffset;
+            Fact("raw_layer_scroll_start", rawLayerStart);
+            Fact("raw_layer_scroll_lower", rawLayerLower);
+            Fact("raw_layer_scroll_higher", rawLayerHigher);
+            Check("raw_layer_scroll_offsets_finite", double.IsFinite(rawLayerLower) && double.IsFinite(rawLayerHigher));
+            Check("raw_layer_scroll_preserves_fold_state", collapsed.SequenceEqual(Baseline));
+            Check("raw_navigation_methods_preserve_item_state", State(timeline) == original);
             await Reset();
 
             navigation = new SelectionNavigationBridge(host, display, () => collapsed, x => collapsed = x, Log);
