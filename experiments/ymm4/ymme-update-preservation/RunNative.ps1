@@ -27,7 +27,8 @@ $v2Hash = (Get-FileHash $V2Dll -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($v1Hash -eq $v2Hash) { throw 'v1 and v2 probe DLL hashes unexpectedly match.' }
 
 function Stop-Ymm4 {
-    Get-Process -Name 'YukkuriMovieMaker' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'YukkuriMovieMaker*' } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 700
 }
 
@@ -46,11 +47,24 @@ function Write-WindowSnapshot([string]$phase) {
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
             [System.Windows.Automation.ControlType]::Button)
         $buttons = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        $isHostUpdater = $title -match '(?i)(UpdateNotiferViewModel|Check for updates|Updating YukkuriMovieMaker4)'
+        $isInstallerLike = $title -match '(?i)(plugin|プラグイン|extension|拡張|ymme|install)'
         foreach ($button in $buttons) {
             $name = $button.Current.Name
             "[$phase]   button=$name enabled=$($button.Current.IsEnabled)" | Add-Content $windowLog
             if (-not $button.Current.IsEnabled) { continue }
-            if ($name -match '(?i)(インストール|install|上書き|overwrite|更新|update|はい|yes|^ok$|続行|continue|実行)') {
+
+            $shouldInvoke = $false
+            if ($isHostUpdater) {
+                $shouldInvoke = $name -match '(?i)(cancel|キャンセル|後で|skip)'
+            } else {
+                $shouldInvoke = $name -match '(?i)(インストール|install|上書き|overwrite|はい|yes|^ok$|続行|continue|実行)'
+                if (-not $shouldInvoke -and $isInstallerLike) {
+                    $shouldInvoke = $name -match '(?i)(更新|update)'
+                }
+            }
+
+            if ($shouldInvoke) {
                 try {
                     $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                     $invoke.Invoke()
@@ -87,7 +101,7 @@ function Start-InstallerAttempt([string]$package, [string]$version, [string]$mod
     } else {
         throw "Unknown installer mode: $mode"
     }
-    return Wait-ForInstalledVersion $version 45
+    return Wait-ForInstalledVersion $version 60
 }
 
 function Install-Package([string]$package, [string]$version) {
@@ -122,7 +136,7 @@ function New-ProbePackage([string]$dll, [string]$version, [string]$packagePath) 
 # Launch once so a fresh portable host can perform its normal first-run/file-association setup.
 Stop-Ymm4
 $init = Start-Process -FilePath $exe -WorkingDirectory $Ymm4Dir -PassThru
-for ($i = 0; $i -lt 15; $i++) {
+for ($i = 0; $i -lt 25; $i++) {
     Write-WindowSnapshot "init-$i"
     if ($init.HasExited) { break }
     Start-Sleep -Seconds 1
