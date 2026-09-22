@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -228,8 +229,7 @@ internal sealed class HandsOnController : IDisposable
         targets.Add(host.View);
         targets.Add(window);
 
-        foreach (var target in targets
-            .Distinct(ReferenceEqualityComparer.Instance))
+        foreach (var target in targets)
         {
             if (command is RoutedCommand routed)
             {
