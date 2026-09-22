@@ -2,7 +2,8 @@ name: YMM4 no-Harmony P3 persistence pure
 on:
   pull_request:
     paths:
-      - 'experiments/ymm4/no-harmony-p3-persistence/**'
+      - 'experiments/ymm4/no-harmony-p3-persistence/src/**'
+      - 'experiments/ymm4/no-harmony-p3-persistence/tests/**'
       - '.github/workflows/ymm4-no-harmony-p3-persistence.yml'
 permissions: { contents: read }
 concurrency:
