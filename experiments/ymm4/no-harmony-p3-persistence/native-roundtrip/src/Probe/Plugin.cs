@@ -146,10 +146,10 @@ internal static class Probe
     private static Guid GetTimelineId(object root) =>
         GetTimeline(root)?.ID ?? Guid.Empty;
 
-    private static object FindToolArea(object root)
+    private static object? TryFindToolArea(object root)
     {
         if (PublicProperty(root, "ToolMenuItems") is not IEnumerable items)
-            throw new InvalidOperationException("ToolMenuItems missing.");
+            return null;
 
         foreach (var item in items.Cast<object>())
         {
@@ -157,8 +157,11 @@ internal static class Probe
             if (viewModelType == typeof(RoundtripToolViewModel))
                 return item;
         }
-        throw new InvalidOperationException("Roundtrip ToolAreaViewModel missing.");
+        return null;
     }
+
+    private static object FindToolArea(object root) =>
+        TryFindToolArea(root) ?? throw new InvalidOperationException("Roundtrip ToolAreaViewModel missing.");
 
     private static void SeedToolArea(object root, string savedState)
     {
@@ -250,6 +253,7 @@ internal static class Probe
             var idA = GetTimelineId(root);
             Check("timeline_a_id_nonempty", idA != Guid.Empty);
             Check("timeline_id_public_guid", typeof(Timeline).GetProperty("ID", BindingFlags.Instance | BindingFlags.Public)?.PropertyType == typeof(Guid));
+            await Wait("initial ToolArea", () => TryFindToolArea(root) is not null);
             Check("tool_area_found", FindToolArea(root) is not null);
 
             var stateA = FolderDocumentCodec.Save(DocumentFor(
@@ -266,7 +270,7 @@ internal static class Probe
             Check("project_a_toolstate_embedded", FindEmbeddedSavedState(pathA, stateA) == stateA);
 
             createProject.Invoke(root, null);
-            await Wait("new project B", () => GetTimelineId(root) != Guid.Empty && GetTimelineId(root) != idA);
+            await Wait("new project B", () => GetTimelineId(root) != Guid.Empty && GetTimelineId(root) != idA && TryFindToolArea(root) is not null);
             var idB = GetTimelineId(root);
             Check("timeline_b_distinct", idB != Guid.Empty && idB != idA);
 
