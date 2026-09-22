@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyProductState;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.UndoRedo;
@@ -25,6 +26,7 @@ internal sealed class HandsOnController : IDisposable
     private readonly FolderStateStore state;
     private readonly DirectDisplay display;
     private readonly StructuralFolderBridge structural;
+    private readonly FolderVisibilityCoordinator visibility;
     private readonly FolderCommands commands;
     private readonly InputMapAdapter input;
     private readonly FileDropMapAdapter fileDrop;
@@ -55,12 +57,17 @@ internal sealed class HandsOnController : IDisposable
             undo,
             state,
             HandsOnRuntime.Diagnostic);
+        visibility = new FolderVisibilityCoordinator(
+            timeline,
+            state,
+            HandsOnRuntime.Diagnostic);
         commands = new FolderCommands(
             window,
             host,
             undo,
             state,
             structural,
+            visibility,
             HandsOnRuntime.Diagnostic);
         input = new InputMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         fileDrop = new FileDropMapAdapter(host, display, HandsOnRuntime.Diagnostic);
@@ -463,7 +470,12 @@ internal sealed class HandsOnController : IDisposable
         if (folders.Length == 0)
             return;
 
-        adorner = new FolderOverlayAdorner(labels, display, folders);
+        adorner = new FolderOverlayAdorner(
+            labels,
+            display,
+            folders,
+            state.ProductState,
+            timeline.ID.ToString("D"));
         adornerLayer.Add(adorner);
     }
 
@@ -692,6 +704,56 @@ internal sealed class HandsOnController : IDisposable
                 RunFolderCommand(() => commands.SelectItems(folder.Id));
             sub.Items.Add(selectItems);
 
+            var option = commands.FindOption(folder.Id);
+            var colors = new MenuItem { Header = "色" };
+            foreach (var choice in FolderCommands.Palette)
+            {
+                var swatch = new Border
+                {
+                    Width = 12,
+                    Height = 12,
+                    BorderBrush = Brushes.Gray,
+                    BorderThickness = new Thickness(1),
+                    Background = ParseFolderColor(choice.Color)
+                        ?? Brushes.Transparent
+                };
+                var item = new MenuItem
+                {
+                    Header = choice.Name,
+                    Icon = swatch
+                };
+                var capturedColor = choice.Color;
+                item.Click += (_, _) =>
+                    RunFolderCommand(
+                        () => commands.SetColor(
+                            folder.Id,
+                            capturedColor));
+                colors.Items.Add(item);
+            }
+            sub.Items.Add(colors);
+
+            var applyColor = new MenuItem
+            {
+                Header = "フォルダの色を YMM4 のレイヤー色にする"
+            };
+            applyColor.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.ApplyFolderColorToLayers(folder.Id));
+            sub.Items.Add(applyColor);
+
+            var visibilityItem = new MenuItem
+            {
+                Header = option?.Hidden == true
+                    ? "フォルダを表示（各レイヤーの状態に戻す）"
+                    : "フォルダを非表示"
+            };
+            visibilityItem.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.SetHidden(
+                        folder.Id,
+                        option?.Hidden != true));
+            sub.Items.Add(visibilityItem);
+
             sub.Items.Add(new Separator());
 
             var ungroup = new MenuItem
@@ -745,6 +807,22 @@ internal sealed class HandsOnController : IDisposable
         }
     }
 
+    private static Brush? ParseFolderColor(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        try
+        {
+            return new SolidColorBrush(
+                (Color)ColorConverter.ConvertFromString(text));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
     private static string CreationReason(FolderCreationStatus status) =>
         status switch
         {
@@ -783,6 +861,7 @@ internal sealed class HandsOnController : IDisposable
 
         fileDrop.Dispose();
         input.Dispose();
+        visibility.Dispose();
         structural.Dispose();
         display.Dispose();
     }
@@ -797,17 +876,23 @@ internal sealed class HandsOnController : IDisposable
         private readonly VisualCollection children;
         private readonly DirectDisplay display;
         private readonly PersistedFolder[] folders;
+        private readonly FolderProductState productState;
+        private readonly string timelineKey;
         private sealed record FolderHit(Rect Toggle, Rect Name);
         private readonly Dictionary<Guid, FolderHit> hitRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
             DirectDisplay display,
-            PersistedFolder[] folders)
+            PersistedFolder[] folders,
+            FolderProductState productState,
+            string timelineKey)
             : base(adornedElement)
         {
             this.display = display;
             this.folders = folders;
+            this.productState = productState;
+            this.timelineKey = timelineKey;
             children = new VisualCollection(this) { canvas };
             IsHitTestVisible = false;
             Rebuild();
@@ -884,8 +969,14 @@ internal sealed class HandsOnController : IDisposable
                     Width = width,
                     Height = height,
                     CornerRadius = new CornerRadius(3),
-                    Background = new SolidColorBrush(
-                        Color.FromArgb(215, 78, 78, 78)),
+                    Background =
+                        ParseFolderColor(
+                            FolderProductStateRules.FindOption(
+                                productState,
+                                timelineKey,
+                                folder.Id)?.Color)
+                        ?? new SolidColorBrush(
+                            Color.FromArgb(215, 78, 78, 78)),
                     IsHitTestVisible = false,
                     Child = new TextBlock
                     {
