@@ -150,6 +150,40 @@ var fit = StructuralConvenienceRules.PlanFitGroupRanges(
 Check("fit_only_problem_groups",
     fit.SequenceEqual(new[] { 3, 6, 4, 2 }));
 
+var preHostInsert = StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+    core,
+    "scene",
+    new InsertLayers(4, 1),
+    new[]
+    {
+        new GroupSpan(1, 7),
+        new GroupSpan(3, 2),
+        new GroupSpan(10, 2)
+    });
+Check("prehost_insert_group_fix",
+    preHostInsert.SequenceEqual(new[] { 8, 3, 2 }));
+
+var preHostDelete = StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+    core,
+    "scene",
+    new DeleteLayers(4, 1),
+    new[]
+    {
+        new GroupSpan(1, 7),
+        new GroupSpan(3, 2),
+        new GroupSpan(10, 2)
+    });
+Check("prehost_delete_group_fix",
+    preHostDelete.SequenceEqual(new[] { 6, 1, 2 }));
+
+var preHostOutside = StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+    core,
+    "scene",
+    new InsertLayers(9, 1),
+    groups);
+Check("prehost_outside_folder_no_fix",
+    preHostOutside.SequenceEqual(groups.Select(x => x.Range)));
+
 var externalInsert = StructuralConvenienceRules.SuggestExternalGroupRangeFixes(
     core,
     "scene",
