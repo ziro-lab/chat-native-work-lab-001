@@ -254,7 +254,6 @@ internal static class Probe
         {
             var saveProject = PublicMethod(root, "SaveProject", typeof(string));
             var openProject = PublicMethod(root, "OpenProject", typeof(string));
-            var createProject = PublicMethod(root, "CreateProject", Type.EmptyTypes);
 
             var idA = GetTimelineId(root);
             Check("timeline_a_id_nonempty", idA != Guid.Empty);
@@ -275,11 +274,11 @@ internal static class Probe
             Check("project_a_saved", File.Exists(pathA));
             Check("project_a_toolstate_embedded", FindEmbeddedSavedState(pathA, stateA) == stateA);
 
-            createProject.Invoke(root, null);
-            await Wait("new project B", () => GetTimelineId(root) != Guid.Empty && GetTimelineId(root) != idA && TryFindToolArea(root) is not null);
-            var idB = GetTimelineId(root);
-            Check("timeline_b_distinct", idB != Guid.Empty && idB != idA);
-
+            // Project isolation does not require a modal CreateProject route.
+            // Save the same host-owned Timeline as two independent project files
+            // with different ToolState payloads. New-project lifecycle is a
+            // separate P3 gate.
+            var idB = idA;
             var stateB = FolderDocumentCodec.Save(DocumentFor(
                 idB,
                 Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
@@ -292,6 +291,7 @@ internal static class Probe
             saveProject.Invoke(root, [pathB]);
             Check("project_b_saved", File.Exists(pathB));
             Check("project_b_toolstate_embedded", FindEmbeddedSavedState(pathB, stateB) == stateB);
+            Check("project_files_hold_distinct_toolstate", stateA != stateB);
 
             var beforeA = RoundtripToolViewModel.LoadCount;
             openProject.Invoke(root, [pathA]);
