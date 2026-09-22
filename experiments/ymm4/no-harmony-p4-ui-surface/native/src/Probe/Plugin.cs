@@ -164,6 +164,61 @@ internal static class Probe
         return null;
     }
 
+    private static FrameworkElement? FindContextMenuOwnerFromSource(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = Parent(current))
+            if (current is FrameworkElement { ContextMenu: not null } fe)
+                return fe;
+        return null;
+    }
+
+    private static (Point Screen, string HitType, string OwnerType) FindNativeLayerPoint(
+        FrameworkElement labels,
+        int layer)
+    {
+        var row = FindLayerElement(labels, layer);
+        var rowRect = Host.ScreenRect(row);
+        var labelsRect = Host.ScreenRect(labels);
+
+        var left = Math.Max(rowRect.Left + 2, labelsRect.Left + 28);
+        var right = Math.Min(rowRect.Right - 2, labelsRect.Right - 2);
+        var top = Math.Max(rowRect.Top + 2, labelsRect.Top + 2);
+        var bottom = Math.Min(rowRect.Bottom - 2, labelsRect.Bottom - 2);
+
+        if (right <= left || bottom <= top)
+            throw new InvalidOperationException($"No scan rect for layer {layer}: row={rowRect} labels={labelsRect}");
+
+        var ys = new[]
+        {
+            (top + bottom) / 2,
+            top + (bottom - top) * 0.25,
+            top + (bottom - top) * 0.75
+        };
+
+        foreach (var y in ys)
+        {
+            for (var x = left; x <= right; x += 4)
+            {
+                var screen = new Point(x, y);
+                var local = labels.PointFromScreen(screen);
+                var hit = VisualTreeHelper.HitTest(labels, local)?.VisualHit;
+                if (hit is null || FindLayerFromSource(hit) != layer)
+                    continue;
+
+                var owner = FindContextMenuOwnerFromSource(hit);
+                if (owner is null)
+                    continue;
+
+                return (
+                    screen,
+                    hit.GetType().FullName ?? hit.GetType().Name,
+                    owner.GetType().FullName ?? owner.GetType().Name);
+            }
+        }
+
+        throw new InvalidOperationException($"No real hit-test point found for layer {layer}.");
+    }
+
     private static FrameworkElement FindLayerContextOwner(FrameworkElement labels, int layer)
     {
         var direct = Host.Elements(labels)
@@ -205,14 +260,6 @@ internal static class Probe
             labels.AddHandler(FrameworkElement.ContextMenuOpeningEvent, opening, true);
         }
 
-        private static FrameworkElement? FindMenuOwner(DependencyObject? source)
-        {
-            for (var current = source; current is not null; current = Parent(current))
-                if (current is FrameworkElement { ContextMenu: not null } fe)
-                    return fe;
-            return null;
-        }
-
         private static void RemoveTagged(ContextMenu menu)
         {
             foreach (var item in menu.Items.OfType<FrameworkElement>().Where(x => Equals(x.Tag, Tag)).ToArray())
@@ -223,7 +270,7 @@ internal static class Probe
         {
             if (disposed) return;
             var layer = FindLayerFromSource(e.OriginalSource as DependencyObject);
-            var owner = FindMenuOwner(e.OriginalSource as DependencyObject);
+            var owner = FindContextMenuOwnerFromSource(e.OriginalSource as DependencyObject);
             if (layer is null || owner?.ContextMenu is not { } menu)
                 return;
 
@@ -448,9 +495,10 @@ internal static class Probe
             Fact("labels_type", labels.GetType().FullName);
             Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
 
-            var menuOwner6 = FindLayerContextOwner(labels, 6);
-            var nativePoint = Center(menuOwner6);
-            Fact("layer6_context_owner", menuOwner6.GetType().FullName);
+            var nativeRoute = FindNativeLayerPoint(labels, 6);
+            var nativePoint = nativeRoute.Screen;
+            Fact("layer6_hit_type", nativeRoute.HitType);
+            Fact("layer6_context_owner", nativeRoute.OwnerType);
             Fact("layer6_native_point", nativePoint);
 
             var nativeLeftDown = 0;
