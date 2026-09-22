@@ -320,13 +320,23 @@ internal static class HandsOnHostAccess
                 "Group item count does not match the structural plan.",
                 nameof(groups));
 
-        var beforeItems = timeline.Items.ToArray();
-        var removed = beforeItems
-            .Where(item => plan.MapLayer(item.Layer) < 0)
-            .ToArray();
+        switch (plan.Edit)
+        {
+            case Ymm4NoHarmonyFolderRanges.InsertLayers insert:
+                for (var i = 0; i < insert.Count; i++)
+                    timeline.AddLayer(insert.Position);
+                break;
 
-        if (removed.Length > 0)
-            timeline.DeleteItems(removed);
+            case Ymm4NoHarmonyFolderRanges.DeleteLayers delete:
+                for (var i = 0; i < delete.Count; i++)
+                    timeline.DeleteLayer(delete.Position);
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    "Unsupported plugin-owned structural edit: "
+                    + plan.Edit.GetType().Name);
+        }
 
         for (var i = 0; i < groups.Count; i++)
         {
@@ -334,36 +344,14 @@ internal static class HandsOnHostAccess
 
             if (!timeline.Items.Any(
                     item => ReferenceEquals(item, group)))
+            {
                 continue;
+            }
 
             var nextRange = plan.GroupRanges[i];
             if (group.GroupRange != nextRange)
                 group.GroupRange = nextRange;
         }
-
-        foreach (var item in timeline.Items.ToArray())
-        {
-            var mapped = plan.MapLayer(item.Layer);
-            if (mapped < 0)
-            {
-                throw new InvalidOperationException(
-                    "A removed item survived the structural delete plan.");
-            }
-
-            if (item.Layer != mapped)
-                item.Layer = mapped;
-        }
-
-        var settings = timeline.LayerSettings.Items
-            .Select(setting => setting with
-            {
-                Layer = plan.MapLayer(setting.Layer)
-            })
-            .Where(setting => setting.Layer >= 0)
-            .ToImmutableList();
-
-        if (!settings.SequenceEqual(timeline.LayerSettings.Items))
-            timeline.LayerSettings.Items = settings;
 
         if (newGroup is not null)
         {
