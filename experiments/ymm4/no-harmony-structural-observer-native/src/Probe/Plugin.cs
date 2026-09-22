@@ -38,6 +38,78 @@ internal static class Probe
         ImmutableList<LayerSetting> Settings,
         ImmutableList<int> SelectedLayers);
 
+    private sealed record CommandObservation(
+        int Sequence,
+        CommandType Type,
+        object? Parameter);
+
+    private sealed class RoutedCommandObserver : IDisposable
+    {
+        private static readonly CommandType[] Relevant =
+        [
+            CommandType.AddLayer,
+            CommandType.DeleteLayer,
+            CommandType.MoveUpLayer,
+            CommandType.MoveDownLayer,
+            CommandType.Undo,
+            CommandType.Redo
+        ];
+
+        private readonly UIElement root;
+        private readonly Action<string> log;
+        private readonly List<CommandObservation> observations = [];
+        private int sequence;
+        private bool disposed;
+
+        internal RoutedCommandObserver(UIElement root, Action<string> log)
+        {
+            this.root = root;
+            this.log = log;
+            CommandManager.AddPreviewExecutedHandler(root, OnPreviewExecuted);
+        }
+
+        internal int Sequence => sequence;
+
+        internal IReadOnlyList<CommandObservation> Since(int afterSequence) =>
+            observations.Where(x => x.Sequence > afterSequence).ToArray();
+
+        private void OnPreviewExecuted(object sender, ExecutedRoutedEventArgs e)
+        {
+            if (disposed)
+                return;
+
+            foreach (var type in Relevant)
+            {
+                ICommand? expected;
+                try { expected = CommandSettings.Default[type]; }
+                catch { continue; }
+
+                if (!ReferenceEquals(expected, e.Command))
+                    continue;
+
+                var observation = new CommandObservation(
+                    ++sequence,
+                    type,
+                    e.Parameter);
+
+                observations.Add(observation);
+                log(
+                    $"routed_command seq={observation.Sequence} type={observation.Type} " +
+                    $"parameter={observation.Parameter?.GetType().Name ?? "<null>"}:{observation.Parameter ?? ""}");
+                return;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+                return;
+
+            disposed = true;
+            CommandManager.RemovePreviewExecutedHandler(root, OnPreviewExecuted);
+        }
+    }
+
     internal static void Schedule()
     {
         var path = Environment.GetEnvironmentVariable("CNWL_STRUCTURAL_OBSERVER_NATIVE_DIR");
@@ -164,7 +236,9 @@ internal static class Probe
     private static StructuralDetection DetectHostDelta(
         HostSnapshot before,
         HostSnapshot after,
-        bool layerSettingsSignaled)
+        bool layerSettingsSignaled,
+        CommandType? routedIntent,
+        bool trustedStructuralUndo)
     {
         var pairs = new List<LayerPair>();
         var survivingOldLayers = new HashSet<int>();
@@ -203,15 +277,28 @@ internal static class Probe
         var settingsReferenceChanged = !ReferenceEquals(before.Settings, after.Settings);
 
         if (detection.Status == StructuralDetectionStatus.Exact
-            && detection.Edits.Any(x => x is InsertLayers or DeleteLayers)
-            && !layerSettingsSignaled)
+            && detection.Edits.Any(x => x is InsertLayers or DeleteLayers))
         {
-            detection = StructuralDetection.Ambiguous(
-                "Insert/delete-like item motion without LayerSettings signal.");
+            var intentMatches = detection.Edits.All(
+                edit => edit switch
+                {
+                    InsertLayers => routedIntent == CommandType.AddLayer,
+                    DeleteLayers => routedIntent == CommandType.DeleteLayer,
+                    _ => true
+                });
+
+            if (!layerSettingsSignaled
+                && !intentMatches
+                && !trustedStructuralUndo)
+            {
+                detection = StructuralDetection.Ambiguous(
+                    "Insert/delete-like item motion lacked structural command/settings/undo evidence.");
+            }
         }
 
         Log(
-            $"detect settings_signal={layerSettingsSignaled} settings_ref_changed={settingsReferenceChanged} pairs={string.Join(",", pairs.Select(x => $"{x.OldLayer}>{x.NewLayer}"))} " +
+            $"detect settings_signal={layerSettingsSignaled} settings_ref_changed={settingsReferenceChanged} " +
+            $"intent={routedIntent?.ToString() ?? "<none>"} trusted_undo={trustedStructuralUndo} pairs={string.Join(",", pairs.Select(x => $"{x.OldLayer}>{x.NewLayer}"))} " +
             $"vanished={string.Join(",", vanished.OrderBy(x => x))} inserted={string.Join(",", insertedHints.OrderBy(x => x))} " +
             $"status={detection.Status} edits={EditText(detection)} reason={detection.Reason}");
 
@@ -330,12 +417,14 @@ internal static class Probe
         Func<int> recorded,
         Func<int> undoed,
         Func<int> settingsSignals,
+        RoutedCommandObserver commandObserver,
         string baseline)
     {
         var before = Snapshot(timeline);
         var recordedBefore = recorded();
         var undoedBefore = undoed();
         var settingsBefore = settingsSignals();
+        var commandBefore = commandObserver.Sequence;
 
         timeline.SelectedItems = ImmutableList<IItem>.Empty;
         timeline.LayerSelection.SelectedLayers = ImmutableList.Create(layer);
@@ -355,12 +444,25 @@ internal static class Probe
 
         await Task.Delay(150);
         var after = Snapshot(timeline);
+        var forwardCommands = commandObserver.Since(commandBefore);
+        var routedIntent = forwardCommands
+            .Select(x => (CommandType?)x.Type)
+            .LastOrDefault(x =>
+                x is CommandType.AddLayer
+                    or CommandType.DeleteLayer
+                    or CommandType.MoveUpLayer
+                    or CommandType.MoveDownLayer);
+
         var forward = DetectHostDelta(
             before,
             after,
-            settingsSignals() > settingsBefore);
+            settingsSignals() > settingsBefore,
+            routedIntent,
+            trustedStructuralUndo: false);
 
         Fact(name + "_route", route);
+        Fact(name + "_observed_commands", string.Join(",", forwardCommands.Select(x => x.Type)));
+        Check(name + "_command_observed", routedIntent == command);
         Fact(name + "_forward", EditText(forward));
         Check(name + "_forward_exact", forward.Status == StructuralDetectionStatus.Exact);
         Check(name + "_forward_edit", EditText(forward) == expectedForward);
@@ -368,6 +470,7 @@ internal static class Probe
         window.Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
         var undoSettingsBefore = settingsSignals();
+        var undoCommandBefore = commandObserver.Sequence;
         await Native.Key(0x5A, true);
 
         await WaitUntil(
@@ -376,11 +479,17 @@ internal static class Probe
 
         await Task.Delay(150);
         var restored = Snapshot(timeline);
+        var undoCommands = commandObserver.Since(undoCommandBefore);
         var reverse = DetectHostDelta(
             after,
             restored,
-            settingsSignals() > undoSettingsBefore);
+            settingsSignals() > undoSettingsBefore,
+            routedIntent: null,
+            trustedStructuralUndo:
+                forward.Status == StructuralDetectionStatus.Exact
+                && forward.Edits.Count > 0);
 
+        Fact(name + "_undo_commands", string.Join(",", undoCommands.Select(x => x.Type)));
         Fact(name + "_undo", EditText(reverse));
         Check(name + "_undo_exact", reverse.Status == StructuralDetectionStatus.Exact);
         Check(name + "_undo_edit", EditText(reverse) == expectedUndo);
@@ -394,6 +503,7 @@ internal static class Probe
         EventHandler? undoedHandler = null;
         EventHandler? redoedHandler = null;
         PropertyChangedEventHandler? layerSettingsHandler = null;
+        RoutedCommandObserver? commandObserver = null;
 
         try
         {
@@ -426,6 +536,7 @@ internal static class Probe
                 ?? throw new MissingMemberException("UndoRedoManager");
 
             Check("visible_context_bound", ReferenceEquals(timelineView.DataContext, vm));
+            commandObserver = new RoutedCommandObserver(window, Log);
 
             var character = new Character { Name = "CNWL_OBSERVER" };
             for (var layer = 0; layer <= 8; layer++)
@@ -497,6 +608,7 @@ internal static class Probe
                 () => recordedCount,
                 () => undoedCount,
                 () => layerSettingsSignals,
+                commandObserver,
                 baseline);
 
             await Exercise(
@@ -512,6 +624,7 @@ internal static class Probe
                 () => recordedCount,
                 () => undoedCount,
                 () => layerSettingsSignals,
+                commandObserver,
                 baseline);
 
             await Exercise(
@@ -527,6 +640,7 @@ internal static class Probe
                 () => recordedCount,
                 () => undoedCount,
                 () => layerSettingsSignals,
+                commandObserver,
                 baseline);
 
             await Exercise(
@@ -542,6 +656,7 @@ internal static class Probe
                 () => recordedCount,
                 () => undoedCount,
                 () => layerSettingsSignals,
+                commandObserver,
                 baseline);
 
             // Strong false-positive check: imitate an insertion-like coordinated
@@ -558,7 +673,9 @@ internal static class Probe
             var fake = DetectHostDelta(
                 beforeFake,
                 afterFake,
-                layerSettingsSignals > fakeSignalsBefore);
+                layerSettingsSignals > fakeSignalsBefore,
+                routedIntent: null,
+                trustedStructuralUndo: false);
 
             Fact("coordinated_item_shift", EditText(fake));
             Check("coordinated_item_shift_not_exact", fake.Status == StructuralDetectionStatus.Ambiguous);
@@ -602,6 +719,8 @@ internal static class Probe
                     if (redoedHandler is not null)
                         manager.Redoed -= redoedHandler;
                 }
+
+                commandObserver?.Dispose();
 
                 if (layerSettingsHandler is not null)
                 {
