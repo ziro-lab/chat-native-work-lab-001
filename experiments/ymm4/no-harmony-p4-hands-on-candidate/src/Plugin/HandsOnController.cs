@@ -271,6 +271,23 @@ internal sealed class HandsOnController : IDisposable
             if (commands.FindOption(outerId)?.Color != blue)
                 throw new InvalidOperationException("Folder color was not stored.");
 
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            if (commands.FindOption(outerId)?.Color is not null)
+                throw new InvalidOperationException(
+                    "Folder color Undo did not restore the default option.");
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            if (commands.FindOption(outerId)?.Color != blue)
+                throw new InvalidOperationException(
+                    "Folder color Redo did not restore the color.");
+
+            var originalLayerColors = Enumerable.Range(1, 4)
+                .ToDictionary(
+                    layer => layer,
+                    layer => timeline.LayerSettings.Colors[layer]);
+
             commands.ApplyFolderColorToLayers(outerId);
             await Task.Delay(250);
 
@@ -281,6 +298,28 @@ internal sealed class HandsOnController : IDisposable
                 {
                     throw new InvalidOperationException(
                         $"Layer color was not applied at L{layer}.");
+                }
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(300);
+            foreach (var (layer, original) in originalLayerColors)
+            {
+                if (timeline.LayerSettings.Colors[layer] != original)
+                {
+                    throw new InvalidOperationException(
+                        $"Layer color Undo mismatch at L{layer}.");
+                }
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(300);
+            for (var layer = 1; layer <= 4; layer++)
+            {
+                if (timeline.LayerSettings.Colors[layer] != expectedBlue)
+                {
+                    throw new InvalidOperationException(
+                        $"Layer color Redo mismatch at L{layer}.");
                 }
             }
 
@@ -319,7 +358,9 @@ internal sealed class HandsOnController : IDisposable
                 "visibility_undo_redo=true\n" +
                 "original_visibility_restore=true\n" +
                 "folder_color=true\n" +
+                "folder_color_undo_redo=true\n" +
                 "layer_color_apply=true\n" +
+                "layer_color_undo_redo=true\n" +
                 "schema_v2_reload=true\n");
         }
         catch (Exception ex)
