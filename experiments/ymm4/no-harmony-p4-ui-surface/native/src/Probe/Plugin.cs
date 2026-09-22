@@ -663,14 +663,21 @@ internal static class Probe
                 && postOverlaySource.GetType() == baselineSource.GetType());
             Fact("post_overlay_input_source", postOverlaySource?.GetType().FullName);
 
-            menuLease = new FolderMenuLease(foldedMenu, 6);
+            // Collapse/expand can recycle the realized label row again. Bind the
+            // menu lease to the current row immediately before the right-click.
+            var activeContextOwner = FindLayerContextOwner(labels, 6);
+            var activeMenu = activeContextOwner.ContextMenu
+                ?? throw new InvalidOperationException("Active folded layer 6 ContextMenu missing.");
+            Fact("layer6_menu_recreated_after_toggle", !ReferenceEquals(activeMenu, foldedMenu));
+
+            menuLease = new FolderMenuLease(activeMenu, 6);
             await Native.Click(nativePoint, right: true);
             await Task.Delay(500);
             Check("context_open_observed", menuLease.Openings == 1 && menuLease.LastLayer == 6);
             Check("label_right_map_exact",
                 labelRouter.RightMaps == 1
                 && labelRouter.LastLogicalLayer == 6
-                && ReferenceEquals(labelRouter.LastMenu, foldedMenu));
+                && ReferenceEquals(labelRouter.LastMenu, activeMenu));
             Check("native_menu_preserved_and_extended",
                 menuLease.LastMenu is { IsOpen: true }
                 && menuLease.LastMenu.Items.Count >= menuLease.LastOriginalCount + 2
