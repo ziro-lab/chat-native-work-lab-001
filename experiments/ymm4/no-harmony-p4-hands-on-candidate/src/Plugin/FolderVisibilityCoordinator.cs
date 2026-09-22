@@ -115,6 +115,96 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
         return finalState;
     }
 
+    internal FolderProductState ApplyStructuralChange(
+        FolderProductState before,
+        FolderProductState after,
+        Func<int, int> mapLayer)
+    {
+        ArgumentNullException.ThrowIfNull(mapLayer);
+
+        var normalizedBefore =
+            FolderProductStateRules.NormalizeAndValidate(before);
+        var normalizedAfter =
+            FolderProductStateRules.NormalizeAndValidate(after);
+
+        var beforeHidden = FolderProductStateRules.HiddenLayers(
+            normalizedBefore,
+            TimelineKey);
+        var afterHidden = FolderProductStateRules.HiddenLayers(
+            normalizedAfter,
+            TimelineKey);
+        var mappedBeforeHidden = beforeHidden
+            .Select(mapLayer)
+            .Where(layer => layer >= 0)
+            .ToHashSet();
+
+        var restore = FolderProductStateRules.RestoreMap(
+                normalizedAfter,
+                TimelineKey)
+            .ToDictionary(x => x.Key, x => x.Value);
+
+        internalWriteDepth++;
+        try
+        {
+            foreach (var layer in afterHidden
+                .Except(mappedBeforeHidden)
+                .OrderBy(x => x))
+            {
+                var current = timeline.LayerSettings.IsVisibles[layer];
+
+                if (!restore.ContainsKey(layer))
+                    restore[layer] = current;
+
+                pluginSuppressed.Add(layer);
+
+                if (current)
+                    timeline.LayerSettings.IsVisibles[layer] = false;
+            }
+
+            foreach (var layer in mappedBeforeHidden
+                .Except(afterHidden)
+                .OrderBy(x => x))
+            {
+                if (!restore.TryGetValue(layer, out var original))
+                    continue;
+
+                var current = timeline.LayerSettings.IsVisibles[layer];
+
+                if (!(current && !original) && current != original)
+                    timeline.LayerSettings.IsVisibles[layer] = original;
+
+                restore.Remove(layer);
+                pluginSuppressed.Remove(layer);
+            }
+        }
+        finally
+        {
+            internalWriteDepth--;
+        }
+
+        var result = FolderProductStateRules.ReplaceRestoreMap(
+            normalizedAfter,
+            TimelineKey,
+            restore);
+
+        pluginSuppressed.Clear();
+        foreach (var layer in afterHidden.OrderBy(x => x))
+        {
+            if (restore.ContainsKey(layer)
+                && !timeline.LayerSettings.IsVisibles[layer])
+            {
+                pluginSuppressed.Add(layer);
+            }
+        }
+
+        log(
+            $"visibility_structural hidden_before={beforeHidden.Count} " +
+            $"mapped_before={mappedBeforeHidden.Count} " +
+            $"hidden_after={afterHidden.Count} restore={restore.Count}");
+
+        return result;
+    }
+
     private void OnLayerSettingsChanged(
         object? sender,
         PropertyChangedEventArgs e)

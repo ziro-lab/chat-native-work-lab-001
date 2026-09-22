@@ -2,8 +2,10 @@ using System.Windows;
 using System.Windows.Media;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
+using Ymm4NoHarmonyStructuralConvenience;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
 
@@ -133,11 +135,25 @@ internal sealed class FolderCommands
             folderId,
             name);
 
+        var existingGroups = CurrentGroups();
+        var existingSpans = GroupSpans(existingGroups);
+        var groupRanges =
+            StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+                before,
+                TimelineKey,
+                new Ymm4NoHarmonyFolderRanges.InsertLayers(
+                    insertionPosition,
+                    1),
+                existingSpans);
+
         using var composite = structural.PrepareCompositeOverride(
             CommandType.AddLayer,
             insertionPosition,
             before,
-            after);
+            after,
+            () => HandsOnHostAccess.ApplyGroupRanges(
+                existingGroups,
+                groupRanges));
 
         if (!HandsOnHostAccess.TryExecuteTimelineCommand(
                 host,
@@ -248,6 +264,150 @@ internal sealed class FolderCommands
             $"range={folder.Start}-{folder.End} color={option?.Color ?? "<default>"}");
     }
 
+    internal int CountItemsInFolder(Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        return timeline.Items.Count(
+            item => folder.Start <= item.Layer && item.Layer <= folder.End);
+    }
+
+    internal void AddLayerAtFolderEnd(Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        InsertLayerIntoFolder(
+            folderId,
+            checked(folder.End + 1));
+    }
+
+    internal void AddLayerBelowInsideFolder(
+        Guid folderId,
+        int layer)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        if (layer < folder.Start || layer > folder.End)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+
+        InsertLayerIntoFolder(
+            folderId,
+            checked(layer + 1));
+    }
+
+    private void InsertLayerIntoFolder(
+        Guid folderId,
+        int position)
+    {
+        EnsureEditable();
+
+        var groups = CurrentGroups();
+        var plan = StructuralConvenienceRules.PlanInsertIntoFolder(
+            state.Document,
+            TimelineKey,
+            folderId,
+            position,
+            1,
+            GroupSpans(groups));
+
+        ApplyPluginStructuralPlan(
+            plan,
+            groups,
+            newGroup: null,
+            "insert_into_folder");
+    }
+
+    internal void DeleteFolderContents(Guid folderId)
+    {
+        EnsureEditable();
+
+        var groups = CurrentGroups();
+        var plan = StructuralConvenienceRules.PlanDeleteFolderContents(
+            state.Document,
+            TimelineKey,
+            folderId,
+            GroupSpans(groups));
+
+        ApplyPluginStructuralPlan(
+            plan,
+            groups,
+            newGroup: null,
+            "delete_folder_contents");
+    }
+
+    internal bool AddGroupControl(Guid folderId)
+    {
+        EnsureEditable();
+
+        var groups = CurrentGroups();
+        var plan = StructuralConvenienceRules.PlanAddGroupControl(
+            state.Document,
+            TimelineKey,
+            folderId,
+            GroupSpans(groups));
+
+        var item = new GroupItem
+        {
+            Frame = 0,
+            Length = Math.Max(1, timeline.Length),
+            Layer = plan.GroupLayer,
+            GroupRange = plan.GroupRange
+        };
+
+        ApplyPluginStructuralPlan(
+            plan.Structural,
+            groups,
+            item,
+            "add_group_control");
+
+        return timeline.Items.Any(
+            existing => ReferenceEquals(existing, item));
+    }
+
+    internal IReadOnlyList<GroupIssue> GetGroupIssues(
+        Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        var groups = CurrentGroups();
+        return StructuralConvenienceRules.FindGroupIssues(
+            folder,
+            GroupSpans(groups));
+    }
+
+    internal int FitGroupRanges(Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        var groups = CurrentGroups();
+        var spans = GroupSpans(groups);
+        var ranges = StructuralConvenienceRules.PlanFitGroupRanges(
+            folder,
+            spans);
+
+        var changed = HandsOnHostAccess.ApplyGroupRanges(
+            groups,
+            ranges);
+
+        if (changed == 0)
+            return 0;
+
+        undo.Record();
+        log(
+            $"folder_command fit_groups id={folderId} changed={changed}");
+        return changed;
+    }
+
     internal void Ungroup(Guid folderId) =>
         CommitMetadata(
             document => FolderUxCommands.Ungroup(
@@ -269,6 +429,72 @@ internal sealed class FolderCommands
         log(
             $"folder_command select_items id={folderId} " +
             $"range={folder.Start}-{folder.End}");
+    }
+
+    private GroupItem[] CurrentGroups() =>
+        timeline.Items
+            .OfType<GroupItem>()
+            .OrderBy(group => group.Layer)
+            .ThenBy(group => group.Frame)
+            .ToArray();
+
+    private static GroupSpan[] GroupSpans(
+        IReadOnlyList<GroupItem> groups) =>
+        groups
+            .Select(group => new GroupSpan(
+                group.Layer,
+                group.GroupRange))
+            .ToArray();
+
+    private void EnsureEditable()
+    {
+        if (state.IsRecoveryBlocked)
+        {
+            throw new InvalidOperationException(
+                "Unreadable saved folder state is preserved; editing is blocked.");
+        }
+    }
+
+    private void ApplyPluginStructuralPlan(
+        StructuralConveniencePlan plan,
+        IReadOnlyList<GroupItem> groups,
+        GroupItem? newGroup,
+        string reason)
+    {
+        EnsureEditable();
+
+        var beforeProduct =
+            FolderProductStateRules.NormalizeAndValidate(
+                state.ProductState);
+
+        var afterProduct = FolderProductStateRules.ReplaceCore(
+            beforeProduct,
+            plan.Core);
+        afterProduct = FolderProductStateRules.RemapRestoreLayers(
+            afterProduct,
+            TimelineKey,
+            plan.MapLayer);
+
+        HandsOnHostAccess.ApplyStructuralPlan(
+            timeline,
+            plan,
+            groups,
+            newGroup);
+
+        afterProduct = visibility.ApplyStructuralChange(
+            beforeProduct,
+            afterProduct,
+            plan.MapLayer);
+
+        state.ReplaceProductState(afterProduct);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceProductState(beforeProduct),
+            () => state.ReplaceProductState(afterProduct)));
+        undo.Record();
+
+        log(
+            $"folder_command structural reason={reason} " +
+            $"groups={groups.Count} new_group={newGroup is not null}");
     }
 
     private void CommitProductState(

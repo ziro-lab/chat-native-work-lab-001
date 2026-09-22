@@ -754,17 +754,29 @@ Completed:
 
 No S2-specific global preference was required, so no new SettingsBase state was introduced.
 
-#### S3 — structural convenience + Group Control
+#### S3 — structural convenience + Group Control — COMPLETE / FROZEN
 
+Freeze record:
+- `docs/YMM4_NO_HARMONY_S3_STRUCTURAL_GROUP_FREEZE.md`
+
+Completed:
+
+- host-independent structural convenience / Group rules;
 - add layer at folder end;
-- add layer inside folder;
-- destructive folder+layer delete;
-- add Group Control for folder;
+- add layer below a layer while keeping it inside the folder;
+- target + ancestor expansion with unrelated ranges shifted through FolderRangeTracker;
+- destructive folder+contained-layer/item delete;
+- add Group Control at folder head;
+- GroupRange issue detection / warning count;
 - Fit GroupRange;
-- GroupRange warnings;
-- structural auto-correction using the existing StructuralDelta stream.
+- standard Add/Delete GroupRange auto-correction in the existing P1 host-owned history boundary;
+- plugin-owned structural composites through public Timeline.AddLayer/DeleteLayer and one final native Record();
+- Hidden/visibility-restore composition for newly inserted rows;
+- pure **33/33 PASS**;
+- dual-host S3 integration GREEN on 4.56.1.0 / 4.55.1.1;
+- S0 / S1 / S2 / startup / real .ymme regressions GREEN.
 
-LayerPatan planning formulas may be adapted; host mutation remains owned by the no-Harmony structural/Undo boundary.
+Host mutation remains owned by the no-Harmony structural/Undo boundary. No second structural observer, persistence store, Undo stack or FoldMap was introduced.
 
 #### S4 — management panel parity
 
@@ -913,9 +925,9 @@ P0 Core Spine                 DONE
   -> P4.5 real .ymme install    DONE
   -> S0 integration reconcile  DONE
   -> S1 common commands / low-risk parity DONE
-  -> S2 color / visibility / persistence extension NEXT
-  -> S3 structural convenience / Group Control
-  -> S4 management panel parity
+  -> S2 color / visibility / persistence extension DONE
+  -> S3 structural convenience / Group Control DONE
+  -> S4 management panel parity NEXT
   -> S5 visual parity redesign
   -> P4 freeze
   -> P5 compatibility

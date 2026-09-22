@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
@@ -6,8 +7,11 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Data;
 using System.Windows.Media;
+using Ymm4NoHarmonyStructuralConvenience;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
+using YmmGroupItem = YukkuriMovieMaker.Project.Items.GroupItem;
 using YukkuriMovieMaker.UndoRedo;
 using YukkuriMovieMaker.ViewModels;
 
@@ -274,6 +278,97 @@ internal static class HandsOnHostAccess
         }
 
         return false;
+    }
+
+    internal static int ApplyGroupRanges(
+        IReadOnlyList<YmmGroupItem> groups,
+        IReadOnlyList<int> ranges)
+    {
+        ArgumentNullException.ThrowIfNull(groups);
+        ArgumentNullException.ThrowIfNull(ranges);
+
+        if (groups.Count != ranges.Count)
+            throw new ArgumentException(
+                "Group item count does not match the range plan.",
+                nameof(ranges));
+
+        var changed = 0;
+
+        for (var i = 0; i < groups.Count; i++)
+        {
+            if (groups[i].GroupRange == ranges[i])
+                continue;
+
+            groups[i].GroupRange = ranges[i];
+            changed++;
+        }
+
+        return changed;
+    }
+
+    internal static void ApplyStructuralPlan(
+        Timeline timeline,
+        StructuralConveniencePlan plan,
+        IReadOnlyList<YmmGroupItem> groups,
+        YmmGroupItem? newGroup = null)
+    {
+        ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(groups);
+
+        if (groups.Count != plan.GroupRanges.Count)
+            throw new ArgumentException(
+                "Group item count does not match the structural plan.",
+                nameof(groups));
+
+        switch (plan.Edit)
+        {
+            case Ymm4NoHarmonyFolderRanges.InsertLayers insert:
+                for (var i = 0; i < insert.Count; i++)
+                    timeline.AddLayer(insert.Position);
+                break;
+
+            case Ymm4NoHarmonyFolderRanges.DeleteLayers delete:
+                for (var i = 0; i < delete.Count; i++)
+                    timeline.DeleteLayer(delete.Position);
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    "Unsupported plugin-owned structural edit: "
+                    + plan.Edit.GetType().Name);
+        }
+
+        for (var i = 0; i < groups.Count; i++)
+        {
+            var group = groups[i];
+
+            if (!timeline.Items.Any(
+                    item => ReferenceEquals(item, group)))
+            {
+                continue;
+            }
+
+            var nextRange = plan.GroupRanges[i];
+            if (group.GroupRange != nextRange)
+                group.GroupRange = nextRange;
+        }
+
+        if (newGroup is not null)
+        {
+            if (!timeline.TryAddItems(
+                    [newGroup],
+                    newGroup.Frame,
+                    newGroup.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "YMM4 rejected the planned Group Control item.");
+            }
+        }
+
+        timeline.LayerSelection.Clear();
+        timeline.RefreshTimelineLengthAndMaxLayer();
     }
 
     internal static FrameworkElement FindLayerElement(FrameworkElement labels, int layer)
