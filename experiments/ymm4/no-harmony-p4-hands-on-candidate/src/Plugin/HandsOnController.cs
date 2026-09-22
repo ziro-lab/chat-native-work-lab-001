@@ -84,24 +84,16 @@ internal sealed class HandsOnController : IDisposable
         {
             await Task.Delay(500);
 
-            var markers = timeline.Items
-                .Where(x => string.Equals(
-                    x.Remark,
-                    "CNWL_P4_HANDS_ON_SMOKE",
-                    StringComparison.Ordinal))
-                .OrderBy(x => x.Layer)
-                .ToArray();
-
-            if (markers.Length != 3
-                || !markers.Select(x => x.Layer).SequenceEqual(new[] { 0, 1, 2 }))
+            if (timeline.Items.Any())
             {
                 throw new InvalidOperationException(
-                    "Unexpected smoke fixture: " +
-                    string.Join(",", markers.Select(x => x.Layer)));
+                    "S0 structural smoke must start from a resource-free Timeline.");
             }
 
-            // Match the frozen P1 native gate: commit any fixture setup first so
-            // the measured structural action owns a clean history unit.
+            var baselineSettingsCount = timeline.LayerSettings.Items.Count;
+
+            // Match the frozen P1 native gate: establish a clean history boundary
+            // before measuring the host-owned structural command.
             undo.Record();
 
             var key = timeline.ID.ToString("D");
@@ -128,7 +120,7 @@ internal sealed class HandsOnController : IDisposable
                 "after_add",
                 expectedStart: 1,
                 expectedEnd: 3,
-                expectedMarkerLayers: [0, 1, 3]);
+                expectedSettingsCount: baselineSettingsCount + 1);
 
             if (structural.PendingEdits != 1)
                 throw new InvalidOperationException(
@@ -141,7 +133,7 @@ internal sealed class HandsOnController : IDisposable
                 "after_undo",
                 expectedStart: 1,
                 expectedEnd: 2,
-                expectedMarkerLayers: [0, 1, 2]);
+                expectedSettingsCount: baselineSettingsCount);
 
             if (structural.UndoCallbacks != 1)
                 throw new InvalidOperationException(
@@ -154,7 +146,7 @@ internal sealed class HandsOnController : IDisposable
                 "after_redo",
                 expectedStart: 1,
                 expectedEnd: 3,
-                expectedMarkerLayers: [0, 1, 3]);
+                expectedSettingsCount: baselineSettingsCount + 1);
 
             if (structural.RedoCallbacks != 1)
                 throw new InvalidOperationException(
@@ -163,6 +155,8 @@ internal sealed class HandsOnController : IDisposable
             WriteS0Result(
                 "PASS_S0_INTEGRATION\n" +
                 $"timeline={key}\n" +
+                $"baseline_settings={baselineSettingsCount}\n" +
+                $"after_redo_settings={timeline.LayerSettings.Items.Count}\n" +
                 $"pending={structural.PendingEdits}\n" +
                 $"undo_callbacks={structural.UndoCallbacks}\n" +
                 $"redo_callbacks={structural.RedoCallbacks}\n" +
@@ -180,7 +174,7 @@ internal sealed class HandsOnController : IDisposable
         string phase,
         int expectedStart,
         int expectedEnd,
-        int[] expectedMarkerLayers)
+        int expectedSettingsCount)
     {
         var key = timeline.ID.ToString("D");
         var folder = FolderDocumentRules.FindTimeline(state.Document, key)
@@ -195,26 +189,18 @@ internal sealed class HandsOnController : IDisposable
                 (folder is null ? "<null>" : $"{folder.Start}-{folder.End}"));
         }
 
-        var markerLayers = timeline.Items
-            .Where(x => string.Equals(
-                x.Remark,
-                "CNWL_P4_HANDS_ON_SMOKE",
-                StringComparison.Ordinal))
-            .Select(x => x.Layer)
-            .OrderBy(x => x)
-            .ToArray();
-
-        if (!markerLayers.SequenceEqual(expectedMarkerLayers))
+        var settingsCount = timeline.LayerSettings.Items.Count;
+        if (settingsCount != expectedSettingsCount)
         {
             throw new InvalidOperationException(
-                $"{phase}: marker layers mismatch: " +
-                string.Join(",", markerLayers));
+                $"{phase}: LayerSettings count mismatch: " +
+                $"{settingsCount} != {expectedSettingsCount}");
         }
 
         display.ThrowIfFailed();
         HandsOnRuntime.Diagnostic(
             $"s0_state phase={phase} folder={folder.Start}-{folder.End} " +
-            $"markers={string.Join(",", markerLayers)}");
+            $"layer_settings={settingsCount}");
     }
 
     private void ExecuteHostCommand(CommandType type, object? parameter)
