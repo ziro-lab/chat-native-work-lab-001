@@ -320,6 +320,9 @@ internal sealed class FolderCommands
         var afterProduct = FolderProductStateRules.ReplaceCore(
             beforeProduct,
             afterCore);
+        afterProduct = visibility.ApplyHiddenChange(
+            beforeProduct,
+            afterProduct);
 
         CommitResolvedProductState(
             beforeProduct,
