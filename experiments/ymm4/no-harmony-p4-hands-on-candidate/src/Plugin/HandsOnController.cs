@@ -12,6 +12,7 @@ using Ymm4NoHarmonyStructuralConvenience;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YmmGroupItem = YukkuriMovieMaker.Project.Items.GroupItem;
 using YukkuriMovieMaker.UndoRedo;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
@@ -155,7 +156,7 @@ internal sealed class HandsOnController : IDisposable
                             ]
                         })));
 
-            var groupA = new GroupItem
+            var groupA = new YmmGroupItem
             {
                 Frame = 0,
                 Length = Math.Max(1, timeline.Length),
@@ -169,7 +170,7 @@ internal sealed class HandsOnController : IDisposable
                     isItemSelectionEnabled: false))
             {
                 throw new InvalidOperationException(
-                    "S3 baseline GroupItem could not be added.");
+                    "S3 baseline YmmGroupItem could not be added.");
             }
 
             undo.Record();
@@ -293,7 +294,7 @@ internal sealed class HandsOnController : IDisposable
 
             AssertS3Folder(folderB, 7, 9, "group_add_B");
             var groupsAfterAdd = timeline.Items
-                .OfType<GroupItem>()
+                .OfType<YmmGroupItem>()
                 .OrderBy(x => x.Layer)
                 .ToArray();
             if (groupsAfterAdd.Length != 2)
@@ -308,18 +309,18 @@ internal sealed class HandsOnController : IDisposable
             ExecuteHostCommand(CommandType.Undo, null);
             await Task.Delay(350);
             AssertS3Folder(folderB, 7, 8, "group_add_undo_B");
-            if (timeline.Items.OfType<GroupItem>().Count() != 1)
+            if (timeline.Items.OfType<YmmGroupItem>().Count() != 1)
                 throw new InvalidOperationException(
-                    "Group Control add Undo did not remove the new GroupItem.");
+                    "Group Control add Undo did not remove the new YmmGroupItem.");
 
             ExecuteHostCommand(CommandType.Redo, null);
             await Task.Delay(350);
             AssertS3Folder(folderB, 7, 9, "group_add_redo_B");
-            if (timeline.Items.OfType<GroupItem>().Count() != 2)
+            if (timeline.Items.OfType<YmmGroupItem>().Count() != 2)
                 throw new InvalidOperationException(
-                    "Group Control add Redo did not restore the GroupItem.");
+                    "Group Control add Redo did not restore the YmmGroupItem.");
 
-            // Destructive folder delete must remove metadata + rows + GroupItem
+            // Destructive folder delete must remove metadata + rows + YmmGroupItem
             // and come back with one Undo.
             var maxBeforeDelete = timeline.MaxLayer;
             commands.DeleteFolderContents(folderB);
@@ -329,7 +330,7 @@ internal sealed class HandsOnController : IDisposable
                 throw new InvalidOperationException(
                     "Destructive folder delete left folder B metadata.");
             if (timeline.Items
-                .OfType<GroupItem>()
+                .OfType<YmmGroupItem>()
                 .Any(x => x.Layer >= 7 && x.Layer <= 9))
             {
                 throw new InvalidOperationException(
@@ -342,7 +343,7 @@ internal sealed class HandsOnController : IDisposable
             ExecuteHostCommand(CommandType.Undo, null);
             await Task.Delay(400);
             AssertS3Folder(folderB, 7, 9, "delete_undo_B");
-            if (timeline.Items.OfType<GroupItem>().Count() != 2
+            if (timeline.Items.OfType<YmmGroupItem>().Count() != 2
                 || timeline.MaxLayer != maxBeforeDelete)
             {
                 throw new InvalidOperationException(
@@ -352,7 +353,7 @@ internal sealed class HandsOnController : IDisposable
             ExecuteHostCommand(CommandType.Redo, null);
             await Task.Delay(400);
             if (commands.FindFolder(folderB) is not null
-                || timeline.Items.OfType<GroupItem>().Count() != 1
+                || timeline.Items.OfType<YmmGroupItem>().Count() != 1
                 || timeline.MaxLayer != maxBeforeDelete - 3)
             {
                 throw new InvalidOperationException(
