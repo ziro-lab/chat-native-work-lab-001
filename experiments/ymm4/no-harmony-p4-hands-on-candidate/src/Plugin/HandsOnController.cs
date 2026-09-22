@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyState;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.UndoRedo;
@@ -645,7 +646,12 @@ internal sealed class HandsOnController : IDisposable
         if (folders.Length == 0)
             return;
 
-        adorner = new FolderOverlayAdorner(labels, display, folders);
+        adorner = new FolderOverlayAdorner(
+            labels,
+            display,
+            folders,
+            state.State,
+            timeline.ID.ToString("D"));
         adornerLayer.Add(adorner);
     }
 
@@ -876,6 +882,58 @@ internal sealed class HandsOnController : IDisposable
 
             sub.Items.Add(new Separator());
 
+            var option = FolderSessionDocumentRules.FindOption(
+                state.State,
+                timeline.ID.ToString("D"),
+                folder.Id);
+
+            var hidden = option?.Hidden ?? false;
+            var hiddenItem = new MenuItem
+            {
+                Header = hidden ? "フォルダを表示" : "フォルダを非表示",
+                IsCheckable = true,
+                IsChecked = hidden
+            };
+            hiddenItem.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.SetHidden(folder.Id, !hidden));
+            sub.Items.Add(hiddenItem);
+
+            var colorMenu = new MenuItem { Header = "フォルダの色" };
+            foreach (var choice in FolderCommands.ColorChoices)
+            {
+                var colorItem = new MenuItem
+                {
+                    Header = choice.Name,
+                    IsCheckable = true,
+                    IsChecked = string.Equals(
+                        option?.Color,
+                        choice.Color,
+                        StringComparison.OrdinalIgnoreCase),
+                    Icon = CreateColorSwatch(choice.Color)
+                };
+
+                var capturedColor = choice.Color;
+                colorItem.Click += (_, _) =>
+                    RunFolderCommand(
+                        () => commands.SetColor(
+                            folder.Id,
+                            capturedColor));
+                colorMenu.Items.Add(colorItem);
+            }
+            sub.Items.Add(colorMenu);
+
+            var applyColor = new MenuItem
+            {
+                Header = "フォルダ色をYMM4レイヤー色へ適用"
+            };
+            applyColor.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.ApplyColorToLayers(folder.Id));
+            sub.Items.Add(applyColor);
+
+            sub.Items.Add(new Separator());
+
             var ungroup = new MenuItem
             {
                 Header = "フォルダを解除（レイヤーは残す）"
@@ -886,6 +944,38 @@ internal sealed class HandsOnController : IDisposable
 
             root.Items.Add(sub);
         }
+    }
+
+    private static FrameworkElement CreateColorSwatch(string? color)
+    {
+        var brush = color is null
+            ? Brushes.Transparent
+            : new SolidColorBrush(ParseArgbColor(color));
+
+        return new Border
+        {
+            Width = 14,
+            Height = 14,
+            BorderThickness = new Thickness(1),
+            BorderBrush = Brushes.Gray,
+            Background = brush
+        };
+    }
+
+    private static Color ParseArgbColor(string text)
+    {
+        var value = text.AsSpan();
+        if (value.Length != 9 || value[0] != '#')
+            throw new ArgumentException("Color must use #AARRGGBB format.");
+
+        static byte ParseByte(ReadOnlySpan<char> hex) =>
+            Convert.ToByte(hex.ToString(), 16);
+
+        return Color.FromArgb(
+            ParseByte(value.Slice(1, 2)),
+            ParseByte(value.Slice(3, 2)),
+            ParseByte(value.Slice(5, 2)),
+            ParseByte(value.Slice(7, 2)));
     }
 
     private void PromptRename(Guid folderId)
@@ -979,17 +1069,26 @@ internal sealed class HandsOnController : IDisposable
         private readonly VisualCollection children;
         private readonly DirectDisplay display;
         private readonly PersistedFolder[] folders;
+        private readonly IReadOnlyDictionary<Guid, FolderOptionState> options;
         private sealed record FolderHit(Rect Toggle, Rect Name);
         private readonly Dictionary<Guid, FolderHit> hitRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
             DirectDisplay display,
-            PersistedFolder[] folders)
+            PersistedFolder[] folders,
+            FolderSessionDocument session,
+            string timelineKey)
             : base(adornedElement)
         {
             this.display = display;
             this.folders = folders;
+            options = session.FolderOptions
+                .Where(x => string.Equals(
+                    x.TimelineKey,
+                    timelineKey,
+                    StringComparison.Ordinal))
+                .ToDictionary(x => x.FolderId);
             children = new VisualCollection(this) { canvas };
             IsHitTestVisible = false;
             Rebuild();
@@ -1061,17 +1160,29 @@ internal sealed class HandsOnController : IDisposable
                         Math.Max(0, width - toggleWidth),
                         height));
 
+                options.TryGetValue(folder.Id, out var option);
+                var baseColor = option?.Color is { } text
+                    ? ParseArgbColor(text)
+                    : Color.FromRgb(78, 78, 78);
+                var tagColor = Color.FromArgb(
+                    option?.Hidden == true ? (byte)150 : (byte)215,
+                    baseColor.R,
+                    baseColor.G,
+                    baseColor.B);
+
                 var border = new Border
                 {
                     Width = width,
                     Height = height,
                     CornerRadius = new CornerRadius(3),
-                    Background = new SolidColorBrush(
-                        Color.FromArgb(215, 78, 78, 78)),
+                    Background = new SolidColorBrush(tagColor),
                     IsHitTestVisible = false,
                     Child = new TextBlock
                     {
-                        Text = (folder.IsCollapsed ? "▶ " : "▼ ") + folder.Name,
+                        Text =
+                            (folder.IsCollapsed ? "▶ " : "▼ ")
+                            + (option?.Hidden == true ? "[非表示] " : "")
+                            + folder.Name,
                         Foreground = Brushes.White,
                         FontSize = 10,
                         TextTrimming = TextTrimming.CharacterEllipsis,
