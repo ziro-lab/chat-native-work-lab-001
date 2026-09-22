@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Ymm4TrackCStructuralProbe</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.Windows.WindowState" Alias="WindowState" />
+    <Using Include="YukkuriMovieMaker.Plugin" />
+    <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ReactiveProperty.Core"><HintPath>$(YMM4DirPath)ReactiveProperty.Core.dll</HintPath><Private>false</Private></Reference>
+    <Compile Include="../../../../no-harmony-track-a/src/Probe/Host.cs" Link="Host.cs" />
+    <Compile Include="../../../../no-harmony-folder-layout-generalization/src/Probe/FolderLayout.cs" Link="FolderLayout.cs" />
+    <Compile Include="../../../../no-harmony-track-c/src/Probe/GestureDisplay.cs" Link="GestureDisplay.cs" />
+    <Compile Include="../../../../no-harmony-track-c/src/Probe/InputMapAdapter.cs" Link="InputMapAdapter.cs" />
+    <Compile Include="../../../../no-harmony-track-c/src/Probe/FileDropAdapter.cs" Link="FileDropAdapter.cs" />
+    <Compile Include="../../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
+    <Compile Include="../../../../no-harmony-structural-observer/src/StructuralDeltaDetector.cs" Link="StructuralDeltaDetector.cs" />
+  </ItemGroup>
+</Project>
