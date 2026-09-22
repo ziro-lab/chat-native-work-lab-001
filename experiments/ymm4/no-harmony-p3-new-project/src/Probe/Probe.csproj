@@ -12,6 +12,6 @@
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
-    <Compile Include="../../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
+    <Compile Include="../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
   </ItemGroup>
 </Project>
