@@ -241,7 +241,6 @@ internal static class Probe
 
     private sealed class FolderOwnerAdorner : Adorner
     {
-        private readonly Canvas canvas = new() { ClipToBounds = true };
         private readonly VisualCollection children;
         private readonly DirectDisplay display;
         private readonly CollapsedSpan span;
@@ -255,7 +254,6 @@ internal static class Probe
         {
             this.display = display;
             this.span = span;
-            children = new VisualCollection(this) { canvas };
             toggle = new Button
             {
                 Content = "▶",
@@ -271,46 +269,38 @@ internal static class Probe
                 var collapsed = display.Layout.IsHidden(span.Start + 1);
                 display.SetSpans(collapsed ? [] : [span]);
                 toggle.Content = collapsed ? "▼" : "▶";
-                Position();
+                InvalidateArrange();
             };
-            canvas.Children.Add(toggle);
-            Position();
+            children = new VisualCollection(this) { toggle };
         }
 
-        internal void Position()
-        {
-            Canvas.SetLeft(toggle, 2);
-            Canvas.SetTop(toggle, display.Layout.VisualRowOfLogical(span.Start) * display.Height + 3);
-        }
+        private Rect ToggleRect() =>
+            new(
+                2,
+                display.Layout.VisualRowOfLogical(span.Start) * display.Height + 3,
+                toggle.Width,
+                toggle.Height);
 
         protected override int VisualChildrenCount => children.Count;
         protected override Visual GetVisualChild(int index) => children[index];
 
         protected override Size MeasureOverride(Size constraint)
         {
-            canvas.Measure(constraint);
+            toggle.Measure(new Size(toggle.Width, toggle.Height));
             return AdornedElement.RenderSize;
         }
 
         protected override Size ArrangeOverride(Size finalSize)
         {
-            canvas.Arrange(new Rect(AdornedElement.RenderSize));
-            Position();
+            toggle.Arrange(ToggleRect());
             return finalSize;
         }
 
         protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
         {
-            var left = Canvas.GetLeft(toggle);
-            var top = Canvas.GetTop(toggle);
-            var width = toggle.ActualWidth > 0 ? toggle.ActualWidth : toggle.Width;
-            var height = toggle.ActualHeight > 0 ? toggle.ActualHeight : toggle.Height;
-            var buttonRect = new Rect(left, top, width, height);
-
-            // The Adorner spans the whole layer-label list for positioning, but
-            // only the explicit folder button may own input. Everywhere else
-            // must fall through to YMM4's native layer-label controls.
-            return buttonRect.Contains(hitTestParameters.HitPoint)
+            // This Adorner is full-size only so its child can track folded rows.
+            // It contains no full-size Canvas: only the explicit button owns input.
+            return ToggleRect().Contains(hitTestParameters.HitPoint)
                 ? base.HitTestCore(hitTestParameters)
                 : null;
         }
