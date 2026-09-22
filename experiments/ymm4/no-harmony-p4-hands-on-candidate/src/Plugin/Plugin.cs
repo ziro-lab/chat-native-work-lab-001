@@ -133,6 +133,7 @@ internal static class HandsOnRuntime
     private static PropertyChangedEventHandler? projectPathHandler;
     private static HandsOnController? controller;
     private static Guid lastProjectTimelineId;
+    private static bool smokeProjectRequested;
 
     internal static void Start()
     {
@@ -189,6 +190,20 @@ internal static class HandsOnRuntime
                 root = currentRoot;
                 AttachProjectSignal(currentRoot);
                 Diagnostic("main_root_attached");
+            }
+
+            if (HandsOnHostAccess.ActiveTimelineViewModel(currentRoot) is null
+                && !smokeProjectRequested
+                && string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                smokeProjectRequested = true;
+                currentRoot.GetType()
+                    .GetMethod("CreateProject", Type.EmptyTypes)
+                    ?.Invoke(currentRoot, null);
+                Diagnostic("smoke_create_project_requested");
             }
 
             EnsureController();
