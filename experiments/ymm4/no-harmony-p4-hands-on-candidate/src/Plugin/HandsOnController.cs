@@ -25,6 +25,7 @@ internal sealed class HandsOnController : IDisposable
     private readonly FolderStateStore state;
     private readonly DirectDisplay display;
     private readonly StructuralFolderBridge structural;
+    private readonly FolderCommands commands;
     private readonly InputMapAdapter input;
     private readonly FileDropMapAdapter fileDrop;
     private readonly AdornerLayer adornerLayer;
@@ -54,6 +55,13 @@ internal sealed class HandsOnController : IDisposable
             undo,
             state,
             HandsOnRuntime.Diagnostic);
+        commands = new FolderCommands(
+            window,
+            host,
+            undo,
+            state,
+            structural,
+            HandsOnRuntime.Diagnostic);
         input = new InputMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         fileDrop = new FileDropMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         adornerLayer = AdornerLayer.GetAdornerLayer(labels)
@@ -63,6 +71,191 @@ internal sealed class HandsOnController : IDisposable
         window.AddHandler(Mouse.PreviewMouseDownEvent, mouseHandler, true);
         RefreshFromDocument();
         ScheduleS0IntegrationSmoke();
+        ScheduleS1IntegrationSmoke();
+    }
+
+    private void ScheduleS1IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S1_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS1IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS1IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+            {
+                throw new InvalidOperationException(
+                    "S1 create smoke must start from a resource-free Timeline.");
+            }
+
+            var baselineSettingsCount = timeline.LayerSettings.Items.Count;
+            undo.Record();
+
+            timeline.LayerSelection.Clear();
+            var folderId = Guid.Parse(
+                "11111111-2222-3333-4444-555555555555");
+
+            var decision = commands.CreateFromContext(
+                clickedLayer: 1,
+                folderId,
+                "S1 Smoke");
+
+            await Task.Delay(500);
+
+            if (!decision.NeedsAdditionalLayer
+                || decision.Start != 1
+                || decision.End != 1)
+            {
+                throw new InvalidOperationException(
+                    "S1 one-row decision did not request the insertion convenience.");
+            }
+
+            AssertS1CreateState(
+                "after_create",
+                folderId,
+                expectedFolder: (1, 2, false),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            if (structural.PendingEdits != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Expected one composite history command, got {structural.PendingEdits}.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            AssertS1CreateState(
+                "after_undo",
+                folderId,
+                expectedFolder: null,
+                expectedSettingsCount: baselineSettingsCount);
+
+            if (structural.UndoCallbacks != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Expected one composite Undo callback, got {structural.UndoCallbacks}.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            AssertS1CreateState(
+                "after_redo",
+                folderId,
+                expectedFolder: (1, 2, false),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            if (structural.RedoCallbacks != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Expected one composite Redo callback, got {structural.RedoCallbacks}.");
+            }
+
+            commands.SetAllCollapsed(true);
+            await Task.Delay(250);
+            AssertS1CreateState(
+                "after_collapse_all",
+                folderId,
+                expectedFolder: (1, 2, true),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            commands.SetAllCollapsed(false);
+            await Task.Delay(250);
+            AssertS1CreateState(
+                "after_expand_all",
+                folderId,
+                expectedFolder: (1, 2, false),
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            WriteS1Result(
+                "PASS_S1_INTEGRATION\n" +
+                $"timeline={timeline.ID:D}\n" +
+                $"baseline_settings={baselineSettingsCount}\n" +
+                $"after_create_settings={timeline.LayerSettings.Items.Count}\n" +
+                $"pending={structural.PendingEdits}\n" +
+                $"undo_callbacks={structural.UndoCallbacks}\n" +
+                $"redo_callbacks={structural.RedoCallbacks}\n" +
+                "single_row_create=true\n" +
+                "bulk_collapse_expand=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic("s1_integration_smoke_error=" + ex);
+            WriteS1Result("FAIL_S1_INTEGRATION\n" + ex + "\n");
+        }
+    }
+
+    private void AssertS1CreateState(
+        string phase,
+        Guid folderId,
+        (int Start, int End, bool Collapsed)? expectedFolder,
+        int expectedSettingsCount)
+    {
+        var timelineState = FolderDocumentRules.FindTimeline(
+            state.Document,
+            timeline.ID.ToString("D"));
+        var folder = timelineState?.Folders
+            .FirstOrDefault(x => x.Id == folderId);
+
+        if (expectedFolder is null)
+        {
+            if (folder is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{phase}: folder should not exist but was " +
+                    $"{folder.Start}-{folder.End}.");
+            }
+        }
+        else
+        {
+            var expected = expectedFolder.Value;
+            if (folder is null
+                || folder.Start != expected.Start
+                || folder.End != expected.End
+                || folder.IsCollapsed != expected.Collapsed)
+            {
+                throw new InvalidOperationException(
+                    $"{phase}: folder mismatch: " +
+                    (folder is null
+                        ? "<null>"
+                        : $"{folder.Start}-{folder.End}:collapsed={folder.IsCollapsed}"));
+            }
+        }
+
+        var settingsCount = timeline.LayerSettings.Items.Count;
+        if (settingsCount != expectedSettingsCount)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: LayerSettings count mismatch: " +
+                $"{settingsCount} != {expectedSettingsCount}");
+        }
+
+        display.ThrowIfFailed();
+        HandsOnRuntime.Diagnostic(
+            $"s1_state phase={phase} settings={settingsCount} " +
+            $"folder={(folder is null ? "<null>" : $"{folder.Start}-{folder.End}:{folder.IsCollapsed}")}");
+    }
+
+    private static void WriteS1Result(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "s1-result.txt"), text);
     }
 
     private void ScheduleS0IntegrationSmoke()
@@ -205,50 +398,15 @@ internal sealed class HandsOnController : IDisposable
 
     private void ExecuteHostCommand(CommandType type, object? parameter)
     {
-        ICommand command = CommandSettings.Default[type]
-            ?? throw new InvalidOperationException("Command missing: " + type);
-
-        var targets = new List<IInputElement>();
-        if (Keyboard.FocusedElement is IInputElement focused)
-            targets.Add(focused);
-        targets.Add(host.Source);
-        targets.Add(host.View);
-        targets.Add(window);
-
-        foreach (var target in targets)
+        if (!HandsOnHostAccess.TryExecuteTimelineCommand(
+                host,
+                window,
+                type,
+                parameter))
         {
-            if (command is RoutedCommand routed)
-            {
-                bool can;
-                try
-                {
-                    can = routed.CanExecute(parameter, target);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (!can)
-                    continue;
-
-                routed.Execute(parameter, target);
-                HandsOnRuntime.Diagnostic(
-                    $"s0_command type={type} target={target.GetType().Name} parameter={parameter ?? "<null>"}");
-                return;
-            }
-
-            if (command.CanExecute(parameter))
-            {
-                command.Execute(parameter);
-                HandsOnRuntime.Diagnostic(
-                    $"s0_command type={type} target=<direct> parameter={parameter ?? "<null>"}");
-                return;
-            }
+            throw new InvalidOperationException(
+                $"No executable route for {type} with parameter {parameter ?? "<null>"}.");
         }
-
-        throw new InvalidOperationException(
-            $"No executable route for {type} with parameter {parameter ?? "<null>"}.");
     }
 
     private static void WriteS0Result(string text)
@@ -319,15 +477,23 @@ internal sealed class HandsOnController : IDisposable
             || point.Y < 0 || point.Y >= labels.ActualHeight)
             return;
 
-        if (e.ChangedButton == MouseButton.Left
-            && adorner?.TryFolderAt(point, out var folderId) == true)
+        if (e.ChangedButton == MouseButton.Left)
         {
-            e.Handled = true;
-            ExecuteDocumentChange(
-                document => FolderUxCommands.ToggleCollapsed(
-                    document,
-                    timeline.ID.ToString("D"),
-                    folderId));
+            if (adorner?.TryToggleAt(point, out var toggleId) == true)
+            {
+                e.Handled = true;
+                RunFolderCommand(() => commands.ToggleCollapsed(toggleId));
+                return;
+            }
+
+            if (e.ClickCount >= 2
+                && adorner?.TryNameAt(point, out var renameId) == true)
+            {
+                e.Handled = true;
+                PromptRename(renameId);
+                return;
+            }
+
             return;
         }
 
@@ -382,8 +548,26 @@ internal sealed class HandsOnController : IDisposable
         }
         else
         {
-            AddCreateAction(root);
+            AddCreateAction(root, logicalLayer);
             AddExistingFolderActions(root, logicalLayer);
+
+            var timelineState = FolderDocumentRules.FindTimeline(
+                state.Document,
+                timeline.ID.ToString("D"));
+            if (timelineState is { Folders.Count: > 0 })
+            {
+                root.Items.Add(new Separator());
+
+                var expandAll = new MenuItem { Header = "すべてのフォルダを開く" };
+                expandAll.Click += (_, _) =>
+                    RunFolderCommand(() => commands.SetAllCollapsed(false));
+                root.Items.Add(expandAll);
+
+                var collapseAll = new MenuItem { Header = "すべてのフォルダを畳む" };
+                collapseAll.Click += (_, _) =>
+                    RunFolderCommand(() => commands.SetAllCollapsed(true));
+                root.Items.Add(collapseAll);
+            }
         }
 
         menu.Items.Add(new Separator { Tag = MenuTag });
@@ -398,34 +582,40 @@ internal sealed class HandsOnController : IDisposable
         menu.Closed += closed;
     }
 
-    private void AddCreateAction(MenuItem root)
+    private void AddCreateAction(MenuItem root, int logicalLayer)
     {
-        var selected = timeline.LayerSelection.SelectedLayers
-            .Distinct()
-            .OrderBy(x => x)
-            .ToArray();
         var candidateId = Guid.NewGuid();
-        var decision = FolderUxCommands.EvaluateCreate(
-            state.Document,
-            timeline.ID.ToString("D"),
-            selected,
-            candidateId);
+        var decision = commands.EvaluateCreate(logicalLayer, candidateId);
+
+        string Header()
+        {
+            if (!decision.Allowed
+                || decision.Start is null
+                || decision.End is null)
+            {
+                return "フォルダを作成できません（"
+                    + CreationReason(decision.Status)
+                    + "）";
+            }
+
+            var range = decision.Start == decision.End
+                ? $"L{decision.Start:00}"
+                : $"L{decision.Start:00}–L{decision.End:00}";
+
+            return decision.NeedsAdditionalLayer
+                ? $"{range} をフォルダにする（下に空レイヤーを1つ追加）..."
+                : $"{range} をフォルダにまとめる...";
+        }
 
         var create = new MenuItem
         {
-            Header = decision.Allowed
-                && decision.Start is not null
-                && decision.End is not null
-                    ? $"L{decision.Start}–L{decision.End} をフォルダにまとめる..."
-                    : "フォルダを作成できません（" + CreationReason(decision.Status) + "）",
+            Header = Header(),
             IsEnabled = decision.Allowed
         };
 
         create.Click += (_, _) =>
         {
-            if (!decision.Allowed
-                || decision.Start is null
-                || decision.End is null)
+            if (!decision.Allowed)
                 return;
 
             var count = FolderDocumentRules.FindTimeline(
@@ -439,17 +629,27 @@ internal sealed class HandsOnController : IDisposable
             if (string.IsNullOrWhiteSpace(name))
                 name = fallback;
 
-            var captured = selected.ToArray();
-            ExecuteDocumentChange(
-                document => FolderUxCommands.CreateFolder(
-                    document,
-                    timeline.ID.ToString("D"),
-                    captured,
+            RunFolderCommand(
+                () => commands.CreateFromContext(
+                    logicalLayer,
                     candidateId,
                     name));
         };
 
         root.Items.Add(create);
+
+        if (decision.AdjustedForFolderHead
+            && decision.RequestedStart is not null
+            && decision.Start is not null)
+        {
+            root.Items.Add(new MenuItem
+            {
+                Header =
+                    $"  (L{decision.RequestedStart:00} は既存フォルダの先頭のため、" +
+                    $"L{decision.Start:00} から作成します)",
+                IsEnabled = false
+            });
+        }
     }
 
     private void AddExistingFolderActions(MenuItem root, int logicalLayer)
@@ -479,37 +679,18 @@ internal sealed class HandsOnController : IDisposable
             {
                 Header = folder.IsCollapsed ? "開く" : "畳む"
             };
-            toggle.Click += (_, _) => ExecuteDocumentChange(
-                document => FolderUxCommands.ToggleCollapsed(
-                    document,
-                    timeline.ID.ToString("D"),
-                    folder.Id));
+            toggle.Click += (_, _) =>
+                RunFolderCommand(() => commands.ToggleCollapsed(folder.Id));
             sub.Items.Add(toggle);
 
             var rename = new MenuItem { Header = "名前を変更..." };
-            rename.Click += (_, _) =>
-            {
-                var name = TextPrompt.Show("フォルダ名", folder.Name);
-                if (name is null)
-                    return;
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    MessageBox.Show(
-                        "フォルダ名を入力してください。",
-                        FolderToolViewModel.DisplayTitle,
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-                    return;
-                }
-
-                ExecuteDocumentChange(
-                    document => FolderUxCommands.RenameFolder(
-                        document,
-                        timeline.ID.ToString("D"),
-                        folder.Id,
-                        name));
-            };
+            rename.Click += (_, _) => PromptRename(folder.Id);
             sub.Items.Add(rename);
+
+            var selectItems = new MenuItem { Header = "中のアイテムを選択" };
+            selectItems.Click += (_, _) =>
+                RunFolderCommand(() => commands.SelectItems(folder.Id));
+            sub.Items.Add(selectItems);
 
             sub.Items.Add(new Separator());
 
@@ -517,40 +698,41 @@ internal sealed class HandsOnController : IDisposable
             {
                 Header = "フォルダを解除（レイヤーは残す）"
             };
-            ungroup.Click += (_, _) => ExecuteDocumentChange(
-                document => FolderUxCommands.Ungroup(
-                    document,
-                    timeline.ID.ToString("D"),
-                    folder.Id));
+            ungroup.Click += (_, _) =>
+                RunFolderCommand(() => commands.Ungroup(folder.Id));
             sub.Items.Add(ungroup);
 
             root.Items.Add(sub);
         }
     }
 
-    private void ExecuteDocumentChange(
-        Func<FolderDocument, FolderDocument> change)
+    private void PromptRename(Guid folderId)
     {
-        if (state.IsRecoveryBlocked)
+        var folder = commands.FindFolder(folderId);
+        if (folder is null)
             return;
 
+        var name = TextPrompt.Show("フォルダ名", folder.Name);
+        if (name is null)
+            return;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            MessageBox.Show(
+                "フォルダ名を入力してください。",
+                FolderToolViewModel.DisplayTitle,
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        RunFolderCommand(() => commands.Rename(folderId, name));
+    }
+
+    private static void RunFolderCommand(Action action)
+    {
         try
         {
-            var before = state.Document;
-            var after = FolderDocumentRules.NormalizeAndValidate(change(before));
-
-            if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
-                return;
-
-            state.ReplaceDocument(after);
-
-            undo.AddCommand(new UndoRedoActionCommand(
-                () => state.ReplaceDocument(before),
-                () => state.ReplaceDocument(after)));
-            undo.Record();
-
-            HandsOnRuntime.Diagnostic(
-                $"folder_history_record timeline={timeline.ID:D}");
+            action();
         }
         catch (Exception ex)
         {
@@ -615,7 +797,8 @@ internal sealed class HandsOnController : IDisposable
         private readonly VisualCollection children;
         private readonly DirectDisplay display;
         private readonly PersistedFolder[] folders;
-        private readonly Dictionary<Guid, Rect> hitRects = [];
+        private sealed record FolderHit(Rect Toggle, Rect Name);
+        private readonly Dictionary<Guid, FolderHit> hitRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
@@ -630,11 +813,26 @@ internal sealed class HandsOnController : IDisposable
             Rebuild();
         }
 
-        internal bool TryFolderAt(Point point, out Guid folderId)
+        internal bool TryToggleAt(Point point, out Guid folderId)
         {
             foreach (var pair in hitRects)
             {
-                if (pair.Value.Contains(point))
+                if (pair.Value.Toggle.Contains(point))
+                {
+                    folderId = pair.Key;
+                    return true;
+                }
+            }
+
+            folderId = Guid.Empty;
+            return false;
+        }
+
+        internal bool TryNameAt(Point point, out Guid folderId)
+        {
+            foreach (var pair in hitRects)
+            {
+                if (pair.Value.Name.Contains(point))
                 {
                     folderId = pair.Key;
                     return true;
@@ -672,7 +870,14 @@ internal sealed class HandsOnController : IDisposable
                         Math.Max(48, AdornedElement.RenderSize.Width - x - 4)));
                 var height = Math.Max(18, display.Height - 6);
                 var rect = new Rect(x, y, width, height);
-                hitRects[folder.Id] = rect;
+                var toggleWidth = Math.Min(18, width);
+                hitRects[folder.Id] = new FolderHit(
+                    new Rect(x, y, toggleWidth, height),
+                    new Rect(
+                        x + toggleWidth,
+                        y,
+                        Math.Max(0, width - toggleWidth),
+                        height));
 
                 var border = new Border
                 {

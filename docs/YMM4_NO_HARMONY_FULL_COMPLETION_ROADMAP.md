@@ -672,7 +672,8 @@ Current P4 evidence:
 - P4.3 minimum integrated workflow — 24/24 named assertions PASS on YMM4 4.56.1.0;
 - P4.4 installable hands-on candidate — startup-smoked;
 - P4.5 real `.ymme` install — GREEN on YMM4 4.56.1.0;
-- S0 product integration reconciliation — dual-host GREEN on YMM4 4.56.1.0 / 4.55.1.1; freeze record: `docs/YMM4_NO_HARMONY_S0_INTEGRATION_RECONCILIATION.md`.
+- S0 product integration reconciliation — dual-host GREEN on YMM4 4.56.1.0 / 4.55.1.1; freeze record: `docs/YMM4_NO_HARMONY_S0_INTEGRATION_RECONCILIATION.md`;
+- S1 common commands / low-risk parity — pure 27/27 PASS + dual-host one-row composite GREEN; freeze record: `docs/YMM4_NO_HARMONY_S1_COMMON_COMMANDS_FREEZE.md`.
 
 ### Product direction
 
@@ -709,15 +710,26 @@ Completed:
 
 S0 does not reopen the P0-P3 Core contracts.
 
-#### S1 — common command surface + low-risk parity
+#### S1 — common command surface + low-risk parity — COMPLETE / FROZEN
 
-- LayerPatan creation-range behavior;
+Freeze record:
+- `docs/YMM4_NO_HARMONY_S1_COMMON_COMMANDS_FREEZE.md`
+
+Completed:
+
+- pinned LayerPatan creation-range behavior: selected-click -> selected min..max including gaps; outside-click -> clicked layer only;
 - folder-head adjustment;
-- one-layer create convenience;
-- double-click rename;
+- one-layer create convenience with one native Add Layer + one user-visible Undo unit;
+- double-click rename on the folder-name hit region;
 - expand all / collapse all;
 - select items in folder;
-- shared command entry from Timeline / tag / Tool panel / keyboard.
+- shared typed `FolderCommands` ownership used by Timeline menu/tag and reserved for S4 Tool-panel/keyboard projection;
+- standard command execution centralized through the product host-access boundary;
+- pure policy 27/27 PASS;
+- dual-host S1 composite integration GREEN;
+- S0 / startup / real `.ymme` / P4 minimum workflow regressions GREEN.
+
+S1 freezes command ownership and semantics. S4 still owns management-panel construction and panel-specific keyboard/discoverability UX.
 
 #### S2 — extended project state + visual metadata
 
@@ -886,8 +898,8 @@ P0 Core Spine                 DONE
   -> P4.4 installable candidate DONE
   -> P4.5 real .ymme install    DONE
   -> S0 integration reconcile  DONE
-  -> S1 common commands / low-risk parity NEXT
-  -> S2 color / visibility / persistence extension
+  -> S1 common commands / low-risk parity DONE
+  -> S2 color / visibility / persistence extension NEXT
   -> S3 structural convenience / Group Control
   -> S4 management panel parity
   -> S5 visual parity redesign
