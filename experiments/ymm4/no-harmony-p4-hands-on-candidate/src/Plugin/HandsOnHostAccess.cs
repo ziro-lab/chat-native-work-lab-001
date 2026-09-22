@@ -11,6 +11,7 @@ using Ymm4NoHarmonyStructuralConvenience;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YmmGroupItem = YukkuriMovieMaker.Project.Items.GroupItem;
 using YukkuriMovieMaker.UndoRedo;
 using YukkuriMovieMaker.ViewModels;
 
@@ -280,7 +281,7 @@ internal static class HandsOnHostAccess
     }
 
     internal static int ApplyGroupRanges(
-        IReadOnlyList<GroupItem> groups,
+        IReadOnlyList<YmmGroupItem> groups,
         IReadOnlyList<int> ranges)
     {
         ArgumentNullException.ThrowIfNull(groups);
@@ -308,8 +309,8 @@ internal static class HandsOnHostAccess
     internal static void ApplyStructuralPlan(
         Timeline timeline,
         StructuralConveniencePlan plan,
-        IReadOnlyList<GroupItem> groups,
-        GroupItem? newGroup = null)
+        IReadOnlyList<YmmGroupItem> groups,
+        YmmGroupItem? newGroup = null)
     {
         ArgumentNullException.ThrowIfNull(timeline);
         ArgumentNullException.ThrowIfNull(plan);
