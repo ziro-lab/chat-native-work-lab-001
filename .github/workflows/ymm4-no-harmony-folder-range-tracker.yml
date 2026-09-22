@@ -1,0 +1,43 @@
+name: YMM4 no-Harmony pure FolderRangeTracker
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-folder-range-tracker/**'
+      - '.github/workflows/ymm4-no-harmony-folder-range-tracker.yml'
+permissions: { contents: read }
+concurrency:
+  group: folder-range-tracker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  pure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false, fetch-depth: 1 }
+      - name: Enforce host-independent boundary
+        shell: bash
+        run: |
+          project='experiments/ymm4/no-harmony-folder-range-tracker/tests/TrackerTests.csproj'
+          source='experiments/ymm4/no-harmony-folder-range-tracker/src/FolderRangeTracker.cs'
+          if grep -Eiq 'YukkuriMovieMaker|PresentationFramework|UseWPF|net[0-9.]+-windows|System\.Windows' "$project" "$source"; then
+            echo 'P1.2 boundary violation: tracker gained YMM4/WPF/Windows dependency' >&2
+            exit 1
+          fi
+      - name: Build pure tracker
+        shell: bash
+        run: dotnet build experiments/ymm4/no-harmony-folder-range-tracker/tests/TrackerTests.csproj -c Release --nologo -warnaserror
+      - name: Run policy suite
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet run --project experiments/ymm4/no-harmony-folder-range-tracker/tests/TrackerTests.csproj -c Release --no-build | tee result.txt
+          grep -q '^status=PASS_FOLDER_RANGE_TRACKER$' result.txt
+          grep -Eq '^assertion_count=[2-9][0-9]+$' result.txt
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-folder-range-tracker
+          path: result.txt
+          retention-days: 14
