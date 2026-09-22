@@ -4,7 +4,7 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>Ymm4NoHarmonyStructuralMutationProbe</AssemblyName>
+    <AssemblyName>Ymm4StructuralMutationProbe</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="System.Windows.WindowState" Alias="WindowState" />
