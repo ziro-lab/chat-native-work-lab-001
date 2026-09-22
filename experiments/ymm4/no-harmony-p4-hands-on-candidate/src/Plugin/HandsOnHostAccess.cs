@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
@@ -6,8 +7,10 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Data;
 using System.Windows.Media;
+using Ymm4NoHarmonyStructuralConvenience;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.UndoRedo;
 using YukkuriMovieMaker.ViewModels;
 
@@ -274,6 +277,83 @@ internal static class HandsOnHostAccess
         }
 
         return false;
+    }
+
+    internal static void ApplyStructuralPlan(
+        Timeline timeline,
+        StructuralConveniencePlan plan,
+        IReadOnlyList<GroupItem> groups,
+        GroupItem? newGroup = null)
+    {
+        ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(groups);
+
+        if (groups.Count != plan.GroupRanges.Count)
+            throw new ArgumentException(
+                "Group item count does not match the structural plan.",
+                nameof(groups));
+
+        var beforeItems = timeline.Items.ToArray();
+        var removed = beforeItems
+            .Where(item => plan.MapLayer(item.Layer) < 0)
+            .ToArray();
+
+        if (removed.Length > 0)
+            timeline.DeleteItems(removed);
+
+        for (var i = 0; i < groups.Count; i++)
+        {
+            var group = groups[i];
+
+            if (!timeline.Items.Any(
+                    item => ReferenceEquals(item, group)))
+                continue;
+
+            var nextRange = plan.GroupRanges[i];
+            if (group.GroupRange != nextRange)
+                group.GroupRange = nextRange;
+        }
+
+        foreach (var item in timeline.Items.ToArray())
+        {
+            var mapped = plan.MapLayer(item.Layer);
+            if (mapped < 0)
+            {
+                throw new InvalidOperationException(
+                    "A removed item survived the structural delete plan.");
+            }
+
+            if (item.Layer != mapped)
+                item.Layer = mapped;
+        }
+
+        var settings = timeline.LayerSettings.Items
+            .Select(setting => setting with
+            {
+                Layer = plan.MapLayer(setting.Layer)
+            })
+            .Where(setting => setting.Layer >= 0)
+            .ToImmutableList();
+
+        if (!settings.SequenceEqual(timeline.LayerSettings.Items))
+            timeline.LayerSettings.Items = settings;
+
+        if (newGroup is not null)
+        {
+            if (!timeline.TryAddItems(
+                    [newGroup],
+                    newGroup.Frame,
+                    newGroup.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "YMM4 rejected the planned Group Control item.");
+            }
+        }
+
+        timeline.LayerSelection.Clear();
+        timeline.RefreshTimelineLengthAndMaxLayer();
     }
 
     internal static FrameworkElement FindLayerElement(FrameworkElement labels, int layer)
