@@ -52,6 +52,8 @@ function Run-Phase([string]$phase,[string]$marker){
     if(-not(Test-Path $marker)){throw "No marker for phase $phase"}
   } finally {
     if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+    Wait-Process -Id $p.Id -Timeout 10 -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
   }
 }
 
