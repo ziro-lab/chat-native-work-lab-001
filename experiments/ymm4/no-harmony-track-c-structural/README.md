@@ -43,3 +43,30 @@ For every case the gate checks:
 - click and right-click mapping remain native-correct after the structural mutation and after reset.
 
 This is P1.5a only. Native item drag and real FileDrop after structural mutation are intentionally deferred to P1.5b.
+
+
+## P1.5a result
+
+Source `d2ca75c53c92feb8edf2e6b10e1897b9e6186d5f`, run `35693945595`.
+
+Both pinned hosts passed `PASS_TRACK_C_STRUCTURAL` with **108/108** assertions.
+
+The strict structural history sequence deliberately runs before native click/right mapping because the host records that later interaction as an additional history boundary. This keeps the claim precise: one Ctrl+Z immediately after a structural mutation restores Timeline + Folder state together.
+
+## P1.5b — drag + real FileDrop after structural mutation
+
+P1.5b keeps the proven Add L3 state active:
+
+- folders = A1..6 / B2..5 / C7..9;
+- original L6 marker becomes the visible C owner at L7;
+- original L9 marker becomes visible L10.
+
+Then it proves:
+
+- native drag from folded visible L7 one display row down maps to logical L10;
+- drag Frame remains native-owned and changes horizontally;
+- drag Undo/Redo/reset are exact while folder state stays unchanged;
+- real PNG FileDrop onto folded visible L10 executes native AddFileItem;
+- post-correction places the new item on logical L10;
+- FileDrop Undo/Redo/reset works while folder state stays unchanged;
+- folded geometry/extent/no-hidden-view invariants remain green throughout.

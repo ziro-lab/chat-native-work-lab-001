@@ -797,6 +797,7 @@ internal static class Probe
     {
         DirectDisplay? display = null;
         InputMapAdapter? input = null;
+        FileDropMapAdapter? fileDrop = null;
         StructuralFolderBridge? bridge = null;
         UndoRedoManager? manager = null;
         EventHandler? recordedHandler = null;
@@ -943,6 +944,10 @@ internal static class Probe
                 BaselineFolders);
 
             input = new InputMapAdapter(
+                host,
+                display,
+                Log);
+            fileDrop = new FileDropMapAdapter(
                 host,
                 display,
                 Log);
@@ -1112,6 +1117,317 @@ internal static class Probe
                 "post_structural_input_recorded_after_click",
                 recorded - postInputRecordedBefore);
 
+            // P1.5b: keep the structurally-mutated Add L3 state active:
+            // folders A1..6 / B2..5 / C7..9. The original L6 item is now the
+            // visible C owner at L7. One folded display row down maps to L10.
+            var structuralFolderState = FolderText(bridge.State);
+            Check(
+                "p15b_structural_folder_state",
+                structuralFolderState ==
+                    "A:1-6|B:2-5|C:7-9");
+
+            var dragBefore = (target.Layer, target.Frame);
+            Check(
+                "p15b_drag_starts_L7",
+                dragBefore.Layer == 7);
+
+            await Reveal(
+                host,
+                display.Layout.VisualRowOfLogical(target.Layer)
+                    * display.Height);
+            timeline.SelectedItems =
+                ImmutableList<IItem>.Empty;
+
+            var correctionBefore = input.Corrections;
+            Log("phase=p15b_structural_drag");
+            var dragStart = host.Center(target);
+
+            await Native.Drag(
+                dragStart,
+                host.OffsetScreen(
+                    dragStart,
+                    32,
+                    display.Height));
+
+            await Sample(
+                host,
+                display,
+                "p15b_drag_forward");
+
+            var dragAfter = (target.Layer, target.Frame);
+            Fact(
+                "p15b_drag_after",
+                $"L{dragAfter.Layer}:F{dragAfter.Frame}");
+            Fact(
+                "p15b_drag_frame_delta",
+                dragAfter.Frame - dragBefore.Frame);
+
+            Check(
+                "p15b_drag_L7_to_L10",
+                dragAfter.Layer == 10
+                && input.Corrections > correctionBefore);
+            Check(
+                "p15b_drag_native_frame_changed",
+                dragAfter.Frame > dragBefore.Frame);
+            Check(
+                "p15b_drag_folder_unchanged",
+                FolderText(bridge.State) ==
+                    structuralFolderState);
+
+            host.Activate();
+            await Task.Delay(100);
+            var dragUndoBefore = undone;
+            await Native.Key(0x5A, true);
+            await WaitUntil(
+                "p15b drag undo",
+                () =>
+                    undone > dragUndoBefore
+                    && (target.Layer, target.Frame) ==
+                        dragBefore
+                    && FolderText(bridge.State) ==
+                        structuralFolderState);
+
+            Check(
+                "p15b_drag_undo_exact",
+                (target.Layer, target.Frame) ==
+                    dragBefore);
+            Check(
+                "p15b_drag_undo_folder_unchanged",
+                FolderText(bridge.State) ==
+                    structuralFolderState);
+
+            host.Activate();
+            await Task.Delay(100);
+            var dragRedoBefore = redone;
+            await Native.Key(0x59, true);
+            await WaitUntil(
+                "p15b drag redo",
+                () =>
+                    redone > dragRedoBefore
+                    && (target.Layer, target.Frame) ==
+                        dragAfter
+                    && FolderText(bridge.State) ==
+                        structuralFolderState);
+
+            Check(
+                "p15b_drag_redo_exact",
+                (target.Layer, target.Frame) ==
+                    dragAfter);
+
+            host.Activate();
+            await Task.Delay(100);
+            dragUndoBefore = undone;
+            await Native.Key(0x5A, true);
+            await WaitUntil(
+                "p15b drag reset",
+                () =>
+                    undone > dragUndoBefore
+                    && (target.Layer, target.Frame) ==
+                        dragBefore
+                    && FolderText(bridge.State) ==
+                        structuralFolderState);
+
+            await Sample(
+                host,
+                display,
+                "p15b_drag_history");
+
+            // Real FileDrop after structural mutation. Use the original L9 item,
+            // now visible at L10 after Add L3.
+            var dropAnchor = items[9];
+            Check(
+                "p15b_drop_anchor_L10",
+                dropAnchor.Layer == 10);
+
+            await Reveal(
+                host,
+                display.Layout.VisualRowOfLogical(
+                    dropAnchor.Layer)
+                    * display.Height);
+
+            timeline.SelectedItems =
+                ImmutableList<IItem>.Empty;
+
+            var anchorBox =
+                Host.ScreenRect(
+                    host.ItemView(dropAnchor));
+            var scrollBox =
+                Host.ScreenRect(host.Scroll);
+            var dropPoint = new Point(
+                Math.Min(
+                    scrollBox.Right - 36,
+                    anchorBox.Right + 72),
+                anchorBox.Y
+                    + anchorBox.Height / 2);
+
+            var enterBefore = fileDrop.DragEnterCount;
+            var overBefore = fileDrop.DragOverCount;
+            var dropBeforeCount = fileDrop.DropCount;
+            var addFileBefore =
+                fileDrop.AddCommandExecutions;
+            var correctedBefore =
+                fileDrop.PostCorrectedItems;
+
+            Log("phase=p15b_structural_filedrop");
+            var dropObservation =
+                await IntegratedFileDropHarness.DropPng(
+                    window,
+                    host,
+                    dropPoint,
+                    output,
+                    "track-c-structural");
+
+            await Sample(
+                host,
+                display,
+                "p15b_filedrop_added");
+
+            Check(
+                "p15b_filedrop_drag_enter",
+                fileDrop.DragEnterCount > enterBefore);
+            Check(
+                "p15b_filedrop_drag_over",
+                fileDrop.DragOverCount > overBefore);
+            Check(
+                "p15b_filedrop_drop",
+                fileDrop.DropCount ==
+                    dropBeforeCount + 1);
+            Check(
+                "p15b_filedrop_add_command",
+                fileDrop.AddCommandExecutions ==
+                    addFileBefore + 1);
+            Check(
+                "p15b_filedrop_post_corrected",
+                fileDrop.PostCorrectedItems >
+                    correctedBefore);
+            Check(
+                "p15b_filedrop_logical_L10",
+                fileDrop.LastLogicalLayer == 10);
+            Check(
+                "p15b_filedrop_added_item",
+                dropObservation.AddedItems.Length > 0);
+            Check(
+                "p15b_filedrop_added_layer",
+                dropObservation.AddedItems.All(
+                    x => x.Layer == 10));
+            Check(
+                "p15b_filedrop_folder_unchanged",
+                FolderText(bridge.State) ==
+                    structuralFolderState);
+
+            var dropPath =
+                dropObservation.FilePath;
+            var addedRefs =
+                dropObservation.AddedItems.ToArray();
+
+            var dropUndoBefore = undone;
+            host.Activate();
+            await Task.Delay(100);
+            await Native.Key(0x5A, true);
+            await WaitUntil(
+                "p15b filedrop undo",
+                () =>
+                    undone > dropUndoBefore
+                    && !timeline.Items.Any(
+                        x =>
+                            addedRefs.Any(
+                                y => ReferenceEquals(x, y))
+                            || string.Equals(
+                                IntegratedFileDropHarness
+                                    .FilePathOf(x),
+                                dropPath,
+                                StringComparison
+                                    .OrdinalIgnoreCase))
+                    && FolderText(bridge.State) ==
+                        structuralFolderState);
+
+            await Sample(
+                host,
+                display,
+                "p15b_filedrop_undo");
+            Check(
+                "p15b_filedrop_undo_removed",
+                !timeline.Items.Any(
+                    x =>
+                        addedRefs.Any(
+                            y => ReferenceEquals(x, y))
+                        || string.Equals(
+                            IntegratedFileDropHarness
+                                .FilePathOf(x),
+                            dropPath,
+                            StringComparison
+                                .OrdinalIgnoreCase)));
+            Check(
+                "p15b_filedrop_undo_folder_unchanged",
+                FolderText(bridge.State) ==
+                    structuralFolderState);
+
+            var dropRedoBefore = redone;
+            host.Activate();
+            await Task.Delay(100);
+            await Native.Key(0x59, true);
+            await WaitUntil(
+                "p15b filedrop redo event",
+                () => redone > dropRedoBefore);
+
+            await Task.Delay(700);
+
+            var redoDrop =
+                timeline.Items.FirstOrDefault(
+                    x =>
+                        addedRefs.Any(
+                            y => ReferenceEquals(x, y))
+                        || string.Equals(
+                            IntegratedFileDropHarness
+                                .FilePathOf(x),
+                            dropPath,
+                            StringComparison
+                                .OrdinalIgnoreCase));
+
+            await Sample(
+                host,
+                display,
+                "p15b_filedrop_redo");
+
+            Check(
+                "p15b_filedrop_redo_restored",
+                redoDrop is not null);
+            Check(
+                "p15b_filedrop_redo_layer",
+                redoDrop?.Layer == 10);
+            Check(
+                "p15b_filedrop_redo_folder_unchanged",
+                FolderText(bridge.State) ==
+                    structuralFolderState);
+
+            dropUndoBefore = undone;
+            host.Activate();
+            await Task.Delay(100);
+            await Native.Key(0x5A, true);
+            await WaitUntil(
+                "p15b filedrop reset",
+                () =>
+                    undone > dropUndoBefore
+                    && !timeline.Items.Any(
+                        x =>
+                            addedRefs.Any(
+                                y => ReferenceEquals(x, y))
+                            || string.Equals(
+                                IntegratedFileDropHarness
+                                    .FilePathOf(x),
+                                dropPath,
+                                StringComparison
+                                    .OrdinalIgnoreCase)));
+
+            await Sample(
+                host,
+                display,
+                "p15b_filedrop_reset");
+            Check(
+                "p15b_filedrop_reset_folder_unchanged",
+                FolderText(bridge.State) ==
+                    structuralFolderState);
+
             Check(
                 "no_harmony_loaded",
                 !AppDomain.CurrentDomain
@@ -1153,6 +1469,7 @@ internal static class Probe
         {
             try
             {
+                fileDrop?.Dispose();
                 input?.Dispose();
                 bridge?.Dispose();
                 display?.Dispose();
