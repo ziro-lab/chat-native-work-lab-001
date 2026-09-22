@@ -281,6 +281,90 @@ public static class StructuralConvenienceRules
         return Array.AsReadOnly(ranges);
     }
 
+    public static IReadOnlyList<int> PlanStandardGroupRangesBeforeHost(
+        FolderDocument beforeDocument,
+        string timelineKey,
+        StructuralEdit edit,
+        IReadOnlyList<GroupSpan> groupsBefore)
+    {
+        ArgumentNullException.ThrowIfNull(beforeDocument);
+        ArgumentException.ThrowIfNullOrWhiteSpace(timelineKey);
+        ArgumentNullException.ThrowIfNull(edit);
+        ArgumentNullException.ThrowIfNull(groupsBefore);
+
+        var before = FolderDocumentRules.NormalizeAndValidate(beforeDocument);
+        var folders = FolderDocumentRules.FindTimeline(before, timelineKey)
+            ?.Folders
+            ?? [];
+
+        var ranges = groupsBefore.Select(x => x.Range).ToArray();
+
+        switch (edit)
+        {
+            case InsertLayers insert:
+            {
+                if (!folders.Any(
+                        folder =>
+                            folder.Start < insert.Position
+                            && insert.Position <= folder.End))
+                {
+                    return Array.AsReadOnly(ranges);
+                }
+
+                for (var i = 0; i < groupsBefore.Count; i++)
+                {
+                    var group = groupsBefore[i];
+
+                    if (group.Layer < insert.Position
+                        && insert.Position <= group.LastControlled)
+                    {
+                        ranges[i] = checked(group.Range + insert.Count);
+                    }
+                }
+
+                return Array.AsReadOnly(ranges);
+            }
+
+            case DeleteLayers delete:
+            {
+                var lastDeleted = checked(
+                    delete.Position + delete.Count - 1);
+
+                if (!folders.Any(
+                        folder =>
+                            folder.Start <= delete.Position
+                            && lastDeleted <= folder.End))
+                {
+                    return Array.AsReadOnly(ranges);
+                }
+
+                for (var i = 0; i < groupsBefore.Count; i++)
+                {
+                    var group = groupsBefore[i];
+
+                    if (delete.Position <= group.Layer
+                        && group.Layer <= lastDeleted)
+                    {
+                        continue;
+                    }
+
+                    ranges[i] = Math.Max(
+                        1,
+                        AdjustRangeForDelete(
+                            group.Layer,
+                            group.Range,
+                            delete.Position,
+                            delete.Count));
+                }
+
+                return Array.AsReadOnly(ranges);
+            }
+
+            default:
+                return Array.AsReadOnly(ranges);
+        }
+    }
+
     public static IReadOnlyList<int?> SuggestExternalGroupRangeFixes(
         FolderDocument beforeDocument,
         string timelineKey,
