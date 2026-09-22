@@ -279,6 +279,32 @@ internal static class HandsOnHostAccess
         return false;
     }
 
+    internal static int ApplyGroupRanges(
+        IReadOnlyList<GroupItem> groups,
+        IReadOnlyList<int> ranges)
+    {
+        ArgumentNullException.ThrowIfNull(groups);
+        ArgumentNullException.ThrowIfNull(ranges);
+
+        if (groups.Count != ranges.Count)
+            throw new ArgumentException(
+                "Group item count does not match the range plan.",
+                nameof(ranges));
+
+        var changed = 0;
+
+        for (var i = 0; i < groups.Count; i++)
+        {
+            if (groups[i].GroupRange == ranges[i])
+                continue;
+
+            groups[i].GroupRange = ranges[i];
+            changed++;
+        }
+
+        return changed;
+    }
+
     internal static void ApplyStructuralPlan(
         Timeline timeline,
         StructuralConveniencePlan plan,
