@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4P3MissingController;
 
@@ -44,6 +46,22 @@ internal static class Controller
         return reactive?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(reactive) as string;
     }
 
+    private static Timeline? TimelineOf(object root)
+    {
+        var active = PublicProperty(root, "ActiveTimelineViewModel");
+        if (active is null) return null;
+        return PublicProperty(active, "Timeline") as Timeline
+            ?? active.GetType().GetField("timeline", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(active) as Timeline;
+    }
+
+    private static bool MarkerPresent(object root) =>
+        TimelineOf(root)?.Items.Any(x =>
+            x is VoiceItem
+            && x.Remark == "CNWL_P3_MISSING_MARKER"
+            && x.Frame == 123
+            && x.Layer == 7
+            && x.Length == 60) == true;
+
     private static void Bootstrap()
     {
         var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(350) };
@@ -81,20 +99,38 @@ internal static class Controller
                     Path.GetFullPath(ProjectPath(root) ?? ""),
                     Path.GetFullPath(source),
                     StringComparison.OrdinalIgnoreCase);
+                var markerAfterSourceOpen = MarkerPresent(root);
 
                 PublicMethod(root, "SaveProject", typeof(string)).Invoke(root, [target]);
                 await Task.Delay(700);
+
+                PublicMethod(root, "OpenProject", typeof(string)).Invoke(root, [target]);
+                await Task.Delay(1800);
+                var targetPathApplied = string.Equals(
+                    Path.GetFullPath(ProjectPath(root) ?? ""),
+                    Path.GetFullPath(target),
+                    StringComparison.OrdinalIgnoreCase);
+                var markerAfterTargetReopen = MarkerPresent(root);
 
                 var subjectLoaded = AppDomain.CurrentDomain.GetAssemblies()
                     .Any(x => string.Equals(x.GetName().Name, "Ymm4P3MissingSubject", StringComparison.OrdinalIgnoreCase));
                 var harmonyLoaded = AppDomain.CurrentDomain.GetAssemblies()
                     .Any(x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true);
 
-                var pass = pathApplied && File.Exists(target) && !subjectLoaded && !harmonyLoaded;
+                var pass = pathApplied
+                    && targetPathApplied
+                    && markerAfterSourceOpen
+                    && markerAfterTargetReopen
+                    && File.Exists(target)
+                    && !subjectLoaded
+                    && !harmonyLoaded;
                 File.WriteAllText(Path.Combine(output, "controller-result.json"), JsonSerializer.Serialize(new
                 {
                     status = pass ? "PASS_P3_MISSING_CONTROLLER" : "FAIL_P3_MISSING_CONTROLLER",
                     pathApplied,
+                    targetPathApplied,
+                    markerAfterSourceOpen,
+                    markerAfterTargetReopen,
                     targetExists = File.Exists(target),
                     subjectAssemblyLoaded = subjectLoaded,
                     harmonyLoaded
