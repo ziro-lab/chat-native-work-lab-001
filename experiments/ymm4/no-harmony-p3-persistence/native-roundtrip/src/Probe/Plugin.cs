@@ -33,30 +33,18 @@ public sealed class RoundtripToolView : UserControl
 {
 }
 
-public sealed class RoundtripToolViewModel : IToolViewModel, IDisposable
+public sealed class RoundtripToolViewModel : IToolViewModel
 {
     private string? savedState;
-    private INotifyPropertyChanged? projectPathSignal;
-    private bool disposed;
 
     private static readonly object Gate = new();
     public static int LoadCount { get; private set; }
     public static string? LastLoadedSavedState { get; private set; }
-    public static int ProjectPathSignalCount { get; private set; }
-    public static int HostAreaSyncCount { get; private set; }
-    public static string? LastHostAreaSavedState { get; private set; }
 
     event EventHandler<CreateNewToolViewRequestedEventArgs>? IToolViewModel.CreateNewToolViewRequested { add { } remove { } }
     event PropertyChangedEventHandler? INotifyPropertyChanged.PropertyChanged { add { } remove { } }
 
     public string Title => "CNWL P3 Folder State";
-
-    public RoundtripToolViewModel()
-    {
-        Application.Current.Dispatcher.BeginInvoke(
-            new Action(AttachProjectPathSignal),
-            DispatcherPriority.ApplicationIdle);
-    }
 
     public void LoadState(ToolState stateData)
     {
@@ -82,106 +70,6 @@ public sealed class RoundtripToolViewModel : IToolViewModel, IDisposable
         Title = Title,
         SavedState = savedState
     };
-
-    private void AttachProjectPathSignal()
-    {
-        if (disposed || projectPathSignal is not null)
-            return;
-
-        var root = FindMainViewModel();
-        var signal = root?.GetType()
-            .GetProperty("ProjectFilePath", BindingFlags.Instance | BindingFlags.Public)
-            ?.GetValue(root) as INotifyPropertyChanged;
-        if (signal is null)
-            return;
-
-        projectPathSignal = signal;
-        projectPathSignal.PropertyChanged += ProjectPathChanged;
-    }
-
-    private void ProjectPathChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (disposed)
-            return;
-
-        lock (Gate)
-            ProjectPathSignalCount++;
-
-        // OpenProject updates the public project path and the host-owned ToolArea
-        // state. Read the restored ToolState one ContextIdle turn later.
-        Application.Current.Dispatcher.BeginInvoke(
-            new Action(SyncFromHostToolArea),
-            DispatcherPriority.ContextIdle);
-    }
-
-    private static object? FindMainViewModel() =>
-        Application.Current.Windows.Cast<Window>()
-            .Select(x => x.DataContext)
-            .FirstOrDefault(x => x?.GetType().FullName == "YukkuriMovieMaker.ViewModels.MainViewModel");
-
-    private void SyncFromHostToolArea()
-    {
-        try
-        {
-            var root = FindMainViewModel();
-            if (root is null)
-                return;
-
-            var areas = root.GetType()
-                .GetProperty("AnchorableAreaViewModels", BindingFlags.Instance | BindingFlags.Public)
-                ?.GetValue(root) as IEnumerable;
-            if (areas is null)
-                return;
-
-            foreach (var area in areas.Cast<object>())
-            {
-                var viewModelType = area.GetType()
-                    .GetProperty("ViewModelType", BindingFlags.Instance | BindingFlags.Public)
-                    ?.GetValue(area) as Type;
-                if (viewModelType != typeof(RoundtripToolViewModel))
-                    continue;
-
-                var save = area.GetType().GetMethod("SaveState", BindingFlags.Instance | BindingFlags.Public, Type.EmptyTypes);
-                var state = save?.Invoke(area, null);
-                var restored = state?.GetType()
-                    .GetProperty("SavedState", BindingFlags.Instance | BindingFlags.Public)
-                    ?.GetValue(state) as string;
-
-                savedState = restored;
-                lock (Gate)
-                {
-                    HostAreaSyncCount++;
-                    LastHostAreaSavedState = restored;
-                }
-
-                var dir = Environment.GetEnvironmentVariable("CNWL_P3_TOOLSTATE_ROUNDTRIP_DIR");
-                if (!string.IsNullOrWhiteSpace(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                    File.AppendAllText(
-                        Path.Combine(dir, "project-events.txt"),
-                        $"{DateTime.UtcNow:O}\tpid={Environment.ProcessId}\tpathSignal={ProjectPathSignalCount}\tsync={HostAreaSyncCount}\tsaved={restored ?? "<null>"}{Environment.NewLine}");
-                }
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            var dir = Environment.GetEnvironmentVariable("CNWL_P3_TOOLSTATE_ROUNDTRIP_DIR");
-            if (!string.IsNullOrWhiteSpace(dir))
-                File.AppendAllText(Path.Combine(dir, "project-events.txt"), $"{DateTime.UtcNow:O}\terror={ex}{Environment.NewLine}");
-        }
-    }
-
-    public void Dispose()
-    {
-        if (disposed)
-            return;
-        disposed = true;
-        if (projectPathSignal is not null)
-            projectPathSignal.PropertyChanged -= ProjectPathChanged;
-        projectPathSignal = null;
-    }
 }
 
 internal static class Probe
@@ -191,6 +79,11 @@ internal static class Probe
     private static readonly Dictionary<string, bool> checks = [];
     private static readonly Dictionary<string, string> facts = [];
     private static bool failed;
+    private static INotifyPropertyChanged? projectPathSignal;
+    private static PropertyChangedEventHandler? projectPathHandler;
+    private static int projectPathSignalCount;
+    private static int hostAreaSyncCount;
+    private static string? lastHostAreaSavedState;
 
     internal static void Schedule()
     {
@@ -316,6 +209,46 @@ internal static class Probe
         return state.GetType().GetProperty("SavedState", BindingFlags.Instance | BindingFlags.Public)?.GetValue(state) as string;
     }
 
+    private static void AttachProjectStateCoordinator(object root)
+    {
+        if (projectPathSignal is not null)
+            throw new InvalidOperationException("Project-state coordinator already attached.");
+
+        projectPathSignal = PublicProperty(root, "ProjectFilePath") as INotifyPropertyChanged
+            ?? throw new InvalidOperationException("Public ProjectFilePath does not expose change notification.");
+
+        projectPathHandler = (_, _) =>
+        {
+            projectPathSignalCount++;
+            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    lastHostAreaSavedState = ReadToolAreaState(root);
+                    hostAreaSyncCount++;
+                    File.AppendAllText(
+                        Path.Combine(output, "project-events.txt"),
+                        $"{DateTime.UtcNow:O}\tpathSignal={projectPathSignalCount}\tsync={hostAreaSyncCount}\tsaved={lastHostAreaSavedState ?? "<null>"}{Environment.NewLine}");
+                }
+                catch (Exception ex)
+                {
+                    File.AppendAllText(
+                        Path.Combine(output, "project-events.txt"),
+                        $"{DateTime.UtcNow:O}\terror={ex}{Environment.NewLine}");
+                }
+            }), DispatcherPriority.ContextIdle);
+        };
+        projectPathSignal.PropertyChanged += projectPathHandler;
+    }
+
+    private static void DetachProjectStateCoordinator()
+    {
+        if (projectPathSignal is not null && projectPathHandler is not null)
+            projectPathSignal.PropertyChanged -= projectPathHandler;
+        projectPathHandler = null;
+        projectPathSignal = null;
+    }
+
     private static async Task Wait(string name, Func<bool> condition, int timeoutMs = 10000)
     {
         var started = DateTime.UtcNow;
@@ -381,6 +314,7 @@ internal static class Probe
         {
             var saveProject = PublicMethod(root, "SaveProject", typeof(string));
             var openProject = PublicMethod(root, "OpenProject", typeof(string));
+            AttachProjectStateCoordinator(root);
 
             var idA = GetTimelineId(root);
             Check("timeline_a_id_nonempty", idA != Guid.Empty);
@@ -421,29 +355,29 @@ internal static class Probe
             Check("project_files_hold_distinct_toolstate", stateA != stateB);
 
             var beforeA = RoundtripToolViewModel.LoadCount;
-            var beforeAPathSignal = RoundtripToolViewModel.ProjectPathSignalCount;
-            var beforeASync = RoundtripToolViewModel.HostAreaSyncCount;
+            var beforeAPathSignal = projectPathSignalCount;
+            var beforeASync = hostAreaSyncCount;
             openProject.Invoke(root, [pathA]);
             await Wait("open project A project-path sync", () =>
                 SamePath(GetProjectFilePath(root), pathA)
-                && RoundtripToolViewModel.ProjectPathSignalCount > beforeAPathSignal
-                && RoundtripToolViewModel.HostAreaSyncCount > beforeASync
-                && RoundtripToolViewModel.LastHostAreaSavedState == stateA,
+                && projectPathSignalCount > beforeAPathSignal
+                && hostAreaSyncCount > beforeASync
+                && lastHostAreaSavedState == stateA,
                 10000);
             var areaAfterA = ReadToolAreaState(root);
             facts["open_a_project_path"] = GetProjectFilePath(root) ?? "<null>";
             facts["open_a_load_count_before"] = beforeA.ToString(CultureInfo.InvariantCulture);
             facts["open_a_load_count_after"] = RoundtripToolViewModel.LoadCount.ToString(CultureInfo.InvariantCulture);
             facts["open_a_project_path_signal_before"] = beforeAPathSignal.ToString(CultureInfo.InvariantCulture);
-            facts["open_a_project_path_signal_after"] = RoundtripToolViewModel.ProjectPathSignalCount.ToString(CultureInfo.InvariantCulture);
+            facts["open_a_project_path_signal_after"] = projectPathSignalCount.ToString(CultureInfo.InvariantCulture);
             facts["open_a_host_sync_before"] = beforeASync.ToString(CultureInfo.InvariantCulture);
-            facts["open_a_host_sync_after"] = RoundtripToolViewModel.HostAreaSyncCount.ToString(CultureInfo.InvariantCulture);
+            facts["open_a_host_sync_after"] = hostAreaSyncCount.ToString(CultureInfo.InvariantCulture);
             facts["open_a_area_matches"] = (areaAfterA == stateA).ToString();
             Check("open_a_project_path_applied", SamePath(GetProjectFilePath(root), pathA));
             Check("open_a_timeline_id_stable", GetTimelineId(root) == idA);
-            Check("open_a_project_path_signal_observed", RoundtripToolViewModel.ProjectPathSignalCount > beforeAPathSignal);
-            Check("open_a_host_area_synced", RoundtripToolViewModel.HostAreaSyncCount > beforeASync
-                && RoundtripToolViewModel.LastHostAreaSavedState == stateA);
+            Check("open_a_project_path_signal_observed", projectPathSignalCount > beforeAPathSignal);
+            Check("open_a_host_area_synced", hostAreaSyncCount > beforeASync
+                && lastHostAreaSavedState == stateA);
             Check("open_a_loadstate_not_required", RoundtripToolViewModel.LoadCount == beforeA);
             Check("open_a_area_state_restored", areaAfterA == stateA);
             var loadA = FolderDocumentCodec.Load(stateA);
@@ -451,29 +385,29 @@ internal static class Probe
                 && FolderDocumentRules.FindTimeline(loadA.Document, idA.ToString("D"))?.Folders.Single().Name == "Project A");
 
             var beforeB = RoundtripToolViewModel.LoadCount;
-            var beforeBPathSignal = RoundtripToolViewModel.ProjectPathSignalCount;
-            var beforeBSync = RoundtripToolViewModel.HostAreaSyncCount;
+            var beforeBPathSignal = projectPathSignalCount;
+            var beforeBSync = hostAreaSyncCount;
             openProject.Invoke(root, [pathB]);
             await Wait("open project B project-path sync", () =>
                 SamePath(GetProjectFilePath(root), pathB)
-                && RoundtripToolViewModel.ProjectPathSignalCount > beforeBPathSignal
-                && RoundtripToolViewModel.HostAreaSyncCount > beforeBSync
-                && RoundtripToolViewModel.LastHostAreaSavedState == stateB,
+                && projectPathSignalCount > beforeBPathSignal
+                && hostAreaSyncCount > beforeBSync
+                && lastHostAreaSavedState == stateB,
                 10000);
             var areaAfterB = ReadToolAreaState(root);
             facts["open_b_project_path"] = GetProjectFilePath(root) ?? "<null>";
             facts["open_b_load_count_before"] = beforeB.ToString(CultureInfo.InvariantCulture);
             facts["open_b_load_count_after"] = RoundtripToolViewModel.LoadCount.ToString(CultureInfo.InvariantCulture);
             facts["open_b_project_path_signal_before"] = beforeBPathSignal.ToString(CultureInfo.InvariantCulture);
-            facts["open_b_project_path_signal_after"] = RoundtripToolViewModel.ProjectPathSignalCount.ToString(CultureInfo.InvariantCulture);
+            facts["open_b_project_path_signal_after"] = projectPathSignalCount.ToString(CultureInfo.InvariantCulture);
             facts["open_b_host_sync_before"] = beforeBSync.ToString(CultureInfo.InvariantCulture);
-            facts["open_b_host_sync_after"] = RoundtripToolViewModel.HostAreaSyncCount.ToString(CultureInfo.InvariantCulture);
+            facts["open_b_host_sync_after"] = hostAreaSyncCount.ToString(CultureInfo.InvariantCulture);
             facts["open_b_area_matches"] = (areaAfterB == stateB).ToString();
             Check("open_b_project_path_applied", SamePath(GetProjectFilePath(root), pathB));
             Check("open_b_timeline_id_stable", GetTimelineId(root) == idB);
-            Check("open_b_project_path_signal_observed", RoundtripToolViewModel.ProjectPathSignalCount > beforeBPathSignal);
-            Check("open_b_host_area_synced", RoundtripToolViewModel.HostAreaSyncCount > beforeBSync
-                && RoundtripToolViewModel.LastHostAreaSavedState == stateB);
+            Check("open_b_project_path_signal_observed", projectPathSignalCount > beforeBPathSignal);
+            Check("open_b_host_area_synced", hostAreaSyncCount > beforeBSync
+                && lastHostAreaSavedState == stateB);
             Check("open_b_loadstate_not_required", RoundtripToolViewModel.LoadCount == beforeB);
             Check("open_b_area_state_restored", areaAfterB == stateB);
             Check("project_state_isolated", stateA != stateB && areaAfterA == stateA && areaAfterB == stateB);
@@ -487,6 +421,10 @@ internal static class Probe
         catch (Exception ex)
         {
             Fail(ex);
+        }
+        finally
+        {
+            DetachProjectStateCoordinator();
         }
         Finish();
     }
