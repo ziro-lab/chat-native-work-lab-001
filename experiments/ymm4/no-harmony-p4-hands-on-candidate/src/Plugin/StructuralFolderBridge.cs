@@ -175,29 +175,29 @@ internal sealed class StructuralFolderBridge : IDisposable
                     "Folder state changed while a composite structural command was pending.");
             }
 
-            var beforeProduct = state.ProductState;
-            var afterProduct = FolderProductStateRules.ReplaceCore(
-                beforeProduct,
+            var compositeBeforeProduct = state.ProductState;
+            var compositeAfterProduct = FolderProductStateRules.ReplaceCore(
+                compositeBeforeProduct,
                 composite.After);
 
-            var key = timeline.ID.ToString("D");
+            var compositeKey = timeline.ID.ToString("D");
             var currentTimeline = FolderDocumentRules.FindTimeline(
                 composite.Before,
-                key);
+                compositeKey);
             var remapPlan = FolderRangeTracker.Apply(
                 currentTimeline?.Folders.Select(
                     x => new FolderRange(x.Id, x.Start, x.End))
                     ?? [],
                 edit);
 
-            afterProduct = FolderProductStateRules.RemapRestoreLayers(
-                afterProduct,
-                key,
+            compositeAfterProduct = FolderProductStateRules.RemapRestoreLayers(
+                compositeAfterProduct,
+                compositeKey,
                 remapPlan.MapLayer);
 
             ApplyPendingState(
-                beforeProduct,
-                afterProduct,
+                compositeBeforeProduct,
+                compositeAfterProduct,
                 $"composite:{type}:L{layer}");
             composite.MarkApplied();
             return;
