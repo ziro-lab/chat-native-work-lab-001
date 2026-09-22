@@ -168,7 +168,7 @@ internal static class StructuralProbe
         Timeline timeline,
         int layer)
     {
-        var command = CommandSettings.Default[commandType]
+        ICommand command = CommandSettings.Default[commandType]
             ?? throw new InvalidOperationException("Command missing: " + commandType);
 
         var labelVm = layer >= 0 && layer < vm.LayerLabels.Count
