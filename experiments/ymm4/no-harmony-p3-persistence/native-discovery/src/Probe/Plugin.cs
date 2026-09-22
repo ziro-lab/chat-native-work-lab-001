@@ -109,6 +109,64 @@ internal static class Probe
                 }));
     }
 
+    private static object[] RuntimeEntries(object? enumerable)
+    {
+        if (enumerable is not System.Collections.IEnumerable values)
+            return [];
+
+        return values.Cast<object>().Select((value, index) =>
+        {
+            var type = value.GetType();
+            var scalars = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var p in type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(x => x.CanRead && x.GetIndexParameters().Length == 0))
+            {
+                try
+                {
+                    var v = p.GetValue(value);
+                    if (v is null)
+                    {
+                        if (p.Name.Contains("Tool", StringComparison.OrdinalIgnoreCase)
+                            || p.Name.Contains("Name", StringComparison.OrdinalIgnoreCase)
+                            || p.Name.Contains("Title", StringComparison.OrdinalIgnoreCase)
+                            || p.Name.Contains("Header", StringComparison.OrdinalIgnoreCase)
+                            || p.Name.Contains("Command", StringComparison.OrdinalIgnoreCase))
+                            scalars[p.Name] = null;
+                    }
+                    else if (v is string or bool or int or Guid or Type
+                        || p.Name.Contains("Tool", StringComparison.OrdinalIgnoreCase)
+                        || p.Name.Contains("Name", StringComparison.OrdinalIgnoreCase)
+                        || p.Name.Contains("Title", StringComparison.OrdinalIgnoreCase)
+                        || p.Name.Contains("Header", StringComparison.OrdinalIgnoreCase)
+                        || p.Name.Contains("Command", StringComparison.OrdinalIgnoreCase))
+                    {
+                        scalars[p.Name] = v.ToString();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    scalars[p.Name] = "<getter:" + ex.GetType().Name + ">";
+                }
+            }
+
+            return (object)new
+            {
+                index,
+                type = type.FullName,
+                text = value.ToString(),
+                values = scalars,
+                publicSurface = MemberSummary(type, x =>
+                    x.Name.Contains("Tool", StringComparison.OrdinalIgnoreCase)
+                    || x.Name.Contains("Item", StringComparison.OrdinalIgnoreCase)
+                    || x.Name.Contains("Command", StringComparison.OrdinalIgnoreCase)
+                    || x.Name.Contains("State", StringComparison.OrdinalIgnoreCase)
+                    || x.Name.Contains("Title", StringComparison.OrdinalIgnoreCase)
+                    || x.Name.Contains("Header", StringComparison.OrdinalIgnoreCase)
+                    || x.Name.Contains("Name", StringComparison.OrdinalIgnoreCase))
+            };
+        }).ToArray();
+    }
+
     private static void Run(object root, object activeVm)
     {
         var timeline = Get(activeVm, "Timeline") as Timeline
@@ -178,6 +236,8 @@ internal static class Probe
                 x.Name.Contains("Tool", StringComparison.OrdinalIgnoreCase)
                 || x.Name.Contains("Plugin", StringComparison.OrdinalIgnoreCase)
                 || x.Name.Contains("View", StringComparison.OrdinalIgnoreCase)),
+            toolMenuEntries = RuntimeEntries(Get(root, "ToolMenuItems")),
+            anchorableAreaEntries = RuntimeEntries(Get(root, "AnchorableAreaViewModels")),
             mainModelToolSurface = model is null ? "<null>" : MemberSummary(model.GetType(), x =>
                 x.Name.Contains("Tool", StringComparison.OrdinalIgnoreCase)
                 || x.Name.Contains("Plugin", StringComparison.OrdinalIgnoreCase)
