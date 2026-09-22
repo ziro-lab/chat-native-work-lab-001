@@ -49,10 +49,12 @@ try {
   Get-Content $result|Write-Host
   if($r.status -ne 'PASS_P4_UI_SURFACE'){throw 'P4 UI surface failed'}
   $required=@(
-    'fixture_folded','layer_labels_found','adorner_attached','adorner_input_transparent','toggle_on_screen',
+    'layer_labels_found','identity_native_context_menu','fixture_folded',
+    'baseline_native_layer_input_observed',
+    'adorner_attached','adorner_input_transparent','toggle_on_screen',
     'native_toggle_expands','native_toggle_collapses',
     'outside_overlay_preserves_native_layer_click',
-    'context_open_observed','native_menu_preserved_and_extended',
+    'context_open_observed','label_right_map_exact','native_menu_preserved_and_extended',
     'native_menu_action_click','menu_cleanup_after_close','adorner_detached',
     'no_display_failure_or_reentry','no_harmony_loaded','display_subscriptions_released')
   foreach($name in $required){if(-not $r.checks.ContainsKey($name) -or $r.checks[$name] -ne $true){throw "Missing/failed assertion: $name"}}
