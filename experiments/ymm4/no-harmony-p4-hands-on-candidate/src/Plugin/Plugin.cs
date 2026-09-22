@@ -204,16 +204,21 @@ internal static class HandsOnRuntime
             currentWindow.Width = 1100;
             currentWindow.Height = 720;
 
-            var s0IntegrationSmoke = string.Equals(
-                Environment.GetEnvironmentVariable("CNWL_P4_S0_INTEGRATION_SMOKE"),
-                "1",
-                StringComparison.Ordinal);
+            var resourceFreeIntegrationSmoke =
+                string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P4_S0_INTEGRATION_SMOKE"),
+                    "1",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P4_S1_INTEGRATION_SMOKE"),
+                    "1",
+                    StringComparison.Ordinal);
 
-            // The ordinary startup smoke keeps its VoiceItem fixture. The S0
-            // structural-history gate must stay resource-free: an artificial
-            // VoiceItem without a configured speaker makes YMM4's resource
-            // refresh fail when UndoRedoManager records a history boundary.
-            if (!s0IntegrationSmoke
+            // The ordinary startup smoke keeps its VoiceItem fixture. Structural
+            // history gates stay resource-free: an artificial VoiceItem without
+            // a configured speaker makes YMM4's resource refresh fail when the
+            // UndoRedoManager records a history boundary.
+            if (!resourceFreeIntegrationSmoke
                 && !timeline.Items.Any(x =>
                     string.Equals(
                         x.Remark,
@@ -240,7 +245,7 @@ internal static class HandsOnRuntime
             smokeTimelinePrepared = true;
             Diagnostic(
                 $"smoke_timeline_prepared timeline={timeline.ID:D} " +
-                $"resource_free={s0IntegrationSmoke}");
+                $"resource_free={resourceFreeIntegrationSmoke}");
         }
         catch (Exception ex)
         {
