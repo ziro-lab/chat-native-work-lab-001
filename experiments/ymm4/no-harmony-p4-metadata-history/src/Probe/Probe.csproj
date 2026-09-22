@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Ymm4P4MetadataHistoryProbe</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="YukkuriMovieMaker.Plugin" />
+    <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ReactiveProperty.Core"><HintPath>$(YMM4DirPath)ReactiveProperty.Core.dll</HintPath><Private>false</Private></Reference>
+    <Compile Include="../../../no-harmony-track-a/src/Probe/Host.cs" Link="Host.cs" />
+    <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
+    <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
+    <Compile Include="../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
+    <Compile Include="../../no-harmony-p4-ux-policy/src/FolderUxCommands.cs" Link="FolderUxCommands.cs" />
+  </ItemGroup>
+</Project>
