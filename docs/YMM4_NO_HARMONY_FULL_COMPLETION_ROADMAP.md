@@ -577,6 +577,8 @@ P1 is therefore **COMPLETE / FROZEN**. P2 may add host interaction routes withou
 
 ## P2 — Host Interaction Coverage
 
+**Status: COMPLETE / FROZEN.**
+
 **Purpose:** eliminate remaining places where folded display coordinates can diverge from YMM4's logical coordinates.
 
 ### Scope
@@ -590,6 +592,8 @@ P1 is therefore **COMPLETE / FROZEN**. P2 may add host interaction routes withou
 - context-menu actions that derive a layer from cursor position.
 
 ### Exit gate
+
+**SATISFIED / FROZEN.** See `docs/YMM4_NO_HARMONY_P2_INTERACTION_MATRIX.md`.
 
 A documented interaction matrix is green on both pinned hosts, with every supported route classified as:
 
@@ -607,34 +611,45 @@ Persistence schema and final visual design.
 
 ## P3 — Folder Data Model & Persistence
 
+**Status: COMPLETE / FROZEN.**
+
+Freeze record: `docs/YMM4_NO_HARMONY_P3_PERSISTENCE_FREEZE.md`.
+
 **Purpose:** make folder state survive normal project lifecycle safely.
 
-### Scope
+### Frozen storage boundary
 
-- folder identity;
-- range / hierarchy representation;
-- collapse state;
-- names / minimal metadata needed by the Full product;
-- save / reopen;
-- project switch;
-- new project;
-- malformed / stale state recovery;
-- schema versioning and migration;
-- safe behavior when the plugin is unavailable or an older version is loaded.
-
-### Design rule
-
-Do not make display geometry the persisted source of truth. Persist logical folder state and rebuild display state.
+- schema v1 persists only logical folder state: Timeline key, folder Id, Start/End, Name and collapsed state;
+- display geometry / viewport / derived hierarchy are rebuilt, not persisted;
+- project-owned `ToolState.SavedState` is the storage surface;
+- public `Timeline.ID : Guid` is the per-Timeline key;
+- public `ProjectFilePath` change notification is the accepted project-switch signal;
+- new-project creation explicitly clears inherited folder state after the host produces a fresh Timeline.ID;
+- malformed / unsupported / invalid SavedState is quarantined and preserved raw rather than silently overwritten;
+- reloaded FolderDocument immediately re-enters the frozen P1 structural/Undo semantics.
 
 ### Exit gate
 
-Round-trip tests must prove:
+**SATISFIED / FROZEN.**
 
-- save -> close -> reopen preserves valid structure;
-- invalid persisted state fails safely;
-- migration is deterministic;
-- no project corruption if the plugin cannot restore a folder;
-- structural edits after reload continue to pass P1 semantics.
+Evidence:
+
+- P3.1 pure FolderDocument / codec — 29/29 PASS;
+- P3.3 pure unreadable-state preservation — 40/40 PASS;
+- P3.2 project A/B roundtrip — GREEN on 4.56.1.0 and 4.55.1.1;
+- P3.4 new-project reset — GREEN on both pinned hosts;
+- P3.6 reload -> structural Add/Undo/Redo — GREEN on both pinned hosts;
+- consolidated secondary-host V2 — `PASS_P3_V2_SECONDARY`.
+
+### Known graceful-degradation limitation
+
+If the folder plugin is completely unavailable and the project is then re-saved, YMM4 does not preserve that absent plugin's ToolState entry. The YMM4 project remains usable, but folder metadata can be lost.
+
+P3 deliberately does **not** add a sidecar / dual-store solely for this unavailable-plugin case. Recovery guidance belongs in P7 release documentation.
+
+### Deferred
+
+Product-facing folder controls, discoverability and interaction polish move to P4.
 
 ---
 
@@ -771,15 +786,15 @@ P0 Core Spine                 DONE
   -> P1.5 Track C integration DONE
   -> P1.6 architecture convergence DONE
   -> P1 freeze                DONE
-  -> P2 interaction coverage  NEXT
-  -> P3 persistence
-  -> P4 UX
+  -> P2 interaction coverage  DONE
+  -> P3 persistence           DONE
+  -> P4 UX                    NEXT
   -> P5 compatibility
   -> P6 hardening
   -> P7 release
 ```
 
-P1 is frozen. If P2 exposes evidence that contradicts a frozen P1 assumption, reopen only the affected gate with a new isolated proof rather than broadly rewriting P0/P1.
+P0-P3 are frozen. If later phases expose evidence that contradicts a frozen assumption, reopen only the affected gate with a new isolated proof rather than broadly rewriting earlier phases.
 
 # 6. Scope-control rules
 
