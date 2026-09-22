@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
 using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
@@ -134,6 +135,7 @@ internal static class HandsOnRuntime
     private static HandsOnController? controller;
     private static Guid lastProjectTimelineId;
     private static bool smokeProjectRequested;
+    private static bool smokeTimelinePrepared;
 
     internal static void Start()
     {
@@ -192,12 +194,14 @@ internal static class HandsOnRuntime
                 Diagnostic("main_root_attached");
             }
 
+            var smokeEnabled = string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT"),
+                "1",
+                StringComparison.Ordinal);
+
             if (HandsOnHostAccess.ActiveTimelineViewModel(currentRoot) is null
                 && !smokeProjectRequested
-                && string.Equals(
-                    Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT"),
-                    "1",
-                    StringComparison.Ordinal))
+                && smokeEnabled)
             {
                 smokeProjectRequested = true;
                 currentRoot.GetType()
@@ -206,11 +210,61 @@ internal static class HandsOnRuntime
                 Diagnostic("smoke_create_project_requested");
             }
 
+            if (smokeEnabled && !smokeTimelinePrepared)
+                TryPrepareSmokeTimeline(currentWindow, currentRoot);
+
             EnsureController();
         }
         catch (Exception ex)
         {
             Diagnostic("tick_error=" + ex);
+        }
+    }
+
+    private static void TryPrepareSmokeTimeline(Window currentWindow, object currentRoot)
+    {
+        var active = HandsOnHostAccess.ActiveTimelineViewModel(currentRoot);
+        var timeline = HandsOnHostAccess.TimelineOf(active);
+        if (timeline is null || timeline.ID == Guid.Empty)
+            return;
+
+        try
+        {
+            currentWindow.WindowState = WindowState.Normal;
+            currentWindow.Left = 0;
+            currentWindow.Top = 0;
+            currentWindow.Width = 1100;
+            currentWindow.Height = 720;
+
+            if (!timeline.Items.Any(x =>
+                string.Equals(
+                    x.Remark,
+                    "CNWL_P4_HANDS_ON_SMOKE",
+                    StringComparison.Ordinal)))
+            {
+                var character = new Character { Name = "CNWL_P4_HANDS_ON_SMOKE" };
+                for (var layer = 0; layer <= 2; layer++)
+                {
+                    var item = new VoiceItem(character)
+                    {
+                        Frame = 20,
+                        Layer = layer,
+                        Length = 60,
+                        Serif = "smoke",
+                        Remark = "CNWL_P4_HANDS_ON_SMOKE"
+                    };
+                    if (!timeline.TryAddItems([item], item.Frame, item.Layer))
+                        throw new InvalidOperationException(
+                            "Smoke fixture item could not be added at layer " + layer);
+                }
+            }
+
+            smokeTimelinePrepared = true;
+            Diagnostic($"smoke_timeline_prepared timeline={timeline.ID:D}");
+        }
+        catch (Exception ex)
+        {
+            Diagnostic("smoke_prepare_retry=" + ex.Message);
         }
     }
 
