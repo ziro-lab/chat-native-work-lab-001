@@ -10,6 +10,7 @@
   <ItemGroup>
     <Using Include="System.Windows.WindowState" Alias="WindowState" />
     <Using Include="YukkuriMovieMaker.Settings" />
+    <Using Include="YukkuriMovieMaker.Plugin" />
     <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="ReactiveProperty.Core"><HintPath>$(YMM4DirPath)ReactiveProperty.Core.dll</HintPath><Private>false</Private></Reference>
