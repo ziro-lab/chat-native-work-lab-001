@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Media;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyProductState;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Settings;
@@ -20,6 +22,7 @@ internal sealed class FolderCommands
     private readonly UndoRedoManager undo;
     private readonly FolderStateStore state;
     private readonly StructuralFolderBridge structural;
+    private readonly FolderVisibilityCoordinator visibility;
     private readonly Action<string> log;
 
     internal FolderCommands(
@@ -28,6 +31,7 @@ internal sealed class FolderCommands
         UndoRedoManager undo,
         FolderStateStore state,
         StructuralFolderBridge structural,
+        FolderVisibilityCoordinator visibility,
         Action<string> log)
     {
         this.window = window;
@@ -35,11 +39,32 @@ internal sealed class FolderCommands
         this.undo = undo;
         this.state = state;
         this.structural = structural;
+        this.visibility = visibility;
         this.log = log;
         timeline = host.Timeline;
     }
 
     private string TimelineKey => timeline.ID.ToString("D");
+
+    internal static IReadOnlyList<(string Name, string? Color)> Palette { get; } =
+    [
+        ("赤", "#FFE05A5A"),
+        ("橙", "#FFE89A3C"),
+        ("黄", "#FFD9C23A"),
+        ("緑", "#FF5CB85C"),
+        ("水", "#FF4CB5C9"),
+        ("青", "#FF4F7FE0"),
+        ("紫", "#FF9B6BD6"),
+        ("灰", "#FF8A8A8A"),
+        ("既定", null)
+    ];
+
+    internal FolderOptionState? FindOption(Guid folderId) =>
+        FolderProductStateRules.FindOption(
+            state.ProductState,
+            TimelineKey,
+            folderId);
+
 
     internal FolderCreationDecision EvaluateCreate(
         int clickedLayer,
@@ -162,6 +187,67 @@ internal sealed class FolderCommands
                 collapsed),
             collapsed ? "collapse_all" : "expand_all");
 
+    internal void SetColor(Guid folderId, string? color) =>
+        CommitProductState(
+            product => FolderProductStateRules.SetFolderColor(
+                product,
+                TimelineKey,
+                folderId,
+                color),
+            "set_color");
+
+    internal void SetHidden(Guid folderId, bool hidden)
+    {
+        if (state.IsRecoveryBlocked)
+            throw new InvalidOperationException(
+                "Unreadable saved folder state is preserved; editing is blocked.");
+
+        var before = FolderProductStateRules.NormalizeAndValidate(
+            state.ProductState);
+        var requested = FolderProductStateRules.SetFolderHidden(
+            before,
+            TimelineKey,
+            folderId,
+            hidden);
+        var after = visibility.ApplyHiddenChange(
+            before,
+            requested);
+
+        CommitResolvedProductState(
+            before,
+            after,
+            hidden ? "hide" : "show");
+    }
+
+    internal void ApplyFolderColorToLayers(Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var option = FindOption(folderId);
+
+        var color = option?.Color is { } text
+            ? (Color)ColorConverter.ConvertFromString(text)
+            : Colors.Transparent;
+
+        var changed = false;
+        for (var layer = folder.Start; layer <= folder.End; layer++)
+        {
+            if (timeline.LayerSettings.Colors[layer] == color)
+                continue;
+            timeline.LayerSettings.Colors[layer] = color;
+            changed = true;
+        }
+
+        if (!changed)
+            return;
+
+        undo.Record();
+        log(
+            $"folder_command apply_color id={folderId} " +
+            $"range={folder.Start}-{folder.End} color={option?.Color ?? "<default>"}");
+    }
+
     internal void Ungroup(Guid folderId) =>
         CommitMetadata(
             document => FolderUxCommands.Ungroup(
@@ -185,6 +271,40 @@ internal sealed class FolderCommands
             $"range={folder.Start}-{folder.End}");
     }
 
+    private void CommitProductState(
+        Func<FolderProductState, FolderProductState> change,
+        string reason)
+    {
+        if (state.IsRecoveryBlocked)
+            throw new InvalidOperationException(
+                "Unreadable saved folder state is preserved; editing is blocked.");
+
+        var before = FolderProductStateRules.NormalizeAndValidate(
+            state.ProductState);
+        var after = FolderProductStateRules.NormalizeAndValidate(
+            change(before));
+        CommitResolvedProductState(before, after, reason);
+    }
+
+    private void CommitResolvedProductState(
+        FolderProductState before,
+        FolderProductState after,
+        string reason)
+    {
+        if (FolderProductStateCodec.Save(before)
+            == FolderProductStateCodec.Save(after))
+            return;
+
+        state.ReplaceProductState(after);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceProductState(before),
+            () => state.ReplaceProductState(after)));
+        undo.Record();
+
+        log(
+            $"folder_command product reason={reason} timeline={TimelineKey}");
+    }
+
     private void CommitMetadata(
         Func<FolderDocument, FolderDocument> change,
         string reason)
@@ -193,19 +313,17 @@ internal sealed class FolderCommands
             throw new InvalidOperationException(
                 "Unreadable saved folder state is preserved; editing is blocked.");
 
-        var before = state.Document;
-        var after = FolderDocumentRules.NormalizeAndValidate(change(before));
+        var beforeProduct = FolderProductStateRules.NormalizeAndValidate(
+            state.ProductState);
+        var before = beforeProduct.Core;
+        var afterCore = FolderDocumentRules.NormalizeAndValidate(change(before));
+        var afterProduct = FolderProductStateRules.ReplaceCore(
+            beforeProduct,
+            afterCore);
 
-        if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
-            return;
-
-        state.ReplaceDocument(after);
-        undo.AddCommand(new UndoRedoActionCommand(
-            () => state.ReplaceDocument(before),
-            () => state.ReplaceDocument(after)));
-        undo.Record();
-
-        log(
-            $"folder_command metadata reason={reason} timeline={TimelineKey}");
+        CommitResolvedProductState(
+            beforeProduct,
+            afterProduct,
+            reason);
     }
 }
