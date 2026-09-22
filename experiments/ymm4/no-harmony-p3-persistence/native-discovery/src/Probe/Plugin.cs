@@ -236,6 +236,11 @@ internal static class Probe
                 x.Name.Contains("Tool", StringComparison.OrdinalIgnoreCase)
                 || x.Name.Contains("Plugin", StringComparison.OrdinalIgnoreCase)
                 || x.Name.Contains("View", StringComparison.OrdinalIgnoreCase)),
+            mainViewModelProjectSurface = MemberSummary(root.GetType(), x =>
+                x.Name.Contains("Project", StringComparison.OrdinalIgnoreCase)
+                || x.Name.Contains("Save", StringComparison.OrdinalIgnoreCase)
+                || x.Name.Contains("Load", StringComparison.OrdinalIgnoreCase)
+                || x.Name.Contains("Open", StringComparison.OrdinalIgnoreCase)),
             toolMenuEntries = RuntimeEntries(Get(root, "ToolMenuItems")),
             anchorableAreaEntries = RuntimeEntries(Get(root, "AnchorableAreaViewModels")),
             mainModelToolSurface = model is null ? "<null>" : MemberSummary(model.GetType(), x =>
