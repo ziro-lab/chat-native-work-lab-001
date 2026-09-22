@@ -25,6 +25,7 @@ internal sealed class HandsOnController : IDisposable
     private readonly FolderStateStore state;
     private readonly DirectDisplay display;
     private readonly StructuralFolderBridge structural;
+    private readonly FolderCommands commands;
     private readonly InputMapAdapter input;
     private readonly FileDropMapAdapter fileDrop;
     private readonly AdornerLayer adornerLayer;
@@ -53,6 +54,13 @@ internal sealed class HandsOnController : IDisposable
             timeline,
             undo,
             state,
+            HandsOnRuntime.Diagnostic);
+        commands = new FolderCommands(
+            window,
+            host,
+            undo,
+            state,
+            structural,
             HandsOnRuntime.Diagnostic);
         input = new InputMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         fileDrop = new FileDropMapAdapter(host, display, HandsOnRuntime.Diagnostic);
@@ -205,50 +213,15 @@ internal sealed class HandsOnController : IDisposable
 
     private void ExecuteHostCommand(CommandType type, object? parameter)
     {
-        ICommand command = CommandSettings.Default[type]
-            ?? throw new InvalidOperationException("Command missing: " + type);
-
-        var targets = new List<IInputElement>();
-        if (Keyboard.FocusedElement is IInputElement focused)
-            targets.Add(focused);
-        targets.Add(host.Source);
-        targets.Add(host.View);
-        targets.Add(window);
-
-        foreach (var target in targets)
+        if (!HandsOnHostAccess.TryExecuteTimelineCommand(
+                host,
+                window,
+                type,
+                parameter))
         {
-            if (command is RoutedCommand routed)
-            {
-                bool can;
-                try
-                {
-                    can = routed.CanExecute(parameter, target);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (!can)
-                    continue;
-
-                routed.Execute(parameter, target);
-                HandsOnRuntime.Diagnostic(
-                    $"s0_command type={type} target={target.GetType().Name} parameter={parameter ?? "<null>"}");
-                return;
-            }
-
-            if (command.CanExecute(parameter))
-            {
-                command.Execute(parameter);
-                HandsOnRuntime.Diagnostic(
-                    $"s0_command type={type} target=<direct> parameter={parameter ?? "<null>"}");
-                return;
-            }
+            throw new InvalidOperationException(
+                $"No executable route for {type} with parameter {parameter ?? "<null>"}.");
         }
-
-        throw new InvalidOperationException(
-            $"No executable route for {type} with parameter {parameter ?? "<null>"}.");
     }
 
     private static void WriteS0Result(string text)
@@ -319,15 +292,23 @@ internal sealed class HandsOnController : IDisposable
             || point.Y < 0 || point.Y >= labels.ActualHeight)
             return;
 
-        if (e.ChangedButton == MouseButton.Left
-            && adorner?.TryFolderAt(point, out var folderId) == true)
+        if (e.ChangedButton == MouseButton.Left)
         {
-            e.Handled = true;
-            ExecuteDocumentChange(
-                document => FolderUxCommands.ToggleCollapsed(
-                    document,
-                    timeline.ID.ToString("D"),
-                    folderId));
+            if (adorner?.TryToggleAt(point, out var toggleId) == true)
+            {
+                e.Handled = true;
+                RunFolderCommand(() => commands.ToggleCollapsed(toggleId));
+                return;
+            }
+
+            if (e.ClickCount >= 2
+                && adorner?.TryNameAt(point, out var renameId) == true)
+            {
+                e.Handled = true;
+                PromptRename(renameId);
+                return;
+            }
+
             return;
         }
 
@@ -382,8 +363,26 @@ internal sealed class HandsOnController : IDisposable
         }
         else
         {
-            AddCreateAction(root);
+            AddCreateAction(root, logicalLayer);
             AddExistingFolderActions(root, logicalLayer);
+
+            var timelineState = FolderDocumentRules.FindTimeline(
+                state.Document,
+                timeline.ID.ToString("D"));
+            if (timelineState is { Folders.Count: > 0 })
+            {
+                root.Items.Add(new Separator());
+
+                var expandAll = new MenuItem { Header = "すべてのフォルダを開く" };
+                expandAll.Click += (_, _) =>
+                    RunFolderCommand(() => commands.SetAllCollapsed(false));
+                root.Items.Add(expandAll);
+
+                var collapseAll = new MenuItem { Header = "すべてのフォルダを畳む" };
+                collapseAll.Click += (_, _) =>
+                    RunFolderCommand(() => commands.SetAllCollapsed(true));
+                root.Items.Add(collapseAll);
+            }
         }
 
         menu.Items.Add(new Separator { Tag = MenuTag });
@@ -398,34 +397,40 @@ internal sealed class HandsOnController : IDisposable
         menu.Closed += closed;
     }
 
-    private void AddCreateAction(MenuItem root)
+    private void AddCreateAction(MenuItem root, int logicalLayer)
     {
-        var selected = timeline.LayerSelection.SelectedLayers
-            .Distinct()
-            .OrderBy(x => x)
-            .ToArray();
         var candidateId = Guid.NewGuid();
-        var decision = FolderUxCommands.EvaluateCreate(
-            state.Document,
-            timeline.ID.ToString("D"),
-            selected,
-            candidateId);
+        var decision = commands.EvaluateCreate(logicalLayer, candidateId);
+
+        string Header()
+        {
+            if (!decision.Allowed
+                || decision.Start is null
+                || decision.End is null)
+            {
+                return "フォルダを作成できません（"
+                    + CreationReason(decision.Status)
+                    + "）";
+            }
+
+            var range = decision.Start == decision.End
+                ? $"L{decision.Start:00}"
+                : $"L{decision.Start:00}–L{decision.End:00}";
+
+            return decision.NeedsAdditionalLayer
+                ? $"{range} をフォルダにする（下に空レイヤーを1つ追加）..."
+                : $"{range} をフォルダにまとめる...";
+        }
 
         var create = new MenuItem
         {
-            Header = decision.Allowed
-                && decision.Start is not null
-                && decision.End is not null
-                    ? $"L{decision.Start}–L{decision.End} をフォルダにまとめる..."
-                    : "フォルダを作成できません（" + CreationReason(decision.Status) + "）",
+            Header = Header(),
             IsEnabled = decision.Allowed
         };
 
         create.Click += (_, _) =>
         {
-            if (!decision.Allowed
-                || decision.Start is null
-                || decision.End is null)
+            if (!decision.Allowed)
                 return;
 
             var count = FolderDocumentRules.FindTimeline(
@@ -439,17 +444,27 @@ internal sealed class HandsOnController : IDisposable
             if (string.IsNullOrWhiteSpace(name))
                 name = fallback;
 
-            var captured = selected.ToArray();
-            ExecuteDocumentChange(
-                document => FolderUxCommands.CreateFolder(
-                    document,
-                    timeline.ID.ToString("D"),
-                    captured,
+            RunFolderCommand(
+                () => commands.CreateFromContext(
+                    logicalLayer,
                     candidateId,
                     name));
         };
 
         root.Items.Add(create);
+
+        if (decision.AdjustedForFolderHead
+            && decision.RequestedStart is not null
+            && decision.Start is not null)
+        {
+            root.Items.Add(new MenuItem
+            {
+                Header =
+                    $"  (L{decision.RequestedStart:00} は既存フォルダの先頭のため、" +
+                    $"L{decision.Start:00} から作成します)",
+                IsEnabled = false
+            });
+        }
     }
 
     private void AddExistingFolderActions(MenuItem root, int logicalLayer)
@@ -479,37 +494,18 @@ internal sealed class HandsOnController : IDisposable
             {
                 Header = folder.IsCollapsed ? "開く" : "畳む"
             };
-            toggle.Click += (_, _) => ExecuteDocumentChange(
-                document => FolderUxCommands.ToggleCollapsed(
-                    document,
-                    timeline.ID.ToString("D"),
-                    folder.Id));
+            toggle.Click += (_, _) =>
+                RunFolderCommand(() => commands.ToggleCollapsed(folder.Id));
             sub.Items.Add(toggle);
 
             var rename = new MenuItem { Header = "名前を変更..." };
-            rename.Click += (_, _) =>
-            {
-                var name = TextPrompt.Show("フォルダ名", folder.Name);
-                if (name is null)
-                    return;
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    MessageBox.Show(
-                        "フォルダ名を入力してください。",
-                        FolderToolViewModel.DisplayTitle,
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-                    return;
-                }
-
-                ExecuteDocumentChange(
-                    document => FolderUxCommands.RenameFolder(
-                        document,
-                        timeline.ID.ToString("D"),
-                        folder.Id,
-                        name));
-            };
+            rename.Click += (_, _) => PromptRename(folder.Id);
             sub.Items.Add(rename);
+
+            var selectItems = new MenuItem { Header = "中のアイテムを選択" };
+            selectItems.Click += (_, _) =>
+                RunFolderCommand(() => commands.SelectItems(folder.Id));
+            sub.Items.Add(selectItems);
 
             sub.Items.Add(new Separator());
 
@@ -517,40 +513,41 @@ internal sealed class HandsOnController : IDisposable
             {
                 Header = "フォルダを解除（レイヤーは残す）"
             };
-            ungroup.Click += (_, _) => ExecuteDocumentChange(
-                document => FolderUxCommands.Ungroup(
-                    document,
-                    timeline.ID.ToString("D"),
-                    folder.Id));
+            ungroup.Click += (_, _) =>
+                RunFolderCommand(() => commands.Ungroup(folder.Id));
             sub.Items.Add(ungroup);
 
             root.Items.Add(sub);
         }
     }
 
-    private void ExecuteDocumentChange(
-        Func<FolderDocument, FolderDocument> change)
+    private void PromptRename(Guid folderId)
     {
-        if (state.IsRecoveryBlocked)
+        var folder = commands.FindFolder(folderId);
+        if (folder is null)
             return;
 
+        var name = TextPrompt.Show("フォルダ名", folder.Name);
+        if (name is null)
+            return;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            MessageBox.Show(
+                "フォルダ名を入力してください。",
+                FolderToolViewModel.DisplayTitle,
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        RunFolderCommand(() => commands.Rename(folderId, name));
+    }
+
+    private static void RunFolderCommand(Action action)
+    {
         try
         {
-            var before = state.Document;
-            var after = FolderDocumentRules.NormalizeAndValidate(change(before));
-
-            if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
-                return;
-
-            state.ReplaceDocument(after);
-
-            undo.AddCommand(new UndoRedoActionCommand(
-                () => state.ReplaceDocument(before),
-                () => state.ReplaceDocument(after)));
-            undo.Record();
-
-            HandsOnRuntime.Diagnostic(
-                $"folder_history_record timeline={timeline.ID:D}");
+            action();
         }
         catch (Exception ex)
         {
