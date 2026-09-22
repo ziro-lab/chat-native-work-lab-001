@@ -1,0 +1,737 @@
+using System.Collections.Immutable;
+using System.Globalization;
+using System.IO;
+using System.Reflection;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
+using YukkuriMovieMaker.ViewModels;
+
+namespace Ymm4NoHarmonyFolderLayoutProbe;
+
+public sealed class P4UiSurfaceEntry : ILocalizePlugin
+{
+    public string Name => "CNWL P4 folder UI surface";
+    public void SetCulture(CultureInfo cultureInfo) => Probe.Schedule();
+}
+
+internal static class Probe
+{
+    private static bool scheduled;
+    private static bool failed;
+    private static string output = "";
+    private static readonly Dictionary<string, bool> checks = [];
+    private static readonly Dictionary<string, string> facts = [];
+
+    internal static void Schedule()
+    {
+        var path = Environment.GetEnvironmentVariable("CNWL_P4_UI_SURFACE_DIR");
+        if (scheduled || string.IsNullOrWhiteSpace(path)) return;
+        scheduled = true;
+        output = Path.GetFullPath(path);
+        Directory.CreateDirectory(output);
+        Application.Current.Dispatcher.BeginInvoke(new Action(Bootstrap), DispatcherPriority.ApplicationIdle);
+    }
+
+    private static void Bootstrap()
+    {
+        var ticks = 0;
+        var created = false;
+        var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromMilliseconds(350) };
+        timer.Tick += async (_, _) =>
+        {
+            try
+            {
+                if (++ticks > 120) throw new TimeoutException("Bootstrap");
+                var window = Application.Current.Windows.Cast<Window>()
+                    .FirstOrDefault(x => x.DataContext?.GetType().FullName == "YukkuriMovieMaker.ViewModels.MainViewModel");
+                if (window is null) return;
+
+                var root = window.DataContext!;
+                var vm = Host.Get(root, "ActiveTimelineViewModel");
+                if (vm is null)
+                {
+                    if (!created)
+                    {
+                        created = true;
+                        root.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(root, null);
+                    }
+                    return;
+                }
+
+                timer.Stop();
+                await Run(window);
+            }
+            catch (Exception ex)
+            {
+                timer.Stop();
+                Fail(ex);
+                Finish();
+            }
+        };
+        timer.Start();
+    }
+
+    private static void Log(string value) =>
+        File.AppendAllText(Path.Combine(output, "progress.txt"), $"{DateTime.UtcNow:O}\t{value}{Environment.NewLine}");
+
+    private static void Check(string name, bool pass)
+    {
+        checks[name] = pass;
+        failed |= !pass;
+        Log($"assert {name}={pass}");
+    }
+
+    private static void Fact(string name, object? value) => facts[name] = value?.ToString() ?? "<null>";
+
+    private static void Fail(Exception ex)
+    {
+        failed = true;
+        facts["error"] = ex.ToString();
+        Log("failure=" + ex);
+    }
+
+    private static void Finish()
+    {
+        var result = new
+        {
+            status = failed ? "FAIL_P4_UI_SURFACE" : "PASS_P4_UI_SURFACE",
+            hostVersion = typeof(Timeline).Assembly.GetName().Version?.ToString(),
+            checks,
+            facts
+        };
+        var tmp = Path.Combine(output, "result.tmp");
+        File.WriteAllText(tmp, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(tmp, Path.Combine(output, "result.json"), true);
+    }
+
+    private static string? ItemsBindingPath(FrameworkElement element)
+    {
+        if (element.GetType().Name != "FastCanvasItemsControl")
+            return null;
+        var property = element.GetType().GetField(
+            "ItemsProperty",
+            BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as DependencyProperty;
+        return property is null ? null : BindingOperations.GetBinding(element, property)?.Path?.Path;
+    }
+
+    private static FrameworkElement FindLabels(Window window, object activeTimeline)
+    {
+        var candidates = Host.Elements(window)
+            .Where(x => x.IsVisible && ItemsBindingPath(x) == "LayerLabels")
+            .ToArray();
+        Fact("layer_label_candidates", candidates.Length);
+        return candidates.FirstOrDefault()
+            ?? throw new InvalidOperationException("LayerLabels FastCanvasItemsControl not found.");
+    }
+
+    private static int? LayerId(object? dataContext)
+    {
+        if (dataContext is null || dataContext.GetType().Name != "TimelineLayerLabelItemViewModel")
+            return null;
+        return dataContext.GetType()
+            .GetProperty("Id", BindingFlags.Instance | BindingFlags.Public)
+            ?.GetValue(dataContext) as int?;
+    }
+
+    private static FrameworkElement FindLayerElement(FrameworkElement labels, int layer)
+    {
+        return Host.Elements(labels)
+            .Where(x => x.IsVisible && LayerId(x.DataContext) == layer && x.ActualWidth > 20 && x.ActualHeight > 8)
+            .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("Layer label row not realized: " + layer);
+    }
+
+    private static DependencyObject? Parent(DependencyObject current) =>
+        current is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(current)
+            : LogicalTreeHelper.GetParent(current);
+
+    private static int? FindLayerFromSource(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = Parent(current))
+            if (current is FrameworkElement fe && LayerId(fe.DataContext) is int layer)
+                return layer;
+        return null;
+    }
+
+    private static FrameworkElement? FindContextMenuOwnerFromSource(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = Parent(current))
+            if (current is FrameworkElement { ContextMenu: not null } fe)
+                return fe;
+        return null;
+    }
+
+    private static async Task<Point> FindContextMenuPoint(
+        FrameworkElement labels,
+        int layer,
+        ContextMenu menu)
+    {
+        var row = FindLayerElement(labels, layer);
+        var rowRect = Host.ScreenRect(row);
+        var labelsRect = Host.ScreenRect(labels);
+
+        var left = Math.Max(rowRect.Left + 3, labelsRect.Left + 3);
+        var right = Math.Min(rowRect.Right - 3, labelsRect.Right - 3);
+        var top = Math.Max(rowRect.Top + 3, labelsRect.Top + 3);
+        var bottom = Math.Min(rowRect.Bottom - 3, labelsRect.Bottom - 3);
+
+        if (right <= left || bottom <= top)
+            throw new InvalidOperationException($"No scan rect for layer {layer}: row={rowRect} labels={labelsRect}");
+
+        var y = (top + bottom) / 2;
+        var xs = new List<double>
+        {
+            left + 6,
+            left + (right - left) * 0.25,
+            left + (right - left) * 0.50,
+            left + (right - left) * 0.75,
+            right - 6
+        };
+        for (var x = left + 6; x < right - 6; x += 12)
+            xs.Add(x);
+
+        foreach (var x in xs.Distinct().Where(x => x >= left && x <= right))
+        {
+            if (menu.IsOpen)
+            {
+                await Native.Key(0x1B);
+                await Task.Delay(120);
+            }
+
+            var screen = new Point(x, y);
+            await Native.Click(screen, right: true);
+            await Task.Delay(180);
+            if (menu.IsOpen)
+            {
+                await Native.Key(0x1B);
+                return screen;
+            }
+        }
+
+        throw new InvalidOperationException($"No native context-menu point found for layer {layer}: row={rowRect} labels={labelsRect}");
+    }
+
+    private static FrameworkElement FindLayerContextOwner(FrameworkElement labels, int layer)
+    {
+        var direct = Host.Elements(labels)
+            .Where(x => x.IsVisible && LayerId(x.DataContext) == layer && x.ContextMenu is not null)
+            .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+            .FirstOrDefault();
+        if (direct is not null)
+            return direct;
+
+        DependencyObject? current = FindLayerElement(labels, layer);
+        while (current is not null)
+        {
+            if (current is FrameworkElement { ContextMenu: not null } fe)
+                return fe;
+            current = Parent(current);
+        }
+
+        throw new InvalidOperationException("ContextMenu owner not found for layer " + layer);
+    }
+
+    private sealed class FolderMenuLease : IDisposable
+    {
+        private const string Tag = "CNWL.P4.Menu";
+        private readonly ContextMenu menu;
+        private readonly int layer;
+        private readonly RoutedEventHandler opened;
+        private bool disposed;
+
+        internal int Openings { get; private set; }
+        internal int Clicks { get; private set; }
+        internal int LastLayer { get; private set; } = -1;
+        internal int LastOriginalCount { get; private set; }
+        internal ContextMenu? LastMenu { get; private set; }
+        internal MenuItem? LastItem { get; private set; }
+
+        internal FolderMenuLease(ContextMenu menu, int layer)
+        {
+            this.menu = menu;
+            this.layer = layer;
+            opened = OnOpened;
+            menu.Opened += opened;
+        }
+
+        private static void RemoveTagged(ContextMenu menu)
+        {
+            foreach (var item in menu.Items.OfType<FrameworkElement>().Where(x => Equals(x.Tag, Tag)).ToArray())
+                menu.Items.Remove(item);
+        }
+
+        private void OnOpened(object? sender, RoutedEventArgs e)
+        {
+            if (disposed) return;
+
+            RemoveTagged(menu);
+            LastOriginalCount = menu.Items.Count;
+
+            var separator = new Separator { Tag = Tag };
+            var item = new MenuItem { Header = "CNWL Folder action", Tag = Tag };
+            item.Click += (_, _) => Clicks++;
+            menu.Items.Add(separator);
+            menu.Items.Add(item);
+
+            Openings++;
+            LastLayer = layer;
+            LastMenu = menu;
+            LastItem = item;
+
+            RoutedEventHandler? closed = null;
+            closed = (_, _) =>
+            {
+                menu.Closed -= closed;
+                RemoveTagged(menu);
+            };
+            menu.Closed += closed;
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            menu.Opened -= opened;
+            RemoveTagged(menu);
+        }
+    }
+
+    private sealed class LayerLabelInputRouter : IDisposable
+    {
+        private readonly Window routeRoot;
+        private readonly FrameworkElement labels;
+        private readonly DirectDisplay display;
+        private readonly MouseButtonEventHandler handler;
+        private bool disposed;
+
+        internal int RightMaps { get; private set; }
+        internal int LastLogicalLayer { get; private set; } = -1;
+        internal ContextMenu? LastMenu { get; private set; }
+
+        internal LayerLabelInputRouter(Window routeRoot, FrameworkElement labels, DirectDisplay display)
+        {
+            this.routeRoot = routeRoot;
+            this.labels = labels;
+            this.display = display;
+            handler = OnPreviewMouseDown;
+            routeRoot.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
+        }
+
+        private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (disposed || e.ChangedButton != MouseButton.Right)
+                return;
+
+            var point = e.GetPosition(labels);
+            if (point.X < 0 || point.X >= labels.ActualWidth
+                || point.Y < 0 || point.Y >= labels.ActualHeight)
+                return;
+
+            var logical = display.Layout.DisplayYToLogical(point.Y, display.Height);
+            var owner = FindLayerContextOwner(labels, logical);
+            var menu = owner.ContextMenu;
+            if (menu is null)
+                return;
+
+            e.Handled = true;
+            menu.PlacementTarget = owner;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+            menu.IsOpen = true;
+
+            RightMaps++;
+            LastLogicalLayer = logical;
+            LastMenu = menu;
+            Log($"label_right_map display={point} logical={logical} owner={owner.GetType().Name}");
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            routeRoot.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
+            if (LastMenu?.IsOpen == true)
+                LastMenu.IsOpen = false;
+        }
+    }
+
+    private sealed class FolderOwnerAdorner : Adorner
+    {
+        private readonly VisualCollection children;
+        private readonly DirectDisplay display;
+        private readonly CollapsedSpan span;
+        private readonly Button toggle;
+
+        internal Button Toggle => toggle;
+
+        internal FolderOwnerAdorner(UIElement adornedElement, DirectDisplay display, CollapsedSpan span)
+            : base(adornedElement)
+        {
+            this.display = display;
+            this.span = span;
+
+            toggle = new Button
+            {
+                Content = "▶",
+                Padding = new Thickness(0),
+                Width = 22,
+                Height = Math.Max(18, display.Height - 6),
+                ToolTip = "CNWL folder toggle",
+                Focusable = false
+            };
+            children = new VisualCollection(this) { toggle };
+
+            // Set this only after the visual collection exists: WPF may query
+            // VisualChildrenCount while propagating inherited hit-test state.
+            // The visual is display-only; input is handled on LayerLabels.
+            IsHitTestVisible = false;
+        }
+
+        internal Rect ToggleRect =>
+            new(
+                2,
+                display.Layout.VisualRowOfLogical(span.Start) * display.Height + 3,
+                toggle.Width,
+                toggle.Height);
+
+        internal void SetCollapsed(bool collapsed)
+        {
+            toggle.Content = collapsed ? "▶" : "▼";
+            InvalidateArrange();
+        }
+
+        protected override int VisualChildrenCount => children.Count;
+        protected override Visual GetVisualChild(int index) => children[index];
+
+        protected override Size MeasureOverride(Size constraint)
+        {
+            toggle.Measure(new Size(toggle.Width, toggle.Height));
+            return AdornedElement.RenderSize;
+        }
+
+        protected override Size ArrangeOverride(Size finalSize)
+        {
+            toggle.Arrange(ToggleRect);
+            return finalSize;
+        }
+    }
+
+    private sealed class FolderToggleInputLease : IDisposable
+    {
+        private readonly Window routeRoot;
+        private readonly FrameworkElement labels;
+        private readonly DirectDisplay display;
+        private readonly CollapsedSpan span;
+        private readonly FolderOwnerAdorner adorner;
+        private readonly MouseButtonEventHandler handler;
+        private bool disposed;
+
+        internal int Clicks { get; private set; }
+
+        internal FolderToggleInputLease(
+            Window routeRoot,
+            FrameworkElement labels,
+            DirectDisplay display,
+            CollapsedSpan span,
+            FolderOwnerAdorner adorner)
+        {
+            this.routeRoot = routeRoot;
+            this.labels = labels;
+            this.display = display;
+            this.span = span;
+            this.adorner = adorner;
+            handler = OnPreviewMouseDown;
+            routeRoot.AddHandler(Mouse.PreviewMouseDownEvent, handler, true);
+        }
+
+        private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (disposed || e.ChangedButton != MouseButton.Left)
+                return;
+
+            var point = e.GetPosition(labels);
+            if (!adorner.ToggleRect.Contains(point))
+                return;
+
+            e.Handled = true;
+            var wasCollapsed = display.Layout.IsHidden(span.Start + 1);
+            var nowCollapsed = !wasCollapsed;
+            display.SetSpans(nowCollapsed ? [span] : []);
+            adorner.SetCollapsed(nowCollapsed);
+            Clicks++;
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            routeRoot.RemoveHandler(Mouse.PreviewMouseDownEvent, handler);
+        }
+    }
+
+    private static Point Center(FrameworkElement element)
+    {
+        var rect = Host.ScreenRect(element);
+        if (rect.Width < 4 || rect.Height < 4)
+            throw new InvalidOperationException("Element has no clickable rect: " + element.GetType().Name + " " + rect);
+        return new Point(rect.X + rect.Width / 2, rect.Y + rect.Height / 2);
+    }
+
+    private static async Task Reveal(Host host, double top)
+    {
+        var current = (Rect)(Host.Reactive(host.Vm, "Viewport")
+            ?? throw new InvalidOperationException("Viewport"));
+        Host.SetReactive(
+            host.Vm,
+            "Viewport",
+            new Rect(new Point(current.X, top), current.Size));
+        await Task.Delay(450);
+    }
+
+    private static async Task Run(Window window)
+    {
+        DirectDisplay? display = null;
+        FolderMenuLease? menuLease = null;
+        FolderOwnerAdorner? adorner = null;
+        FolderToggleInputLease? toggleLease = null;
+        LayerLabelInputRouter? labelRouter = null;
+        AdornerLayer? adornerLayer = null;
+        try
+        {
+            window.WindowState = WindowState.Normal;
+            window.Left = 0;
+            window.Top = 0;
+            window.Width = 1100;
+            window.Height = 720;
+            await Task.Delay(900);
+
+            var view = Host.Elements(window)
+                .Where(x => x.GetType().Name == "TimelineView" && x.IsVisible)
+                .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+                .First();
+
+            var vm = view.DataContext as TimelineViewModel
+                ?? throw new InvalidOperationException("TimelineViewModel missing.");
+            var timeline = Host.Get(vm, "Timeline") as Timeline
+                ?? vm.GetType().GetField("timeline", Host.Flags)?.GetValue(vm) as Timeline
+                ?? throw new InvalidOperationException("Timeline missing.");
+            var scroll = Host.Elements(view).OfType<ScrollViewer>()
+                .Where(x => x.IsVisible && x.ActualHeight > 50)
+                .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+                .First();
+            var host = new Host(
+                window,
+                timeline,
+                vm,
+                view,
+                scroll.Content as FrameworkElement ?? throw new InvalidOperationException("Timeline content missing."),
+                scroll);
+
+            host.Activate();
+            Native.Release();
+            var character = new Character { Name = "CNWL_P4_UI" };
+            for (var layer = 0; layer <= 8; layer++)
+            {
+                var item = new VoiceItem(character)
+                {
+                    Frame = 20,
+                    Layer = layer,
+                    Length = 60,
+                    Serif = "L" + layer,
+                    Remark = "CNWL_P4_L" + layer
+                };
+                if (!timeline.TryAddItems([item], item.Frame, item.Layer))
+                    throw new InvalidOperationException("Fixture add L" + layer);
+            }
+            timeline.SelectedItems = ImmutableList<IItem>.Empty;
+            await Task.Delay(700);
+
+            var labels = FindLabels(window, timeline);
+            Fact("labels_type", labels.GetType().FullName);
+            Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
+
+            var layerHeight = YukkuriMovieMaker.Settings.YMMSettings.Default.LayerHeight;
+            await Reveal(host, 6 * layerHeight);
+
+            var contextOwner = FindLayerContextOwner(labels, 6);
+            var nativeMenu = contextOwner.ContextMenu
+                ?? throw new InvalidOperationException("Layer 6 ContextMenu missing.");
+            Fact("layer6_context_owner", contextOwner.GetType().FullName);
+            Fact("layer6_context_menu_type", nativeMenu.GetType().FullName);
+
+            // Control: before folding, the real YMM4 row opens its own native
+            // ContextMenu through an OS right-click.
+            var identityMenuPoint = await FindContextMenuPoint(labels, 6, nativeMenu);
+            Fact("layer6_identity_menu_point", identityMenuPoint);
+            Check("identity_native_context_menu", identityMenuPoint.X >= 0);
+
+            display = new DirectDisplay(host, Log);
+            var span = new CollapsedSpan(2, 5);
+            display.SetSpans([span]);
+            await Task.Delay(700);
+            display.ThrowIfFailed();
+            Check("fixture_folded", display.Layout.IsHidden(3) && !display.Layout.IsHidden(2));
+
+            await Reveal(host, 0);
+
+            // The label views are visually compacted by DirectDisplay. Route only
+            // the label-column right-click Y coordinate back through FoldMap while
+            // keeping YMM4's existing ContextMenu instance/commands.
+            labelRouter = new LayerLabelInputRouter(window, labels, display);
+
+            var foldedContextOwner = FindLayerContextOwner(labels, 6);
+            var foldedMenu = foldedContextOwner.ContextMenu
+                ?? throw new InvalidOperationException("Folded layer 6 ContextMenu missing.");
+            Fact("layer6_folded_context_owner", foldedContextOwner.GetType().FullName);
+            Fact("layer6_context_recreated", !ReferenceEquals(foldedContextOwner, contextOwner));
+            Fact("layer6_menu_recreated", !ReferenceEquals(foldedMenu, nativeMenu));
+
+            var foldedRow6 = FindLayerElement(labels, 6);
+            var foldedRect6 = Host.ScreenRect(foldedRow6);
+            var nativePoint = new Point(
+                Math.Max(foldedRect6.Left + 4, Math.Min(foldedRect6.Right - 4, identityMenuPoint.X)),
+                foldedRect6.Y + foldedRect6.Height / 2);
+            Fact("layer6_folded_menu_point", nativePoint);
+
+            DependencyObject? baselineSource = null;
+            var baselineLeftDown = 0;
+            MouseButtonEventHandler windowInputObserver = (_, e) =>
+            {
+                if (e.ChangedButton != MouseButton.Left)
+                    return;
+                baselineLeftDown++;
+                baselineSource = e.OriginalSource as DependencyObject;
+            };
+            window.AddHandler(Mouse.PreviewMouseDownEvent, windowInputObserver, true);
+            await Native.Click(nativePoint);
+            window.RemoveHandler(Mouse.PreviewMouseDownEvent, windowInputObserver);
+            Check("baseline_native_layer_input_observed",
+                baselineLeftDown == 1
+                && baselineSource is not null);
+            Fact("baseline_input_source", baselineSource?.GetType().FullName);
+
+            adornerLayer = AdornerLayer.GetAdornerLayer(labels)
+                ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
+            adorner = new FolderOwnerAdorner(labels, display, span);
+            adornerLayer.Add(adorner);
+            toggleLease = new FolderToggleInputLease(window, labels, display, span, adorner);
+            await Task.Delay(500);
+            Check("adorner_attached", adornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
+            Check("adorner_input_transparent", !adorner.IsHitTestVisible);
+            var toggleRect = adorner.ToggleRect;
+            var togglePoint = labels.PointToScreen(new Point(
+                toggleRect.X + toggleRect.Width / 2,
+                toggleRect.Y + toggleRect.Height / 2));
+            Check("toggle_on_screen", Host.ScreenRect(labels).Contains(togglePoint));
+
+            await Native.Click(togglePoint);
+            await Task.Delay(500);
+            display.ThrowIfFailed();
+            Check("native_toggle_expands", toggleLease.Clicks == 1 && !display.Layout.IsHidden(3));
+
+            await Native.Click(togglePoint);
+            await Task.Delay(500);
+            display.ThrowIfFailed();
+            Check("native_toggle_collapses", toggleLease.Clicks == 2 && display.Layout.IsHidden(3));
+
+            DependencyObject? postOverlaySource = null;
+            var postOverlayLeftDown = 0;
+            MouseButtonEventHandler postOverlayObserver = (_, e) =>
+            {
+                if (e.ChangedButton != MouseButton.Left)
+                    return;
+                postOverlayLeftDown++;
+                postOverlaySource = e.OriginalSource as DependencyObject;
+            };
+            window.AddHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver, true);
+            await Native.Click(nativePoint);
+            window.RemoveHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver);
+            Check("outside_overlay_preserves_native_layer_click",
+                postOverlayLeftDown == 1
+                && postOverlaySource is not null
+                && baselineSource is not null
+                && postOverlaySource.GetType() == baselineSource.GetType());
+            Fact("post_overlay_input_source", postOverlaySource?.GetType().FullName);
+
+            // Collapse/expand can recycle the realized label row again. Bind the
+            // menu lease to the current row immediately before the right-click.
+            var activeContextOwner = FindLayerContextOwner(labels, 6);
+            var activeMenu = activeContextOwner.ContextMenu
+                ?? throw new InvalidOperationException("Active folded layer 6 ContextMenu missing.");
+            Fact("layer6_menu_recreated_after_toggle", !ReferenceEquals(activeMenu, foldedMenu));
+
+            menuLease = new FolderMenuLease(activeMenu, 6);
+            await Native.Click(nativePoint, right: true);
+            await Task.Delay(500);
+            Check("context_open_observed", menuLease.Openings == 1 && menuLease.LastLayer == 6);
+            Check("label_right_map_exact",
+                labelRouter.RightMaps == 1
+                && labelRouter.LastLogicalLayer == 6
+                && ReferenceEquals(labelRouter.LastMenu, activeMenu));
+            Check("native_menu_preserved_and_extended",
+                menuLease.LastMenu is { IsOpen: true }
+                && menuLease.LastMenu.Items.Count >= menuLease.LastOriginalCount + 2
+                && menuLease.LastItem is not null);
+
+            if (menuLease.LastItem is null)
+                throw new InvalidOperationException("Injected menu item missing.");
+            await Native.Click(Center(menuLease.LastItem));
+            await Task.Delay(450);
+            Check("native_menu_action_click", menuLease.Clicks == 1);
+            Check("menu_cleanup_after_close",
+                menuLease.LastMenu is not null
+                && !menuLease.LastMenu.Items.OfType<FrameworkElement>()
+                    .Any(x => Equals(x.Tag, "CNWL.P4.Menu")));
+
+            menuLease.Dispose();
+            menuLease = null;
+            toggleLease.Dispose();
+            toggleLease = null;
+            labelRouter.Dispose();
+            labelRouter = null;
+            adornerLayer.Remove(adorner);
+            adorner = null;
+            await Task.Delay(250);
+            Check("adorner_detached", adornerLayer.GetAdorners(labels)?.OfType<FolderOwnerAdorner>().Any() != true);
+            Check("no_display_failure_or_reentry", display.Failure is null && display.Reentries == 0);
+            Check("no_harmony_loaded", !AppDomain.CurrentDomain.GetAssemblies()
+                .Any(x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
+
+            display.Dispose();
+            Check("display_subscriptions_released", display.SubscriptionCount == 0);
+            display = null;
+        }
+        catch (Exception ex)
+        {
+            Fail(ex);
+        }
+        finally
+        {
+            try
+            {
+                menuLease?.Dispose();
+                toggleLease?.Dispose();
+                labelRouter?.Dispose();
+                if (adorner is not null && adornerLayer is not null)
+                    adornerLayer.Remove(adorner);
+                display?.Dispose();
+                Native.Release();
+            }
+            catch (Exception ex)
+            {
+                Fail(ex);
+            }
+            Finish();
+        }
+    }
+}
