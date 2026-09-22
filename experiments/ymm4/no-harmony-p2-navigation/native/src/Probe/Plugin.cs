@@ -240,6 +240,40 @@ internal static class Probe
             Check("keyboard_up_roundtrips", Math.Abs(keyScrollUp - keyScrollStart) < 1);
             Check("keyboard_layer_scroll_preserves_fold_state", collapsed.SequenceEqual(Baseline));
             Check("keyboard_layer_scroll_preserves_item_state", State(timeline) == original);
+
+            // Cross the body of the outer collapsed folder. Visual row 1 is
+            // logical L1 (folder owner); visual row 2 is logical L11.
+            var boundaryStart = display.Height;
+            scroll.ScrollToVerticalOffset(boundaryStart);
+            await Task.Delay(250);
+            Check("boundary_visual_row_maps_owner", display.Layout.DisplayRowToLogical(1) == 1);
+            Check("boundary_next_visual_row_skips_hidden_body", display.Layout.DisplayRowToLogical(2) == 11);
+            vm.ScrollToLowerLayer();
+            await Task.Delay(350);
+            var methodBoundaryDown = scroll.VerticalOffset;
+            vm.ScrollToHigherLayer();
+            await Task.Delay(350);
+            var methodBoundaryUp = scroll.VerticalOffset;
+            Fact("method_boundary_start", boundaryStart);
+            Fact("method_boundary_down", methodBoundaryDown);
+            Fact("method_boundary_up", methodBoundaryUp);
+            Check("method_lower_crosses_fold_by_one_display_row", Math.Abs(methodBoundaryDown - boundaryStart - display.Height) < 1);
+            Check("method_higher_crosses_fold_back", Math.Abs(methodBoundaryUp - boundaryStart) < 1);
+
+            scroll.ScrollToVerticalOffset(boundaryStart);
+            await Task.Delay(250);
+            await Native.Key(0x28); // VK_DOWN across L2..L10 folded body
+            var keyBoundaryDown = scroll.VerticalOffset;
+            await Native.Key(0x26); // VK_UP back to owner row
+            var keyBoundaryUp = scroll.VerticalOffset;
+            Fact("keyboard_boundary_start", boundaryStart);
+            Fact("keyboard_boundary_down", keyBoundaryDown);
+            Fact("keyboard_boundary_up", keyBoundaryUp);
+            Check("keyboard_down_crosses_fold_by_one_display_row", Math.Abs(keyBoundaryDown - boundaryStart - display.Height) < 1);
+            Check("keyboard_up_crosses_fold_back", Math.Abs(keyBoundaryUp - boundaryStart) < 1);
+            Check("boundary_navigation_preserves_fold_state", collapsed.SequenceEqual(Baseline));
+            Check("boundary_navigation_preserves_item_state", State(timeline) == original);
+
             timeline.CurrentFrame = keyFrameBefore;
             await Reset();
 
