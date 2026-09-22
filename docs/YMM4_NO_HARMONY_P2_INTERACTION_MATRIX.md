@@ -1,6 +1,6 @@
 # YMM4 no-Harmony Full — P2 Interaction Matrix v0.1
 
-Status: **primary-host interaction matrix; secondary-host V2 freeze pending**.
+Status: **COMPLETE / FROZEN for P2 interaction mechanisms on both pinned hosts**.
 
 This matrix consolidates existing P0/P1 evidence with the new P2 navigation evidence so P2 does not re-prove already-frozen mechanisms.
 
@@ -61,13 +61,31 @@ Unsupported bare calls fail visually, not structurally: they do not mutate item 
 
 ## P2 exit interpretation
 
-The generic interaction mechanisms are now covered without a Cartesian item-type matrix.
+The generic interaction mechanisms are covered without a Cartesian item-type matrix.
 
-Before P2 freeze:
+### Navigation V2 acceptance
 
-- run the new P2 navigation acceptance on YMM4 4.55.1.1 as the secondary pinned host;
-- preserve the already-green 4.56.1.0 result;
-- if the secondary host agrees, freeze the navigation classifications above;
-- do not replay P0/P1 golden suites because their shared mechanisms were not changed.
+Primary host:
 
-If a future host route reveals a genuinely new interaction mechanism, reopen only that row.
+- YMM4 4.56.1.0 Lite;
+- tested runtime source `0d2fecfd1d73a79c17a40dc9f79b647ef662faaa`;
+- run `35704217666`;
+- native job `106669362224`;
+- marker `PASS_P2_NAVIGATION`;
+- artifact `10684021588`;
+- workflow digest `sha256:a3c7091d6c2590aa417a31ba0c33eb3482961081b121bdac0b4375e2998d8017`.
+
+Secondary host:
+
+- YMM4 4.55.1.1 Lite;
+- V2 run `35704912554`;
+- native job `106671399257`;
+- marker `PASS_P2_NAVIGATION`;
+- artifact `10683603059`;
+- workflow digest `sha256:683444cb772b4d45f9d82ddd443a014f7240d43b1c11ae7567b96c075543a887`.
+
+Both hosts agree on the supported/unsupported navigation classification. P0/P1 golden suites were not replayed because their shared mechanisms were not changed.
+
+**P2 Host Interaction Coverage is COMPLETE / FROZEN.**
+
+A future host route reopens only the affected matrix row when it introduces a genuinely new interaction mechanism. Special/grouped/multi-layer item compatibility remains P5 unless it exposes such a mechanism.
