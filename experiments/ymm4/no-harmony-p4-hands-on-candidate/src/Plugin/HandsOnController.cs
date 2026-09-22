@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyState;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.UndoRedo;
@@ -72,6 +73,459 @@ internal sealed class HandsOnController : IDisposable
         RefreshFromDocument();
         ScheduleS0IntegrationSmoke();
         ScheduleS1IntegrationSmoke();
+        ScheduleS2MetadataSurfaceSmoke();
+        ScheduleS2IntegrationSmoke();
+    }
+
+    private void ScheduleS2IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S2_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS2IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS2IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "S2 integration smoke must start resource-free.");
+
+            undo.Record();
+
+            var key = timeline.ID.ToString("D");
+            var folderId = Guid.Parse(
+                "22222222-3333-4444-5555-666666666666");
+
+            var core = FolderDocumentRules.ReplaceTimeline(
+                FolderDocument.Empty,
+                key,
+                [
+                    new PersistedFolder
+                    {
+                        Id = folderId,
+                        Start = 1,
+                        End = 2,
+                        Name = "S2 Smoke",
+                        IsCollapsed = false
+                    }
+                ]);
+
+            state.ReplaceState(new FolderSessionDocument
+            {
+                Core = core
+            });
+
+            var originalVisible1 =
+                timeline.LayerSettings.IsVisibles[1];
+            var originalVisible2 =
+                timeline.LayerSettings.IsVisibles[2];
+            var originalColor1 =
+                timeline.LayerSettings.Colors[1];
+            var originalColor2 =
+                timeline.LayerSettings.Colors[2];
+
+            commands.SetColor(folderId, "#FF4F7FE0");
+            await Task.Delay(200);
+            AssertS2Option(
+                "after_set_color",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_color_undo",
+                folderId,
+                null,
+                hidden: false,
+                restoreCount: 0);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_color_redo",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            commands.ApplyColorToLayers(folderId);
+            await Task.Delay(200);
+
+            var blue = Color.FromArgb(255, 79, 127, 224);
+            if (timeline.LayerSettings.Colors[1] != blue
+                || timeline.LayerSettings.Colors[2] != blue)
+            {
+                throw new InvalidOperationException(
+                    "ApplyColorToLayers did not update both native layers.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            if (timeline.LayerSettings.Colors[1] != originalColor1
+                || timeline.LayerSettings.Colors[2] != originalColor2)
+            {
+                throw new InvalidOperationException(
+                    "Native layer colors did not restore on Undo.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            if (timeline.LayerSettings.Colors[1] != blue
+                || timeline.LayerSettings.Colors[2] != blue)
+            {
+                throw new InvalidOperationException(
+                    "Native layer colors did not restore on Redo.");
+            }
+
+            commands.SetHidden(folderId, true);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_hide",
+                folderId,
+                "#FF4F7FE0",
+                hidden: true,
+                restoreCount: 2);
+
+            if (timeline.LayerSettings.IsVisibles[1]
+                || timeline.LayerSettings.IsVisibles[2])
+            {
+                throw new InvalidOperationException(
+                    "Folder hide did not hide both native layers.");
+            }
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_hide_undo",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            if (timeline.LayerSettings.IsVisibles[1] != originalVisible1
+                || timeline.LayerSettings.IsVisibles[2] != originalVisible2)
+            {
+                throw new InvalidOperationException(
+                    "Folder hide Undo did not restore native visibility.");
+            }
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_hide_redo",
+                folderId,
+                "#FF4F7FE0",
+                hidden: true,
+                restoreCount: 2);
+
+            if (timeline.LayerSettings.IsVisibles[1]
+                || timeline.LayerSettings.IsVisibles[2])
+            {
+                throw new InvalidOperationException(
+                    "Folder hide Redo did not re-hide native layers.");
+            }
+
+            commands.SetHidden(folderId, false);
+            await Task.Delay(250);
+            AssertS2Option(
+                "after_show",
+                folderId,
+                "#FF4F7FE0",
+                hidden: false,
+                restoreCount: 0);
+
+            if (timeline.LayerSettings.IsVisibles[1] != originalVisible1
+                || timeline.LayerSettings.IsVisibles[2] != originalVisible2)
+            {
+                throw new InvalidOperationException(
+                    "Folder show did not restore original native visibility.");
+            }
+
+            var saved = state.SaveRaw();
+            var roundtrip = FolderSessionDocumentCodec.Load(saved);
+            if (!roundtrip.Success
+                || roundtrip.Status != FolderSessionLoadStatus.LoadedV2
+                || roundtrip.Document is null
+                || FolderSessionDocumentRules.FindOption(
+                    roundtrip.Document,
+                    key,
+                    folderId)?.Color != "#FF4F7FE0")
+            {
+                throw new InvalidOperationException(
+                    "S2 state did not roundtrip as schema v2.");
+            }
+
+            WriteS2IntegrationResult(
+                "PASS_S2_INTEGRATION\n" +
+                $"timeline={key}\n" +
+                "schema_v2_roundtrip=true\n" +
+                "folder_color_undo_redo=true\n" +
+                "native_color_undo_redo=true\n" +
+                "hidden_undo_redo=true\n" +
+                "visibility_restore=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic("s2_integration_smoke_error=" + ex);
+            WriteS2IntegrationResult(
+                "FAIL_S2_INTEGRATION\n" + ex + "\n");
+        }
+    }
+
+    private void AssertS2Option(
+        string phase,
+        Guid folderId,
+        string? color,
+        bool hidden,
+        int restoreCount)
+    {
+        var key = timeline.ID.ToString("D");
+        var option = FolderSessionDocumentRules.FindOption(
+            state.State,
+            key,
+            folderId);
+
+        if (color is null && !hidden)
+        {
+            if (option is not null)
+            {
+                throw new InvalidOperationException(
+                    $"{phase}: expected default/no option.");
+            }
+        }
+        else if (option is null
+            || !string.Equals(
+                option.Color,
+                color,
+                StringComparison.OrdinalIgnoreCase)
+            || option.Hidden != hidden)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: option mismatch.");
+        }
+
+        var count = state.State.VisibilityRestore.Count(
+            x => string.Equals(
+                x.TimelineKey,
+                key,
+                StringComparison.Ordinal));
+
+        if (count != restoreCount)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: restore count {count} != {restoreCount}.");
+        }
+
+        HandsOnRuntime.Diagnostic(
+            $"s2_state phase={phase} color={option?.Color ?? "<null>"} " +
+            $"hidden={option?.Hidden ?? false} restore={count}");
+    }
+
+    private static void WriteS2IntegrationResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "s2-integration-result.txt"),
+            text);
+    }
+
+    private void ScheduleS2MetadataSurfaceSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S2_METADATA_SURFACE_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS2MetadataSurfaceSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS2MetadataSurfaceSmokeAsync()
+    {
+        EventHandler? recorded = null;
+        EventHandler? undone = null;
+        EventHandler? redone = null;
+
+        var recordedCount = 0;
+        var undoCount = 0;
+        var redoCount = 0;
+
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+            {
+                throw new InvalidOperationException(
+                    "S2 metadata surface smoke must start resource-free.");
+            }
+
+            // Flush any host initialization unit before observing setter history.
+            undo.Record();
+
+            recorded = (_, _) => recordedCount++;
+            undone = (_, _) => undoCount++;
+            redone = (_, _) => redoCount++;
+            undo.Recorded += recorded;
+            undo.Undoed += undone;
+            undo.Redoed += redone;
+
+            var visibilityLayer = 1;
+            var originalVisible =
+                timeline.LayerSettings.IsVisibles[visibilityLayer];
+            var changedVisible = !originalVisible;
+
+            timeline.LayerSettings.IsVisibles[visibilityLayer] =
+                changedVisible;
+            var visibilityAfterSetter =
+                timeline.LayerSettings.IsVisibles[visibilityLayer];
+
+            var recordedBeforeVisibilityCommit = recordedCount;
+            undo.Record();
+            var visibilityRecordDelta =
+                recordedCount - recordedBeforeVisibilityCommit;
+
+            var visibilityUndoRestored = false;
+            var visibilityRedoRestored = false;
+
+            if (visibilityRecordDelta > 0)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+                visibilityUndoRestored =
+                    timeline.LayerSettings.IsVisibles[visibilityLayer]
+                    == originalVisible;
+
+                ExecuteHostCommand(CommandType.Redo, null);
+                await Task.Delay(250);
+                visibilityRedoRestored =
+                    timeline.LayerSettings.IsVisibles[visibilityLayer]
+                    == changedVisible;
+            }
+
+            // Return to the baseline before probing color.
+            if (visibilityRedoRestored)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+            }
+            else
+            {
+                timeline.LayerSettings.IsVisibles[visibilityLayer] =
+                    originalVisible;
+                undo.Record();
+            }
+
+            var colorLayer = 2;
+            var originalColor = timeline.LayerSettings.Colors[colorLayer];
+            var changedColor = Color.FromArgb(255, 79, 127, 224);
+
+            if (changedColor == originalColor)
+                changedColor = Color.FromArgb(255, 224, 90, 90);
+
+            timeline.LayerSettings.Colors[colorLayer] = changedColor;
+            var colorAfterSetter =
+                timeline.LayerSettings.Colors[colorLayer];
+
+            var recordedBeforeColorCommit = recordedCount;
+            undo.Record();
+            var colorRecordDelta =
+                recordedCount - recordedBeforeColorCommit;
+
+            var colorUndoRestored = false;
+            var colorRedoRestored = false;
+
+            if (colorRecordDelta > 0)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+                colorUndoRestored =
+                    timeline.LayerSettings.Colors[colorLayer]
+                    == originalColor;
+
+                ExecuteHostCommand(CommandType.Redo, null);
+                await Task.Delay(250);
+                colorRedoRestored =
+                    timeline.LayerSettings.Colors[colorLayer]
+                    == changedColor;
+            }
+
+            // Leave the disposable project at baseline.
+            if (colorRedoRestored)
+            {
+                ExecuteHostCommand(CommandType.Undo, null);
+                await Task.Delay(250);
+            }
+            else
+            {
+                timeline.LayerSettings.Colors[colorLayer] =
+                    originalColor;
+                undo.Record();
+            }
+
+            WriteS2MetadataSurfaceResult(
+                "PASS_S2_METADATA_SURFACE\n" +
+                $"visibility_setter_changed={visibilityAfterSetter == changedVisible}\n" +
+                $"visibility_record_delta={visibilityRecordDelta}\n" +
+                $"visibility_undo_restored={visibilityUndoRestored}\n" +
+                $"visibility_redo_restored={visibilityRedoRestored}\n" +
+                $"color_setter_changed={colorAfterSetter == changedColor}\n" +
+                $"color_record_delta={colorRecordDelta}\n" +
+                $"color_undo_restored={colorUndoRestored}\n" +
+                $"color_redo_restored={colorRedoRestored}\n" +
+                $"recorded_events={recordedCount}\n" +
+                $"undo_events={undoCount}\n" +
+                $"redo_events={redoCount}\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "s2_metadata_surface_smoke_error=" + ex);
+            WriteS2MetadataSurfaceResult(
+                "FAIL_S2_METADATA_SURFACE\n" + ex + "\n");
+        }
+        finally
+        {
+            if (recorded is not null)
+                undo.Recorded -= recorded;
+            if (undone is not null)
+                undo.Undoed -= undone;
+            if (redone is not null)
+                undo.Redoed -= redone;
+        }
+    }
+
+    private static void WriteS2MetadataSurfaceResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "s2-metadata-surface-result.txt"),
+            text);
     }
 
     private void ScheduleS1IntegrationSmoke()
@@ -463,7 +917,12 @@ internal sealed class HandsOnController : IDisposable
         if (folders.Length == 0)
             return;
 
-        adorner = new FolderOverlayAdorner(labels, display, folders);
+        adorner = new FolderOverlayAdorner(
+            labels,
+            display,
+            folders,
+            state.State,
+            timeline.ID.ToString("D"));
         adornerLayer.Add(adorner);
     }
 
@@ -694,6 +1153,58 @@ internal sealed class HandsOnController : IDisposable
 
             sub.Items.Add(new Separator());
 
+            var option = FolderSessionDocumentRules.FindOption(
+                state.State,
+                timeline.ID.ToString("D"),
+                folder.Id);
+
+            var hidden = option?.Hidden ?? false;
+            var hiddenItem = new MenuItem
+            {
+                Header = hidden ? "フォルダを表示" : "フォルダを非表示",
+                IsCheckable = true,
+                IsChecked = hidden
+            };
+            hiddenItem.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.SetHidden(folder.Id, !hidden));
+            sub.Items.Add(hiddenItem);
+
+            var colorMenu = new MenuItem { Header = "フォルダの色" };
+            foreach (var choice in FolderCommands.ColorChoices)
+            {
+                var colorItem = new MenuItem
+                {
+                    Header = choice.Name,
+                    IsCheckable = true,
+                    IsChecked = string.Equals(
+                        option?.Color,
+                        choice.Color,
+                        StringComparison.OrdinalIgnoreCase),
+                    Icon = CreateColorSwatch(choice.Color)
+                };
+
+                var capturedColor = choice.Color;
+                colorItem.Click += (_, _) =>
+                    RunFolderCommand(
+                        () => commands.SetColor(
+                            folder.Id,
+                            capturedColor));
+                colorMenu.Items.Add(colorItem);
+            }
+            sub.Items.Add(colorMenu);
+
+            var applyColor = new MenuItem
+            {
+                Header = "フォルダ色をYMM4レイヤー色へ適用"
+            };
+            applyColor.Click += (_, _) =>
+                RunFolderCommand(
+                    () => commands.ApplyColorToLayers(folder.Id));
+            sub.Items.Add(applyColor);
+
+            sub.Items.Add(new Separator());
+
             var ungroup = new MenuItem
             {
                 Header = "フォルダを解除（レイヤーは残す）"
@@ -704,6 +1215,38 @@ internal sealed class HandsOnController : IDisposable
 
             root.Items.Add(sub);
         }
+    }
+
+    private static FrameworkElement CreateColorSwatch(string? color)
+    {
+        var brush = color is null
+            ? Brushes.Transparent
+            : new SolidColorBrush(ParseArgbColor(color));
+
+        return new Border
+        {
+            Width = 14,
+            Height = 14,
+            BorderThickness = new Thickness(1),
+            BorderBrush = Brushes.Gray,
+            Background = brush
+        };
+    }
+
+    private static Color ParseArgbColor(string text)
+    {
+        var value = text.AsSpan();
+        if (value.Length != 9 || value[0] != '#')
+            throw new ArgumentException("Color must use #AARRGGBB format.");
+
+        static byte ParseByte(ReadOnlySpan<char> hex) =>
+            Convert.ToByte(hex.ToString(), 16);
+
+        return Color.FromArgb(
+            ParseByte(value.Slice(1, 2)),
+            ParseByte(value.Slice(3, 2)),
+            ParseByte(value.Slice(5, 2)),
+            ParseByte(value.Slice(7, 2)));
     }
 
     private void PromptRename(Guid folderId)
@@ -797,17 +1340,26 @@ internal sealed class HandsOnController : IDisposable
         private readonly VisualCollection children;
         private readonly DirectDisplay display;
         private readonly PersistedFolder[] folders;
+        private readonly IReadOnlyDictionary<Guid, FolderOptionState> options;
         private sealed record FolderHit(Rect Toggle, Rect Name);
         private readonly Dictionary<Guid, FolderHit> hitRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
             DirectDisplay display,
-            PersistedFolder[] folders)
+            PersistedFolder[] folders,
+            FolderSessionDocument session,
+            string timelineKey)
             : base(adornedElement)
         {
             this.display = display;
             this.folders = folders;
+            options = session.FolderOptions
+                .Where(x => string.Equals(
+                    x.TimelineKey,
+                    timelineKey,
+                    StringComparison.Ordinal))
+                .ToDictionary(x => x.FolderId);
             children = new VisualCollection(this) { canvas };
             IsHitTestVisible = false;
             Rebuild();
@@ -879,17 +1431,29 @@ internal sealed class HandsOnController : IDisposable
                         Math.Max(0, width - toggleWidth),
                         height));
 
+                options.TryGetValue(folder.Id, out var option);
+                var baseColor = option?.Color is { } text
+                    ? ParseArgbColor(text)
+                    : Color.FromRgb(78, 78, 78);
+                var tagColor = Color.FromArgb(
+                    option?.Hidden == true ? (byte)150 : (byte)215,
+                    baseColor.R,
+                    baseColor.G,
+                    baseColor.B);
+
                 var border = new Border
                 {
                     Width = width,
                     Height = height,
                     CornerRadius = new CornerRadius(3),
-                    Background = new SolidColorBrush(
-                        Color.FromArgb(215, 78, 78, 78)),
+                    Background = new SolidColorBrush(tagColor),
                     IsHitTestVisible = false,
                     Child = new TextBlock
                     {
-                        Text = (folder.IsCollapsed ? "▶ " : "▼ ") + folder.Name,
+                        Text =
+                            (folder.IsCollapsed ? "▶ " : "▼ ")
+                            + (option?.Hidden == true ? "[非表示] " : "")
+                            + folder.Name,
                         Foreground = Brushes.White,
                         FontSize = 10,
                         TextTrimming = TextTrimming.CharacterEllipsis,

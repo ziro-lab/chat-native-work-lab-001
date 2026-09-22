@@ -25,6 +25,8 @@
     <Compile Include="../../../no-harmony-track-c/src/Probe/FileDropAdapter.cs" Link="FileDropAdapter.cs" />
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
     <Compile Include="../../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
+    <Compile Include="../../../no-harmony-s2-state/src/FolderSessionDocument.cs" Link="FolderSessionDocument.cs" />
+    <Compile Include="../../../no-harmony-s2-state/src/FolderVisibilityRules.cs" Link="FolderVisibilityRules.cs" />
     <Compile Include="../../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
     <Compile Include="../../../no-harmony-p4-ux-policy/src/FolderUxCommands.cs" Link="FolderUxCommands.cs" />
   </ItemGroup>

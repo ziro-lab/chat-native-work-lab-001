@@ -1,4 +1,5 @@
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyState;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
@@ -10,9 +11,10 @@ internal sealed class FolderStateStore
 
     internal event EventHandler? Changed;
 
+    internal FolderSessionDocument State => session.State;
     internal FolderDocument Document => session.Document;
     internal bool IsRecoveryBlocked => session.IsRecoveryBlocked;
-    internal FolderDocumentLoadStatus LastLoadStatus => session.LastLoadStatus;
+    internal FolderSessionLoadStatus LastLoadStatus => session.LastLoadStatus;
     internal string? LastError => session.LastError;
 
     internal void LoadRaw(string? savedState)
@@ -25,7 +27,13 @@ internal sealed class FolderStateStore
 
     internal void ReplaceDocument(FolderDocument document)
     {
-        session.Replace(document);
+        session.ReplaceDocument(document);
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void ReplaceState(FolderSessionDocument state)
+    {
+        session.ReplaceState(state);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

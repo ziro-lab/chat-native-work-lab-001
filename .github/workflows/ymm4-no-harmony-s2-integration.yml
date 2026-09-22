@@ -1,0 +1,150 @@
+name: YMM4 no-Harmony S2 integration
+
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
+      - 'experiments/ymm4/no-harmony-s2-state/**'
+      - '.github/workflows/ymm4-no-harmony-s2-integration.yml'
+
+permissions: { contents: read }
+
+concurrency:
+  group: no-harmony-s2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '4.56.1.0'
+            sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+          - version: '4.55.1.1'
+            sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+    env:
+      HOST_VERSION: '${{ matrix.version }}'
+      HOST_HASH: '${{ matrix.sha256 }}'
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Acquire pinned host
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build candidate
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/plugin --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Candidate build failed'}
+          if(Get-ChildItem out/plugin -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){throw 'Unexpected Harmony dependency'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4NoHarmonyFolderHandsOn'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/plugin/Ymm4NoHarmonyFolderHandsOn.dll $d
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @(
+            "source_head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "host_version=$env:HOST_VERSION",
+            "candidate_sha256=$((Get-FileHash out/plugin/Ymm4NoHarmonyFolderHandsOn.dll -Algorithm SHA256).Hash)",
+            "run=$env:GITHUB_RUN_ID",
+            "level=S2-product-integration"
+          )|Set-Content out/evidence/manifest.txt
+
+      - name: Run S2 color / visibility integration smoke
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class S2IntegrationWindow {
+            public delegate bool Callback(IntPtr w, IntPtr p);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(Callback cb,IntPtr p);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr w);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr w,out uint pid);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr w,StringBuilder s,int n);
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr w,uint m,IntPtr wp,IntPtr lp);
+          }
+          '@
+
+          $diag=Join-Path $PWD 'out/evidence/smoke'
+          New-Item -ItemType Directory -Force $diag|Out-Null
+          $env:CNWL_P4_HANDS_ON_DIAG_DIR=$diag
+          $env:CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT='1'
+          $env:CNWL_P4_S2_INTEGRATION_SMOKE='1'
+
+          $p=Start-Process (Join-Path $env:YMM4_DIR 'YukkuriMovieMaker.exe') -WorkingDirectory $env:YMM4_DIR -PassThru
+          try {
+            $script:hostPid=$p.Id
+            $cb=[S2IntegrationWindow+Callback]{
+              param([IntPtr]$w,[IntPtr]$unused)
+              [uint32]$owner=0
+              [void][S2IntegrationWindow]::GetWindowThreadProcessId($w,[ref]$owner)
+              if($owner -eq $script:hostPid -and [S2IntegrationWindow]::IsWindowVisible($w)){
+                $s=New-Object System.Text.StringBuilder 1024
+                [void][S2IntegrationWindow]::GetWindowText($w,$s,1024)
+                $title=$s.ToString()
+                if($title -like '*Check for updates*' -or $title -like '*About YukkuriMovieMaker*'){
+                  [void][S2IntegrationWindow]::PostMessage($w,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
+                }elseif($title -eq 'Confirm' -or $title -eq 'Profile'){
+                  [void][S2IntegrationWindow]::PostMessage($w,0x0100,[IntPtr]0x0D,[IntPtr]::Zero)
+                  [void][S2IntegrationWindow]::PostMessage($w,0x0101,[IntPtr]0x0D,[IntPtr]::Zero)
+                }
+              }
+              return $true
+            }
+
+            $result=Join-Path $diag 's2-integration-result.txt'
+            $deadline=[DateTime]::UtcNow.AddSeconds(120)
+            while([DateTime]::UtcNow -lt $deadline -and -not $p.HasExited -and -not(Test-Path $result)){
+              [void][S2IntegrationWindow]::EnumWindows($cb,[IntPtr]::Zero)
+              Start-Sleep -Milliseconds 400
+            }
+
+            if(-not(Test-Path $result)){
+              if(Test-Path (Join-Path $diag 'runtime.log')){Get-Content (Join-Path $diag 'runtime.log') -Tail 220|Write-Host}
+              throw 'S2 integration smoke did not produce a result'
+            }
+
+            $content=Get-Content $result
+            $content|Write-Host
+            if($content[0] -ne 'PASS_S2_INTEGRATION'){
+              if(Test-Path (Join-Path $diag 'runtime.log')){Get-Content (Join-Path $diag 'runtime.log') -Tail 220|Write-Host}
+              throw 'S2 integration smoke failed'
+            }
+          } finally {
+            if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+            Remove-Item Env:CNWL_P4_HANDS_ON_DIAG_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT -ErrorAction SilentlyContinue
+            Remove-Item Env:CNWL_P4_S2_INTEGRATION_SMOKE -ErrorAction SilentlyContinue
+          }
+
+      - if: always()
+        name: Show evidence
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence/manifest.txt){Get-Content out/evidence/manifest.txt}
+          if(Test-Path out/evidence/smoke/s2-integration-result.txt){Get-Content out/evidence/smoke/s2-integration-result.txt}
+          if(Test-Path out/evidence/smoke/runtime.log){Get-Content out/evidence/smoke/runtime.log -Tail 220}
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-s2-evidence-${{ matrix.version }}
+          path: out/evidence/
+          retention-days: 30

@@ -1,5 +1,8 @@
 using System.Windows;
+using System.Windows.Media;
+using Ymm4NoHarmonyFolderRanges;
 using Ymm4NoHarmonyPersistence;
+using Ymm4NoHarmonyState;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Settings;
@@ -8,12 +11,24 @@ using YukkuriMovieMaker.UndoRedo;
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
 /// <summary>
-/// Shared product command surface. Timeline menu/tag interactions use this now;
-/// the later management panel can call the same typed methods without owning a
-/// second FolderDocument, Undo path, or host mutation implementation.
+/// Shared typed product command surface. S2 history snapshots always use the
+/// single FolderSessionDocument so Core and visual metadata cannot diverge.
 /// </summary>
 internal sealed class FolderCommands
 {
+    internal static readonly IReadOnlyList<(string Name, string? Color)> ColorChoices =
+    [
+        ("赤", "#FFE05A5A"),
+        ("橙", "#FFE89A3C"),
+        ("黄", "#FFD9C23A"),
+        ("緑", "#FF5CB85C"),
+        ("水", "#FF4CB5C9"),
+        ("青", "#FF4F7FE0"),
+        ("紫", "#FF9B6BD6"),
+        ("灰", "#FF8A8A8A"),
+        ("既定", null)
+    ];
+
     private readonly Window window;
     private readonly Host host;
     private readonly Timeline timeline;
@@ -52,7 +67,9 @@ internal sealed class FolderCommands
             candidateId);
 
     internal PersistedFolder? FindFolder(Guid folderId) =>
-        FolderDocumentRules.FindTimeline(state.Document, TimelineKey)
+        FolderDocumentRules.FindTimeline(
+            state.Document,
+            TimelineKey)
             ?.Folders.FirstOrDefault(x => x.Id == folderId);
 
     internal FolderCreationDecision CreateFromContext(
@@ -60,12 +77,8 @@ internal sealed class FolderCommands
         Guid folderId,
         string name)
     {
-        if (state.IsRecoveryBlocked)
-            throw new InvalidOperationException(
-                "Unreadable saved folder state is preserved; editing is blocked.");
+        EnsureEditable();
 
-        // Re-evaluate after the name prompt. The menu header is only a preview;
-        // the actual edit must use the current project/timeline state.
         var decision = EvaluateCreate(clickedLayer, folderId);
         if (!decision.Allowed
             || decision.Start is null
@@ -75,16 +88,38 @@ internal sealed class FolderCommands
                 $"Folder creation rejected: {decision.Status}");
         }
 
+        var existingCount =
+            FolderDocumentRules.FindTimeline(
+                state.Document,
+                TimelineKey)
+            ?.Folders.Count ?? 0;
+        var initialColor =
+            ColorChoices[existingCount % (ColorChoices.Count - 1)].Color;
+
         if (!decision.NeedsAdditionalLayer)
         {
-            CommitMetadata(
-                document => FolderUxCommands.CreateFolder(
-                    document,
-                    TimelineKey,
-                    decision,
-                    folderId,
-                    name),
+            CommitState(
+                current =>
+                {
+                    var core = FolderUxCommands.CreateFolder(
+                        current.Core,
+                        TimelineKey,
+                        decision,
+                        folderId,
+                        name);
+                    var withCore =
+                        FolderSessionDocumentRules.ReplaceCore(
+                            current,
+                            core);
+                    return FolderSessionDocumentRules.SetFolderOption(
+                        withCore,
+                        TimelineKey,
+                        folderId,
+                        initialColor,
+                        hidden: false);
+                },
                 "create");
+
             timeline.LayerSelection.Clear();
             return decision;
         }
@@ -100,19 +135,45 @@ internal sealed class FolderCommands
                 $"YMM4 cannot add the required empty layer at L{insertionPosition}.");
         }
 
-        var before = FolderDocumentRules.NormalizeAndValidate(state.Document);
-        var after = FolderUxCommands.CreateFolderWithInsertedLayer(
-            before,
+        var beforeState =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+
+        var afterCore = FolderUxCommands.CreateFolderWithInsertedLayer(
+            beforeState.Core,
             TimelineKey,
             decision,
             folderId,
             name);
 
+        var sourceTimeline = FolderDocumentRules.FindTimeline(
+            beforeState.Core,
+            TimelineKey);
+
+        var structuralPlan = FolderRangeTracker.Apply(
+            sourceTimeline?.Folders.Select(
+                x => new FolderRange(x.Id, x.Start, x.End))
+                ?? Array.Empty<FolderRange>(),
+            new InsertLayers(insertionPosition, 1));
+
+        var afterState =
+            FolderSessionDocumentRules.ReplaceCoreAfterStructuralEdit(
+                beforeState,
+                afterCore,
+                TimelineKey,
+                structuralPlan);
+
+        afterState = FolderSessionDocumentRules.SetFolderOption(
+            afterState,
+            TimelineKey,
+            folderId,
+            initialColor,
+            hidden: false);
+
         using var composite = structural.PrepareCompositeOverride(
             CommandType.AddLayer,
             insertionPosition,
-            before,
-            after);
+            beforeState,
+            afterState);
 
         if (!HandsOnHostAccess.TryExecuteTimelineCommand(
                 host,
@@ -134,11 +195,12 @@ internal sealed class FolderCommands
         log(
             $"folder_command create_with_insert start={decision.Start} " +
             $"end={decision.End} inserted={insertionPosition} id={folderId}");
+
         return decision;
     }
 
     internal void Rename(Guid folderId, string name) =>
-        CommitMetadata(
+        CommitCore(
             document => FolderUxCommands.RenameFolder(
                 document,
                 TimelineKey,
@@ -147,7 +209,7 @@ internal sealed class FolderCommands
             "rename");
 
     internal void ToggleCollapsed(Guid folderId) =>
-        CommitMetadata(
+        CommitCore(
             document => FolderUxCommands.ToggleCollapsed(
                 document,
                 TimelineKey,
@@ -155,20 +217,203 @@ internal sealed class FolderCommands
             "toggle");
 
     internal void SetAllCollapsed(bool collapsed) =>
-        CommitMetadata(
+        CommitCore(
             document => FolderUxCommands.SetAllCollapsed(
                 document,
                 TimelineKey,
                 collapsed),
             collapsed ? "collapse_all" : "expand_all");
 
-    internal void Ungroup(Guid folderId) =>
-        CommitMetadata(
-            document => FolderUxCommands.Ungroup(
-                document,
+    internal void Ungroup(Guid folderId)
+    {
+        EnsureEditable();
+
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var before =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+        var option = FolderSessionDocumentRules.FindOption(
+            before,
+            TimelineKey,
+            folderId);
+
+        var working = before;
+        IReadOnlyList<LayerVisibilityWrite> writes =
+            Array.Empty<LayerVisibilityWrite>();
+
+        if (option?.Hidden == true)
+        {
+            var visibility = Enumerable.Range(
+                    folder.Start,
+                    folder.End - folder.Start + 1)
+                .ToDictionary(
+                    layer => layer,
+                    layer => timeline.LayerSettings.IsVisibles[layer]);
+
+            var transition = FolderVisibilityRules.SetFolderHidden(
+                working,
                 TimelineKey,
-                folderId),
-            "ungroup");
+                folderId,
+                false,
+                visibility);
+
+            working = transition.State;
+            writes = transition.Writes;
+        }
+
+        var ungroupedCore = FolderUxCommands.Ungroup(
+            working.Core,
+            TimelineKey,
+            folderId);
+        var after = FolderSessionDocumentRules.ReplaceCore(
+            working,
+            ungroupedCore);
+
+        foreach (var write in writes)
+        {
+            if (timeline.LayerSettings.IsVisibles[write.Layer]
+                != write.Visible)
+            {
+                timeline.LayerSettings.IsVisibles[write.Layer] =
+                    write.Visible;
+            }
+        }
+
+        state.ReplaceState(after);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceState(before),
+            () => state.ReplaceState(after)));
+        undo.Record();
+
+        log(
+            $"folder_command ungroup id={folderId} " +
+            $"visibility_writes={writes.Count} timeline={TimelineKey}");
+    }
+
+    internal void SetColor(Guid folderId, string? color)
+    {
+        var option =
+            FolderSessionDocumentRules.FindOption(
+                state.State,
+                TimelineKey,
+                folderId);
+
+        CommitState(
+            current => FolderSessionDocumentRules.SetFolderOption(
+                current,
+                TimelineKey,
+                folderId,
+                color,
+                option?.Hidden ?? false),
+            "set_color");
+    }
+
+    internal void SetHidden(Guid folderId, bool hidden)
+    {
+        EnsureEditable();
+
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        var visibility = Enumerable.Range(
+                folder.Start,
+                folder.End - folder.Start + 1)
+            .ToDictionary(
+                layer => layer,
+                layer => timeline.LayerSettings.IsVisibles[layer]);
+
+        var before =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+        var transition = FolderVisibilityRules.SetFolderHidden(
+            before,
+            TimelineKey,
+            folderId,
+            hidden,
+            visibility);
+        var after =
+            FolderSessionDocumentRules.NormalizeAndValidate(
+                transition.State);
+
+        if (FolderSessionDocumentCodec.Save(before)
+            == FolderSessionDocumentCodec.Save(after))
+            return;
+
+        foreach (var write in transition.Writes)
+        {
+            if (timeline.LayerSettings.IsVisibles[write.Layer]
+                != write.Visible)
+            {
+                timeline.LayerSettings.IsVisibles[write.Layer] =
+                    write.Visible;
+            }
+        }
+
+        state.ReplaceState(after);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceState(before),
+            () => state.ReplaceState(after)));
+        undo.Record();
+
+        log(
+            $"folder_command hidden id={folderId} hidden={hidden} " +
+            $"writes={transition.Writes.Count} timeline={TimelineKey}");
+    }
+
+    internal void ApplyColorToLayers(Guid folderId)
+    {
+        EnsureEditable();
+
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var option = FolderSessionDocumentRules.FindOption(
+            state.State,
+            TimelineKey,
+            folderId);
+        var color = ParseColor(option?.Color);
+
+        var changed = false;
+        for (var layer = folder.Start; layer <= folder.End; layer++)
+        {
+            if (timeline.LayerSettings.Colors[layer] == color)
+                continue;
+
+            timeline.LayerSettings.Colors[layer] = color;
+            changed = true;
+        }
+
+        if (!changed)
+            return;
+
+        // LayerSettings color setters enlist their native Undo commands; the
+        // exact-host S2 surface probe proves one Record() commits them.
+        undo.Record();
+
+        log(
+            $"folder_command apply_color id={folderId} " +
+            $"range={folder.Start}-{folder.End} timeline={TimelineKey}");
+    }
+
+    private static Color ParseColor(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Colors.Transparent;
+
+        var value = text.AsSpan();
+        if (value.Length != 9 || value[0] != '#')
+            throw new ArgumentException("Color must use #AARRGGBB format.");
+
+        static byte ParseByte(ReadOnlySpan<char> hex) =>
+            Convert.ToByte(hex.ToString(), 16);
+
+        return Color.FromArgb(
+            ParseByte(value.Slice(1, 2)),
+            ParseByte(value.Slice(3, 2)),
+            ParseByte(value.Slice(5, 2)),
+            ParseByte(value.Slice(7, 2)));
+    }
 
     internal void SelectItems(Guid folderId)
     {
@@ -178,34 +423,56 @@ internal sealed class FolderCommands
 
         timeline.SelectItems(
             timeline.Items.Where(
-                item => folder.Start <= item.Layer && item.Layer <= folder.End));
+                item =>
+                    folder.Start <= item.Layer
+                    && item.Layer <= folder.End));
 
         log(
             $"folder_command select_items id={folderId} " +
             $"range={folder.Start}-{folder.End}");
     }
 
-    private void CommitMetadata(
+    private void CommitCore(
         Func<FolderDocument, FolderDocument> change,
+        string reason) =>
+        CommitState(
+            current => FolderSessionDocumentRules.ReplaceCore(
+                current,
+                FolderDocumentRules.NormalizeAndValidate(
+                    change(current.Core))),
+            reason);
+
+    private void CommitState(
+        Func<FolderSessionDocument, FolderSessionDocument> change,
         string reason)
     {
-        if (state.IsRecoveryBlocked)
-            throw new InvalidOperationException(
-                "Unreadable saved folder state is preserved; editing is blocked.");
+        EnsureEditable();
 
-        var before = state.Document;
-        var after = FolderDocumentRules.NormalizeAndValidate(change(before));
+        var before =
+            FolderSessionDocumentRules.NormalizeAndValidate(state.State);
+        var after =
+            FolderSessionDocumentRules.NormalizeAndValidate(change(before));
 
-        if (FolderDocumentCodec.Save(before) == FolderDocumentCodec.Save(after))
+        if (FolderSessionDocumentCodec.Save(before)
+            == FolderSessionDocumentCodec.Save(after))
             return;
 
-        state.ReplaceDocument(after);
+        state.ReplaceState(after);
         undo.AddCommand(new UndoRedoActionCommand(
-            () => state.ReplaceDocument(before),
-            () => state.ReplaceDocument(after)));
+            () => state.ReplaceState(before),
+            () => state.ReplaceState(after)));
         undo.Record();
 
         log(
             $"folder_command metadata reason={reason} timeline={TimelineKey}");
+    }
+
+    private void EnsureEditable()
+    {
+        if (state.IsRecoveryBlocked)
+        {
+            throw new InvalidOperationException(
+                "Unreadable saved folder state is preserved; editing is blocked.");
+        }
     }
 }
