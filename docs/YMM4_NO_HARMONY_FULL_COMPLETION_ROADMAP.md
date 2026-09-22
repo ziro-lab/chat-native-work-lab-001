@@ -671,7 +671,8 @@ Current P4 evidence:
 - P4.2 host-independent UX commands — 27/27 PASS;
 - P4.3 minimum integrated workflow — 24/24 named assertions PASS on YMM4 4.56.1.0;
 - P4.4 installable hands-on candidate — startup-smoked;
-- P4.5 real `.ymme` install — GREEN on YMM4 4.56.1.0.
+- P4.5 real `.ymme` install — GREEN on YMM4 4.56.1.0;
+- S0 product integration reconciliation — dual-host GREEN on YMM4 4.56.1.0 / 4.55.1.1; freeze record: `docs/YMM4_NO_HARMONY_S0_INTEGRATION_RECONCILIATION.md`.
 
 ### Product direction
 
@@ -691,13 +692,22 @@ Required principles:
 
 ### Active implementation sequence
 
-#### S0 — integration reconciliation
+#### S0 — integration reconciliation — COMPLETE / FROZEN
 
-Before adding convenience features:
+Freeze record:
+- `docs/YMM4_NO_HARMONY_S0_INTEGRATION_RECONCILIATION.md`
 
-- compare the installable candidate with frozen P1/P2/P3 mechanisms;
-- connect any proven components that are not actually wired into the candidate;
-- do not reinterpret Lab PASS as product integration PASS.
+Completed:
+
+- compared the installable candidate with the frozen P1/P2/P3 mechanisms;
+- connected standard structural FolderRangeTracker + same-transaction Undo synchronization to the persisted FolderDocument;
+- connected the proven folded input/native-drag and real FileDrop mapping routes;
+- verified Add -> Undo -> Redo against the **product candidate**, not only the Lab probes;
+- passed the S0 product-integration gate on both pinned hosts;
+- recorded P2 automatic reveal as an intentional UX/history-policy boundary rather than silently persisting view-only reveal behavior;
+- kept StructuralDeltaDetector as the classifier boundary for structural routes that actually require post-hoc delta classification, without creating a second structural owner beside the proven standard-command path.
+
+S0 does not reopen the P0-P3 Core contracts.
 
 #### S1 — common command surface + low-risk parity
 
@@ -875,8 +885,8 @@ P0 Core Spine                 DONE
   -> P4.3 minimum workflow     DONE (V1 primary)
   -> P4.4 installable candidate DONE
   -> P4.5 real .ymme install    DONE
-  -> S0 integration reconcile  NEXT
-  -> S1 common commands / low-risk parity
+  -> S0 integration reconcile  DONE
+  -> S1 common commands / low-risk parity NEXT
   -> S2 color / visibility / persistence extension
   -> S3 structural convenience / Group Control
   -> S4 management panel parity

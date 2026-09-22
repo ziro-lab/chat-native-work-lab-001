@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -23,6 +24,9 @@ internal sealed class HandsOnController : IDisposable
     private readonly UndoRedoManager undo;
     private readonly FolderStateStore state;
     private readonly DirectDisplay display;
+    private readonly StructuralFolderBridge structural;
+    private readonly InputMapAdapter input;
+    private readonly FileDropMapAdapter fileDrop;
     private readonly AdornerLayer adornerLayer;
     private readonly MouseButtonEventHandler mouseHandler;
 
@@ -44,12 +48,217 @@ internal sealed class HandsOnController : IDisposable
         timeline = host.Timeline;
 
         display = new DirectDisplay(host, HandsOnRuntime.Diagnostic);
+        structural = new StructuralFolderBridge(
+            window,
+            timeline,
+            undo,
+            state,
+            HandsOnRuntime.Diagnostic);
+        input = new InputMapAdapter(host, display, HandsOnRuntime.Diagnostic);
+        fileDrop = new FileDropMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         adornerLayer = AdornerLayer.GetAdornerLayer(labels)
             ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
 
         mouseHandler = OnPreviewMouseDown;
         window.AddHandler(Mouse.PreviewMouseDownEvent, mouseHandler, true);
         RefreshFromDocument();
+        ScheduleS0IntegrationSmoke();
+    }
+
+    private void ScheduleS0IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S0_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS0IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS0IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+            {
+                throw new InvalidOperationException(
+                    "S0 structural smoke must start from a resource-free Timeline.");
+            }
+
+            var baselineSettingsCount = timeline.LayerSettings.Items.Count;
+
+            // Match the frozen P1 native gate: establish a clean history boundary
+            // before measuring the host-owned structural command.
+            undo.Record();
+
+            var key = timeline.ID.ToString("D");
+            var folderId = Guid.Parse("10101010-2020-3030-4040-505050505050");
+            state.ReplaceDocument(FolderDocumentRules.ReplaceTimeline(
+                state.Document,
+                key,
+                [
+                    new PersistedFolder
+                    {
+                        Id = folderId,
+                        Start = 1,
+                        End = 2,
+                        Name = "S0 Smoke",
+                        IsCollapsed = true
+                    }
+                ]));
+
+            await Task.Delay(350);
+            ExecuteHostCommand(CommandType.AddLayer, 2);
+            await Task.Delay(500);
+
+            AssertS0State(
+                "after_add",
+                expectedStart: 1,
+                expectedEnd: 3,
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            if (structural.PendingEdits != 1)
+                throw new InvalidOperationException(
+                    $"Expected one pending structural edit, got {structural.PendingEdits}.");
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            AssertS0State(
+                "after_undo",
+                expectedStart: 1,
+                expectedEnd: 2,
+                expectedSettingsCount: baselineSettingsCount);
+
+            if (structural.UndoCallbacks != 1)
+                throw new InvalidOperationException(
+                    $"Expected one folder Undo callback, got {structural.UndoCallbacks}.");
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            AssertS0State(
+                "after_redo",
+                expectedStart: 1,
+                expectedEnd: 3,
+                expectedSettingsCount: baselineSettingsCount + 1);
+
+            if (structural.RedoCallbacks != 1)
+                throw new InvalidOperationException(
+                    $"Expected one folder Redo callback, got {structural.RedoCallbacks}.");
+
+            WriteS0Result(
+                "PASS_S0_INTEGRATION\n" +
+                $"timeline={key}\n" +
+                $"baseline_settings={baselineSettingsCount}\n" +
+                $"after_redo_settings={timeline.LayerSettings.Items.Count}\n" +
+                $"pending={structural.PendingEdits}\n" +
+                $"undo_callbacks={structural.UndoCallbacks}\n" +
+                $"redo_callbacks={structural.RedoCallbacks}\n" +
+                "folded_input_attached=true\n" +
+                "filedrop_attached=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic("s0_integration_smoke_error=" + ex);
+            WriteS0Result("FAIL_S0_INTEGRATION\n" + ex + "\n");
+        }
+    }
+
+    private void AssertS0State(
+        string phase,
+        int expectedStart,
+        int expectedEnd,
+        int expectedSettingsCount)
+    {
+        var key = timeline.ID.ToString("D");
+        var folder = FolderDocumentRules.FindTimeline(state.Document, key)
+            ?.Folders.SingleOrDefault();
+
+        if (folder is null
+            || folder.Start != expectedStart
+            || folder.End != expectedEnd)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: folder range mismatch: " +
+                (folder is null ? "<null>" : $"{folder.Start}-{folder.End}"));
+        }
+
+        var settingsCount = timeline.LayerSettings.Items.Count;
+        if (settingsCount != expectedSettingsCount)
+        {
+            throw new InvalidOperationException(
+                $"{phase}: LayerSettings count mismatch: " +
+                $"{settingsCount} != {expectedSettingsCount}");
+        }
+
+        display.ThrowIfFailed();
+        HandsOnRuntime.Diagnostic(
+            $"s0_state phase={phase} folder={folder.Start}-{folder.End} " +
+            $"layer_settings={settingsCount}");
+    }
+
+    private void ExecuteHostCommand(CommandType type, object? parameter)
+    {
+        ICommand command = CommandSettings.Default[type]
+            ?? throw new InvalidOperationException("Command missing: " + type);
+
+        var targets = new List<IInputElement>();
+        if (Keyboard.FocusedElement is IInputElement focused)
+            targets.Add(focused);
+        targets.Add(host.Source);
+        targets.Add(host.View);
+        targets.Add(window);
+
+        foreach (var target in targets)
+        {
+            if (command is RoutedCommand routed)
+            {
+                bool can;
+                try
+                {
+                    can = routed.CanExecute(parameter, target);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!can)
+                    continue;
+
+                routed.Execute(parameter, target);
+                HandsOnRuntime.Diagnostic(
+                    $"s0_command type={type} target={target.GetType().Name} parameter={parameter ?? "<null>"}");
+                return;
+            }
+
+            if (command.CanExecute(parameter))
+            {
+                command.Execute(parameter);
+                HandsOnRuntime.Diagnostic(
+                    $"s0_command type={type} target=<direct> parameter={parameter ?? "<null>"}");
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"No executable route for {type} with parameter {parameter ?? "<null>"}.");
+    }
+
+    private static void WriteS0Result(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "s0-result.txt"), text);
     }
 
     internal bool Matches(Guid timelineId) =>
@@ -390,6 +599,9 @@ internal sealed class HandsOnController : IDisposable
             adorner = null;
         }
 
+        fileDrop.Dispose();
+        input.Dispose();
+        structural.Dispose();
         display.Dispose();
     }
 

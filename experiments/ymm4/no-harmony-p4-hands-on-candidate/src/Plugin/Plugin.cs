@@ -204,11 +204,21 @@ internal static class HandsOnRuntime
             currentWindow.Width = 1100;
             currentWindow.Height = 720;
 
-            if (!timeline.Items.Any(x =>
-                string.Equals(
-                    x.Remark,
-                    "CNWL_P4_HANDS_ON_SMOKE",
-                    StringComparison.Ordinal)))
+            var s0IntegrationSmoke = string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S0_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal);
+
+            // The ordinary startup smoke keeps its VoiceItem fixture. The S0
+            // structural-history gate must stay resource-free: an artificial
+            // VoiceItem without a configured speaker makes YMM4's resource
+            // refresh fail when UndoRedoManager records a history boundary.
+            if (!s0IntegrationSmoke
+                && !timeline.Items.Any(x =>
+                    string.Equals(
+                        x.Remark,
+                        "CNWL_P4_HANDS_ON_SMOKE",
+                        StringComparison.Ordinal)))
             {
                 var character = new Character { Name = "CNWL_P4_HANDS_ON_SMOKE" };
                 for (var layer = 0; layer <= 2; layer++)
@@ -228,7 +238,9 @@ internal static class HandsOnRuntime
             }
 
             smokeTimelinePrepared = true;
-            Diagnostic($"smoke_timeline_prepared timeline={timeline.ID:D}");
+            Diagnostic(
+                $"smoke_timeline_prepared timeline={timeline.ID:D} " +
+                $"resource_free={s0IntegrationSmoke}");
         }
         catch (Exception ex)
         {
