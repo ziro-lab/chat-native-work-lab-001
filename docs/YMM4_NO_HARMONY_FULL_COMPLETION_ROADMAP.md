@@ -201,6 +201,8 @@ All structural folder-range tracking, persistence, product UX and release work.
 
 ## P1 — Structural Tracking
 
+**Status: COMPLETE / FROZEN.**
+
 **Purpose:** keep folder ranges correct when YMM4's real layer structure changes, with native Undo/Redo semantics preserved.
 
 ### P1.1 Host structural semantics
@@ -366,73 +368,201 @@ P1.3c artifacts, independently downloaded and SHA256-checked:
 
 ### P1.4 Undo/Redo synchronization
 
-Folder-range state must move with the same user-visible history step as the YMM4 structural operation.
+**Current status: COMPLETE / FROZEN.**
 
-Investigate and use the smallest appropriate public surface from `UndoRedoManager`, including as relevant:
+PR #81 source `868004204778fbe45802013f8ba7de3e606e704f`, run `35692780255`:
 
-- `Subscribe(IUndoRedoable)`;
-- `UnSubscribe`;
-- `AddCommand(IUndoRedoCommandBase)`;
-- `Record()`;
-- `Recorded`;
-- `Undoed`;
-- `Redoed`;
-- `HistoryChanged`.
+- `PASS_UNDO_SYNC`;
+- **74/74** strict assertions on YMM4 4.55.1.1;
+- **74/74** strict assertions on YMM4 4.56.1.0;
+- standard Add/Delete/MoveDown RoutedCommands remain host-owned;
+- plugin folder state is computed by the frozen FolderRangeTracker during handled-events-too PreviewExecuted;
+- the plugin calls public `UndoRedoManager.AddCommand(new UndoRedoActionCommand(...))`;
+- the plugin does **not** call `Record()` during the structural command;
+- YMM4's own standard structural `Record()` commits the pending folder command into the same user-visible history unit;
+- one Ctrl+Z restores Timeline + Folder state together;
+- one Ctrl+Y restores both together;
+- positional MoveDown produces no folder-state change and therefore adds no plugin Undo command;
+- no Harmony.
 
-Acceptance requires **one standard layer action -> one Ctrl+Z -> both YMM4 layer state and folder state return together**.
+Artifacts, independently downloaded and SHA256-checked:
+
+- 4.55.1.1: `10679068161`, SHA256 `ac9643650056063872fc7100ed8494229a7b58550dc69d493cd4854d0a2e640f`;
+- 4.56.1.0: `10678638727`, SHA256 `7083b5e511aff163ee067db28101f6ba406707eeb841173f3fc5688eab61a682`.
+
+Frozen transaction rule:
+
+```text
+Preview standard structural command
+  -> FolderRangeTracker
+  -> update FolderDocument state
+  -> UndoRedoManager.AddCommand(folder undo/redo)
+  -> no plugin Record()
+  -> YMM4 standard command continues
+  -> YMM4 Record() commits one combined user transaction
+```
 
 ### P1.5 Track C integration
 
-Connect the tracker to the P0 display/input architecture.
+**Current status: COMPLETE / FROZEN.**
 
-Verify after Add/Delete/Move and Undo/Redo:
+The P1 structural model, observer and same-transaction Undo mechanism were integrated into the frozen P0 Track C folded display/input architecture without rewriting the previously green Track C mechanisms.
 
-- folded geometry;
-- row chrome;
-- extent;
-- virtualization;
-- right-click/add-position mapping;
-- click;
-- drag;
-- FileDrop;
-- no stale hidden rows;
-- detach / restore.
+#### P1.5a — structural display/history spine
 
-### P1.6 Architecture Convergence Gate
+Source `d2ca75c53c92feb8edf2e6b10e1897b9e6186d5f`, run `35693945595`:
 
-After the integrated P1 behavior is green, but **before P1 is frozen**, review the product-facing structure.
+- `PASS_TRACK_C_STRUCTURAL`;
+- **108/108** on both pinned hosts;
+- Add L3 / Delete L3 / MoveDown L3 prediction equals post-host StructuralDeltaDetector result;
+- one native Record boundary per structural edit;
+- one-step Timeline + Folder Undo/Redo;
+- folded geometry / extent remain exact through forward / Undo / Redo / reset;
+- no stale hidden item views;
+- native click and right-click mapping remains correct after a structural mutation.
 
-This gate does not require rewriting every Lab probe. It requires proving that the intended product implementation can converge without losing the verified behavior.
+A host behavior discovered here is intentionally reflected in the test ordering: native click/right interaction can create another YMM4 history boundary, so post-mutation interaction is tested separately rather than placing that history entry above the structural Undo unit being measured.
 
-Checklist:
+Artifacts:
 
-- FolderRangeTracker is host/WPF-independent.
-- FoldMap/FolderLayout remains the single coordinate-mapping authority.
-- right-click, FileDrop and future placement paths can share one placement boundary instead of permanent operation-specific mapping code.
-- YMM4 version-sensitive reflection/nonpublic access has a defined `YmmHostAccess` boundary.
-- native drag complexity can be encapsulated behind one gesture-lifetime boundary without removing the P0 protections.
-- Lab-only counters/audits/logging are clearly separable from runtime product code.
-- no new P1 component duplicates mapping, Undo or host-access logic already owned elsewhere.
-- a convergence refactor, if needed, reruns the integrated P1 suite before freeze.
+- 4.55.1.1: `10679103302`, SHA256 `5c9f500f150ee760f1f6dc02e350002e67d6ff3d0a91a724a0a37231c5fa06a2`;
+- 4.56.1.0: `10679975336`, SHA256 `4b25463e31dc11564edeaeb82c618a676b724533804deb24689f935471a3e7a0`.
 
-Only after this gate is green should P1 be frozen and P2 add more host-interaction routes.
+#### P1.5b — post-structural native drag + real FileDrop
 
-### P1 exit gate
+Source `0cfc6026dd3011f35a1858ad40d1ca13d422adea`, run `35694253060`:
 
-Both pinned hosts must pass an integrated structural suite covering:
+- `PASS_TRACK_C_STRUCTURAL`;
+- **156/156** on both pinned hosts;
+- after real standard Add L3, collapsed folder state is A1..6 / B2..5 / C7..9;
+- native drag maps the visible C owner from logical L7 to logical L10;
+- native Frame delta remains +35 on both hosts;
+- drag Undo/Redo/reset is exact while Folder state remains unchanged;
+- real PNG FileDrop on the folded visible route executes native AddFileItem;
+- added item is post-corrected to logical L10;
+- FileDrop Undo/Redo/reset is exact while Folder state remains unchanged;
+- geometry / extent / no-reentry / no-hidden-view remain green.
+
+Artifacts:
+
+- 4.55.1.1: `10680220486`, SHA256 `f9436ddfd2f135b033d86cc57fc1bc2117725b6829b699bc9055265fbdfbc826`;
+- 4.56.1.0: `10680200520`, SHA256 `574e2b7e497bd4b6b6d15808156953d28b49af7db41aa8efd2922042ea36a810`.
+
+#### P1.5c — Full structural acceptance
+
+Frozen source `05237928242f6a182a74b7e63090512dd4693212`, run `35695949808`:
+
+- `PASS_TRACK_C_STRUCTURAL`;
+- **353/353** on YMM4 4.55.1.1;
+- **353/353** on YMM4 4.56.1.0;
+- explicit MoveUp L4 -> exact Swap(3);
+- Add exactly at outer folder owner L1 -> exact Insert(1,1) and folder shift;
+- Delete outer owner L1 -> exact Delete(1,1), surviving owner promotion and nested-head normalization;
+- repeated four-operation native sequence:
+  - Add owner;
+  - Delete inserted layer;
+  - MoveUp;
+  - inverse MoveDown;
+- exactly four native history units are produced;
+- four Ctrl+Z operations traverse every expected Timeline + Folder intermediate state;
+- four Ctrl+Y operations traverse every expected state forward;
+- geometry / extent / no-reentry / no-hidden-view remain green at every history state;
+- post-history native click/right mapping remains correct;
+- no Harmony.
+
+Artifacts, independently downloaded and SHA256-checked:
+
+- 4.55.1.1: `10679749216`, SHA256 `79f54961559feed7c8e0d6ee4041979f72faa32c29056fc6e80be472226f4f9f`;
+- 4.56.1.0: `10679918889`, SHA256 `78c30ddf73019c497ab2dc03bf269307785192dd53f5db4701c3239f320ea57f`.
+
+P1.5 therefore covers the P1 exit interaction matrix:
 
 - Add;
 - Delete;
 - Move Up;
 - Move Down;
 - nested folders;
-- boundary cases;
+- owner/boundary cases;
 - repeated edit sequences;
 - Ctrl+Z / Ctrl+Y;
-- post-history native interaction;
+- folded geometry / extent / virtualization behavior inherited from Track C;
+- click / right-click;
+- native drag;
+- real FileDrop;
+- no stale hidden rows;
 - no Harmony.
 
-Only then is P1 frozen.
+### P1.6 Architecture Convergence Gate
+
+**Current status: COMPLETE / FROZEN.**
+
+Review: `docs/YMM4_NO_HARMONY_P1_ARCHITECTURE_CONVERGENCE.md`.
+
+The review compared the frozen P0/P1 implementation against the product convergence rules and found **no broad Lab refactor is required before P1 freeze**.
+
+Checklist result:
+
+- FolderRangeTracker is host/WPF-independent — **green**.
+- StructuralDeltaDetector is host/WPF-independent — **green**.
+- FolderLayout/FoldMap is the single display-row <-> logical-layer mapping authority — **green**.
+- right-click and FileDrop already delegate coordinate conversion to the same FolderLayout — **green for convergence**; the final product should expose one shared PlacementRouter rather than preserving Lab adapter names.
+- version-sensitive reflection/nonpublic YMM4 access has a defined YmmHostAccess extraction boundary — **green**.
+- native drag complexity already has an explicit BeginGesture / UpdateGestureVisuals / EndGesture lifetime and can be hidden behind a product GestureLease without deleting the proven protections — **green**.
+- Lab mutation counters, render audits, budgets and evidence logging are separable from runtime product behavior — **green**.
+- P1 structural observation, range transformation and Undo ownership are separate and do not duplicate folder policy — **green**.
+- no convergence refactor is required inside the frozen Lab probes; rewriting those probes now would reduce evidence stability without simplifying the eventual product — **green**.
+
+The product extraction target remains:
+
+```text
+FolderDocument
+    |
+    +-- FolderRangeTracker
+    |
+    v
+FoldMap
+logical Layer <-> display Row
+    |
+    +----------------------+
+    v                      v
+FoldDisplay          InteractionRouter
+                         +-- placement
+                         +-- navigation
+                         +-- GestureLease
+    |                      |
+    +----------+-----------+
+               v
+          YmmHostAccess
+               |
+               v
+              YMM4
+
+Persistence <-> FolderDocument
+```
+
+P1.6 deliberately freezes **ownership boundaries**, not concrete class names or a premature product rewrite.
+
+### P1 exit gate
+
+**SATISFIED / FROZEN.**
+
+Both pinned hosts pass the integrated structural suite covering:
+
+- Add — **green**;
+- Delete — **green**;
+- Move Up — **green**;
+- Move Down — **green**;
+- nested folders — **green**;
+- boundary / owner cases — **green**;
+- repeated edit sequences — **green**;
+- Ctrl+Z / Ctrl+Y — **green**;
+- post-history native interaction — **green**;
+- native drag / real FileDrop after structural mutation — **green**;
+- no Harmony — **green**.
+
+The final integrated gate is P1.5c source `05237928242f6a182a74b7e63090512dd4693212`, run `35695949808`, **353/353 on both pinned hosts**.
+
+P1 is therefore **COMPLETE / FROZEN**. P2 may add host interaction routes without reopening P1 unless new evidence invalidates a frozen assumption.
 
 ### Explicitly deferred from P1
 
@@ -635,11 +765,11 @@ P0 Core Spine                 DONE
   -> P1.1 host semantics      DONE
   -> P1.2 FolderRangeTracker  DONE
   -> P1.3 operation observe   DONE
-  -> P1.4 Undo synchronization NEXT
-  -> P1.5 Track C integration
-  -> P1.6 architecture convergence
-  -> P1 freeze
-  -> P2 interaction coverage
+  -> P1.4 Undo synchronization DONE
+  -> P1.5 Track C integration DONE
+  -> P1.6 architecture convergence DONE
+  -> P1 freeze                DONE
+  -> P2 interaction coverage  NEXT
   -> P3 persistence
   -> P4 UX
   -> P5 compatibility
@@ -647,7 +777,7 @@ P0 Core Spine                 DONE
   -> P7 release
 ```
 
-P1 may loop between P1.2-P1.4 if host evidence exposes a missing boundary case. That is expected and does not reopen P0.
+P1 is frozen. If P2 exposes evidence that contradicts a frozen P1 assumption, reopen only the affected gate with a new isolated proof rather than broadly rewriting P0/P1.
 
 # 6. Scope-control rules
 
