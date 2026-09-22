@@ -116,12 +116,19 @@ internal static class HandsOnHostAccess
             ?? throw new InvalidOperationException("Active Timeline is missing.");
 
         var view = Host.Elements(window)
-            .Where(x => x.GetType().Name == "TimelineView"
-                && x.IsVisible
-                && ReferenceEquals(x.DataContext, vm))
+            .Where(x => x.GetType().Name == "TimelineView" && x.IsVisible)
             .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
             .FirstOrDefault()
             ?? throw new InvalidOperationException("Active TimelineView is not realized.");
+
+        var viewVm = view.DataContext as TimelineViewModel
+            ?? throw new InvalidOperationException("Visible TimelineView has no TimelineViewModel.");
+        var viewTimeline = TimelineOf(viewVm)
+            ?? throw new InvalidOperationException("Visible TimelineView has no Timeline.");
+        if (viewTimeline.ID != timeline.ID)
+            throw new InvalidOperationException("Visible TimelineView does not match active Timeline yet.");
+
+        vm = viewVm;
 
         var scroll = Host.Elements(view).OfType<ScrollViewer>()
             .Where(x => x.IsVisible && x.ActualHeight > 50)
