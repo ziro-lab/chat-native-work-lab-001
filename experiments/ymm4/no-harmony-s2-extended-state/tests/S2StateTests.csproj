@@ -12,5 +12,6 @@
     <Compile Include="../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
     <Compile Include="../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
     <Compile Include="../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
+    <Compile Include="../../no-harmony-p4-hands-on-candidate/src/Plugin/FolderPersistenceSession.cs" Link="FolderPersistenceSession.cs" />
   </ItemGroup>
 </Project>
