@@ -187,7 +187,15 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
             TimelineKey,
             restore);
 
-        RebuildSuppressionOwnership();
+        pluginSuppressed.Clear();
+        foreach (var layer in afterHidden.OrderBy(x => x))
+        {
+            if (restore.ContainsKey(layer)
+                && !timeline.LayerSettings.IsVisibles[layer])
+            {
+                pluginSuppressed.Add(layer);
+            }
+        }
 
         log(
             $"visibility_structural hidden_before={beforeHidden.Count} " +
