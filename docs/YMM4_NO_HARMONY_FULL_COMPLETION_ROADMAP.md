@@ -277,35 +277,92 @@ P1.5 still has to prove these semantics under the Track C folded display, especi
 
 ### P1.3 Native command observation boundary
 
-Detect the actual standard structural operation without replacing YMM4's implementation.
+**Current status: COMPLETE / FROZEN.**
 
-Preferred order:
+The product-facing observation boundary is:
 
-1. standard WPF / routed-command observation;
-2. public YMM4 events / state deltas;
-3. bounded fallback only if the first two cannot distinguish required operations reliably.
+```text
+UndoRedoManager transaction trigger
+        +
+before/after Timeline item-layer snapshot
+        +
+native empty-LayerSetting insert hint when available
+        +
+one generic WPF RoutedCommand position hint when state is underdetermined
+        ↓
+StructuralDeltaDetector
+        ↓
+InsertLayers / DeleteLayers / SwapAdjacentLayers
+        ↓
+FolderRangeTracker
+```
 
-Do not reimplement standard Add/Delete/Move merely to make the tracker easier.
+No Add/Delete/Move-specific folder adapters are required.
 
-P1.3 must also compare **general structural-delta observation** against command-specific observation. The existing Harmony-free LayerPatan-style approach—watching Timeline / LayerSettings plus UndoRedoManager Recorded/Undoed/Redoed and comparing before/after Layer/LayerSetting state—is a candidate because it could cover several structural operations without adding one adapter per command.
+#### P1.3a — pure StructuralDeltaDetector
 
-Selection rule:
+Initial pure source `e0b7e6ffb8c264ff026a68839aac156326096837`, run `35681491437`:
 
-- prefer the smallest observation mechanism that reliably identifies the structural delta needed by FolderRangeTracker;
-- command-specific hooks are acceptable as Lab evidence, but should not multiply product adapters when a shared delta observer is equally reliable;
-- if routed-command observation and state-delta observation are combined, each must have a clear responsibility rather than duplicate folder logic.
+- host-independent detector;
+- conservative Ambiguous result instead of guessed sparse boundaries;
+- Insert/Delete/adjacent Swap classification;
+- individual item movement is not accepted as structural mutation.
 
-#### P1.3 current evidence
+P1.3c later extended the same detector with an optional generic operation-position hint.
 
-- **P1.3a pure detector:** run `35681491437`, **31/31** green before the position-hint extension.
-- **P1.3b exact-host shared observer:** source `55ef1c12b379b7a31253e457ff0ea7440819ced0`, run `35689361090`, **62/62** on both pinned hosts.
-- dense Add/Delete/Move and their Undo/Redo deltas are exact through one shared observer;
-- sparse Add is exact via native empty-LayerSetting hint;
-- sparse deletion of a completely empty row is underdetermined from state delta alone on both hosts.
-- **P1.3c active:** prove one generic WPF RoutedCommand position-hint observer as the bounded fallback for the underdetermined sparse-delete case. It must feed the same pure detector and must not own folder semantics.
+#### P1.3b — exact-host shared observer
 
-P1.3 is not frozen until P1.3c is native-green on both pinned hosts.
+Source `55ef1c12b379b7a31253e457ff0ea7440819ced0`, run `35689361090`:
 
+- **62/62** on YMM4 4.55.1.1;
+- **62/62** on YMM4 4.56.1.0;
+- public `UndoRedoManager.Recorded / Undoed / Redoed` events are usable common transaction triggers;
+- dense Add/Delete/MoveDown and Undo/Redo/reset classify exactly through one shared state observer;
+- sparse Add L24 is exact through YMM4's empty-LayerSetting insertion hint;
+- sparse Delete of a completely empty L24 between observed L20/L30 is genuinely underdetermined from state alone on both hosts.
+
+P1.3b artifacts:
+
+- 4.55.1.1: `10677727515`, SHA256 `404b359dbdcc646b2e1c7f6c1931756d653605139d05ebf375714ac020d67192`;
+- 4.56.1.0: `10678401894`, SHA256 `6f95107d738a5f87dc3c2d7f9043d6a7a39704bee67c172345edf4a0341aa781`.
+
+#### P1.3c — generic routed structural position hint
+
+Frozen source `22bbe06494729f2c89b72d733070d3962a840943`.
+
+Pure run `35689743836`:
+
+- `PASS_STRUCTURAL_DELTA_DETECTOR`;
+- **37/37** assertions;
+- unique operation-position hint may resolve an already-observed sparse structural gap;
+- multiple/conflicting operation hints remain Ambiguous;
+- detector remains host-independent.
+
+Native run `35689743833`:
+
+- `PASS_STRUCTURAL_OBSERVER_NATIVE`;
+- **73/73** on YMM4 4.55.1.1;
+- **73/73** on YMM4 4.56.1.0;
+- one handled-events-too WPF RoutedCommand observer sees Add/Delete/MoveDown and their integer layer parameters;
+- dense classification remains exact from state delta;
+- sparse Add L24 raw = `Exact:I:24:1`, hinted = same;
+- sparse Delete L24 raw = `Ambiguous`, command hint = `DeleteLayer:24`, hinted = `Exact:D:24:1`;
+- no Harmony.
+
+P1.3c artifacts, independently downloaded and SHA256-checked:
+
+- pure: `10677622965`, SHA256 `b554c7e4098be1429d2ff4ec0fe2c7a5f908b6ba529cca53ecb4895af1c4c699`;
+- 4.55.1.1: `10677318394`, SHA256 `4ea75e6b1fd3112640e3abb164b39c7acf14380959b073c15a1275015274f763`;
+- 4.56.1.0: `10678207901`, SHA256 `7f8169b8bb5e669a80940e4a4dcd2498e64607e2d3ab7b69ec33b3008317035a`.
+
+#### Frozen observation rule
+
+1. State delta is authoritative when it is exact.
+2. Native empty-LayerSetting changes are generic insert hints.
+3. A single generic RoutedCommand position hint may resolve an otherwise-under-determined structural gap.
+4. Command hints do not contain folder policy and do not bypass the pure detector.
+5. Conflicting/insufficient evidence remains Ambiguous.
+6. Standard YMM4 command implementation is never replaced.
 
 ### P1.4 Undo/Redo synchronization
 
@@ -577,8 +634,8 @@ The active path is:
 P0 Core Spine                 DONE
   -> P1.1 host semantics      DONE
   -> P1.2 FolderRangeTracker  DONE
-  -> P1.3 operation observe    NEXT
-  -> P1.4 Undo synchronization
+  -> P1.3 operation observe   DONE
+  -> P1.4 Undo synchronization NEXT
   -> P1.5 Track C integration
   -> P1.6 architecture convergence
   -> P1 freeze
