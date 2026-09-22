@@ -51,7 +51,7 @@ try {
   $required=@(
     'timeline_a_id_nonempty','timeline_id_public_guid','tool_area_found',
     'area_seed_a_roundtrip','project_a_saved','project_a_toolstate_embedded',
-    'timeline_b_distinct','area_seed_b_roundtrip','project_b_saved','project_b_toolstate_embedded',
+    'area_seed_b_roundtrip','project_b_saved','project_b_toolstate_embedded','project_files_hold_distinct_toolstate',
     'open_a_timeline_id_stable','open_a_toolstate_restored','open_a_area_state_restored','open_a_document_valid',
     'open_b_timeline_id_stable','open_b_toolstate_restored','open_b_area_state_restored',
     'project_state_isolated','no_harmony_loaded')
