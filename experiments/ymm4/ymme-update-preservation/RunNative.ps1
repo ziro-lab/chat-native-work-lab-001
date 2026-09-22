@@ -161,11 +161,11 @@ function New-ProbePackage([string]$dll, [string]$version, [string]$packagePath) 
     $plugin = Join-Path $stage 'Ymm4PortableSettingsProbe'
     New-Item -ItemType Directory -Force $plugin | Out-Null
     Copy-Item $dll (Join-Path $plugin 'Ymm4PortableSettingsProbe.dll')
-    Set-Content -NoNewline (Join-Path $plugin 'package-version.txt') $version
+    [System.IO.File]::WriteAllText((Join-Path $plugin 'package-version.txt'), $version)
     if ($version -eq 'v1') {
-        Set-Content -NoNewline (Join-Path $plugin 'obsolete-v1.txt') 'present only in v1 package'
+        [System.IO.File]::WriteAllText((Join-Path $plugin 'obsolete-v1.txt'), 'present only in v1 package')
     } else {
-        Set-Content -NoNewline (Join-Path $plugin 'v2-only.txt') 'present only in v2 package'
+        [System.IO.File]::WriteAllText((Join-Path $plugin 'v2-only.txt'), 'present only in v2 package')
     }
 
     $zip = [System.IO.Path]::ChangeExtension($packagePath, '.zip')
@@ -207,10 +207,10 @@ $userSibling = Join-Path $Ymm4Dir 'user\Ymm4PortableSettingsProbe\settings-probe
 foreach ($dir in @((Split-Path $pluginData), (Split-Path $pluginNested), (Split-Path $userSibling))) {
     New-Item -ItemType Directory -Force $dir | Out-Null
 }
-Set-Content -NoNewline $pluginData '{"source":"user-created","value":42}'
-Set-Content -NoNewline $pluginNested 'nested-user-data'
-Set-Content -NoNewline $pluginRootUserFile 'root-user-data'
-Set-Content -NoNewline $userSibling '{"source":"user-sibling","value":84}'
+[System.IO.File]::WriteAllText($pluginData, '{"source":"user-created","value":42}')
+[System.IO.File]::WriteAllText($pluginNested, 'nested-user-data')
+[System.IO.File]::WriteAllText($pluginRootUserFile, 'root-user-data')
+[System.IO.File]::WriteAllText($userSibling, '{"source":"user-sibling","value":84}')
 
 $before = [ordered]@{
     plugin_data_sha256 = (Get-FileHash $pluginData -Algorithm SHA256).Hash.ToLowerInvariant()
