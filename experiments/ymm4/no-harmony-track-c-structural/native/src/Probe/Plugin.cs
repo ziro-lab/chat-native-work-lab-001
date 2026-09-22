@@ -706,12 +706,6 @@ internal static class Probe
             host,
             display,
             name + "_forward_display");
-        await ClickAndRight(
-            host,
-            display,
-            target,
-            name + "_forward_input");
-
         var timelineAfter = after.Text;
 
         Fact(
@@ -723,24 +717,6 @@ internal static class Probe
         var undoBefore = undoCount();
         await Native.Key(0x5A, true);
 
-        await Task.Delay(900);
-
-        Fact(
-            name + "_undo_diag_event_delta",
-            undoCount() - undoBefore);
-        Fact(
-            name + "_undo_diag_timeline",
-            Capture(host.Timeline).Text);
-        Fact(
-            name + "_undo_diag_folder",
-            FolderText(bridge.State));
-        Fact(
-            name + "_undo_diag_expected_timeline",
-            timelineBaseline);
-        Fact(
-            name + "_undo_diag_expected_folder",
-            folderBaseline);
-
         await WaitUntil(
             name + " undo",
             () =>
@@ -748,8 +724,14 @@ internal static class Probe
                 && Capture(host.Timeline).Text ==
                     timelineBaseline
                 && FolderText(bridge.State) ==
-                    folderBaseline,
-            4000);
+                    folderBaseline);
+
+        Fact(
+            name + "_undo_timeline",
+            Capture(host.Timeline).Text);
+        Fact(
+            name + "_undo_folder",
+            FolderText(bridge.State));
 
         Check(
             name + "_undo_event_one",
@@ -809,11 +791,6 @@ internal static class Probe
             host,
             display,
             name + "_reset_display");
-        await ClickAndRight(
-            host,
-            display,
-            target,
-            name + "_reset_input");
     }
 
     private static async Task Run(Window window)
@@ -1091,6 +1068,49 @@ internal static class Probe
             Check(
                 "bridge_redo_callbacks_expected",
                 bridge.RedoCallbacks == 2);
+
+            // Input mapping is checked after the strict history sequences so any
+            // host-owned selection/context history cannot sit above the structural
+            // transaction being measured.
+            var postInputBefore = Capture(timeline);
+            var postInputRecordedBefore = recorded;
+            bridge.ResetLast();
+            timeline.SelectedItems = ImmutableList<IItem>.Empty;
+            timeline.LayerSelection.SelectedLayers = ImmutableList.Create(3);
+
+            ExecuteStandardLayerCommand(
+                CommandType.AddLayer,
+                window,
+                view,
+                vm,
+                timeline,
+                3);
+
+            await WaitUntil(
+                "post_structural_input forward",
+                () =>
+                    recorded > postInputRecordedBefore
+                    && Capture(timeline).Text != postInputBefore.Text
+                    && FolderText(bridge.State) ==
+                        "A:1-6|B:2-5|C:7-9");
+
+            await Sample(
+                host,
+                display,
+                "post_structural_input_display");
+            await ClickAndRight(
+                host,
+                display,
+                target,
+                "post_structural_input");
+
+            Check(
+                "post_structural_input_preview",
+                bridge.Last is not null
+                && EditText(bridge.Last.Edit) == "I:3:1");
+            Fact(
+                "post_structural_input_recorded_after_click",
+                recorded - postInputRecordedBefore);
 
             Check(
                 "no_harmony_loaded",
