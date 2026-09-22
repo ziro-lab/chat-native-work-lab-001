@@ -298,6 +298,22 @@ internal static class Probe
             Position();
             return finalSize;
         }
+
+        protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
+        {
+            var left = Canvas.GetLeft(toggle);
+            var top = Canvas.GetTop(toggle);
+            var width = toggle.ActualWidth > 0 ? toggle.ActualWidth : toggle.Width;
+            var height = toggle.ActualHeight > 0 ? toggle.ActualHeight : toggle.Height;
+            var buttonRect = new Rect(left, top, width, height);
+
+            // The Adorner spans the whole layer-label list for positioning, but
+            // only the explicit folder button may own input. Everywhere else
+            // must fall through to YMM4's native layer-label controls.
+            return buttonRect.Contains(hitTestParameters.HitPoint)
+                ? base.HitTestCore(hitTestParameters)
+                : null;
+        }
     }
 
     private static Point Center(FrameworkElement element)
