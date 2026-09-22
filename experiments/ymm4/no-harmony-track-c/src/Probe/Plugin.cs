@@ -86,7 +86,7 @@ internal static class ProbeC
     }
     private static async Task Run(Window window, object vm, Timeline t)
     {
-        DirectDisplay? display = null; InputMapAdapter? input = null;
+        DirectDisplay? display = null; InputMapAdapter? input = null; FileDropMapAdapter? fileDrop = null;
         try
         {
             window.WindowState = WindowState.Normal; window.Left = 0; window.Top = 0; window.Width = 1000; window.Height = 700;
@@ -127,6 +127,7 @@ internal static class ProbeC
             var b = new CollapsedSpan[] { new(1, 5), new(2, 3), new(6, 8) };
             display.SetSpans(a); await Sample(host, display, "attach_a");
             input = new InputMapAdapter(host, display, Log);
+            fileDrop = new FileDropMapAdapter(host, display, Log);
             await Reveal(host, display.Layout.VisualRowOfLogical(6) * h);
             var targetState = (target.Layer, target.Frame);
             t.SelectedItems = ImmutableList<IItem>.Empty;
@@ -176,6 +177,73 @@ internal static class ProbeC
                 await Right(host, target, 9, "nested_right_" + cycle, h);
                 display.SetSpans(a); await Sample(host, display, "reopen_" + cycle);
             }
+            // Integrate the previously isolated real FileDrop proof into the exact
+            // Track C display/input architecture. Keep the drop on logical L9 while
+            // its physical row is compressed, then prove native Undo/Redo and reset.
+            Log("phase=integrated_filedrop");
+            await Reveal(host, display.Layout.VisualRowOfLogical(target.Layer) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var targetBox = Host.ScreenRect(host.ItemView(target));
+            var scrollBox = Host.ScreenRect(scroll);
+            var dropPoint = new Point(
+                Math.Min(scrollBox.Right - 36, targetBox.Right + 72),
+                targetBox.Y + targetBox.Height / 2);
+
+            var enterBefore = fileDrop.DragEnterCount;
+            var overBefore = fileDrop.DragOverCount;
+            var dropBefore = fileDrop.DropCount;
+            var commandBefore = fileDrop.AddCommandExecutions;
+            var correctedBefore = fileDrop.PostCorrectedItems;
+
+            var dropObservation = await IntegratedFileDropHarness.DropPng(
+                window,
+                host,
+                dropPoint,
+                output,
+                "track-c-integrated");
+
+            await Sample(host, display, "filedrop_added");
+
+            Check("filedrop_drag_enter", fileDrop.DragEnterCount > enterBefore);
+            Check("filedrop_drag_over", fileDrop.DragOverCount > overBefore);
+            Check("filedrop_drop", fileDrop.DropCount == dropBefore + 1);
+            Check("filedrop_add_command", fileDrop.AddCommandExecutions == commandBefore + 1);
+            Check("filedrop_post_corrected", fileDrop.PostCorrectedItems > correctedBefore);
+            Check("filedrop_logical_layer", fileDrop.LastLogicalLayer == 9);
+            Check("filedrop_added_item", dropObservation.AddedItems.Length > 0);
+            Check("filedrop_added_layer", dropObservation.AddedItems.All(x => x.Layer == 9));
+
+            var dropPath = dropObservation.FilePath;
+            var addedRefs = dropObservation.AddedItems.ToArray();
+            var addedVisible = addedRefs
+                .Select(item => host.ItemViews().FirstOrDefault(x => ReferenceEquals(Host.Item(x.DataContext), item)))
+                .Where(x => x is not null)
+                .Cast<FrameworkElement>()
+                .Any(x => Host.ScreenRect(scroll).IntersectsWith(Host.ScreenRect(x)));
+            Check("filedrop_added_visible", addedVisible);
+
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "filedrop_undo");
+            var undoRemovedDrop = !t.Items.Any(x =>
+                addedRefs.Any(y => ReferenceEquals(x, y)) ||
+                string.Equals(IntegratedFileDropHarness.FilePathOf(x), dropPath, StringComparison.OrdinalIgnoreCase));
+            Check("filedrop_undo_removed", undoRemovedDrop);
+            Live("filedrop_undo", t, fixtures);
+
+            await Native.Key(0x59, true);
+            await Sample(host, display, "filedrop_redo");
+            var redoDrop = t.Items.FirstOrDefault(x =>
+                addedRefs.Any(y => ReferenceEquals(x, y)) ||
+                string.Equals(IntegratedFileDropHarness.FilePathOf(x), dropPath, StringComparison.OrdinalIgnoreCase));
+            Check("filedrop_redo_restored", redoDrop is not null);
+            Check("filedrop_redo_layer", redoDrop?.Layer == 9);
+
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "filedrop_reset");
+            Check("filedrop_reset_removed", !t.Items.Any(x =>
+                addedRefs.Any(y => ReferenceEquals(x, y)) ||
+                string.Equals(IntegratedFileDropHarness.FilePathOf(x), dropPath, StringComparison.OrdinalIgnoreCase)));
+            Live("filedrop_reset", t, fixtures);
             await Reveal(host, display.Layout.VisualRowOfLogical(20) * h);
             Check("low_realized_at_folded_row", Host.ScreenRect(scroll).Contains(host.Center(low)));
             await Native.Click(host.Center(low)); Check("low_native_click", t.SelectedItems.Any(x => ReferenceEquals(x, low)));
@@ -187,6 +255,7 @@ internal static class ProbeC
             var idleWrites = display.Mutations; await Task.Delay(1500); display.ThrowIfFailed();
             Check("integrated_idle_stable", display.Mutations == idleWrites);
             Live("before_detach", t, fixtures);
+            fileDrop.Dispose(); fileDrop = null;
             input.Dispose(); input = null;
             display.SetSpans(); await Sample(host, display, "identity");
             display.Dispose(); Check("display_subscriptions_detached", display.SubscriptionCount == 0);
@@ -205,7 +274,7 @@ internal static class ProbeC
         catch (Exception ex) { Fail(ex); }
         finally
         {
-            try { input?.Dispose(); display?.Dispose(); Native.Release(); } catch (Exception ex) { Fail(ex); }
+            try { fileDrop?.Dispose(); input?.Dispose(); display?.Dispose(); Native.Release(); } catch (Exception ex) { Fail(ex); }
             Finish();
         }
     }
