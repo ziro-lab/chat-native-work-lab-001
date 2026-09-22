@@ -98,14 +98,27 @@ overlay / context menu
         ↓
 FolderDocument command
         ↓
-FolderRangeTracker / collapse metadata
+FolderHistoryAdapter
         ↓
-FoldMap / FoldDisplay
+YMM4 UndoRedoManager
         ↓
-Persistence
+FoldMap / FoldDisplay + Persistence
 ```
 
 P4 must not introduce a second folder model inside ViewModels or WPF elements.
+
+### Metadata history boundary
+
+P4.2b exact-host evidence proves a FolderDocument-only change can use one public `UndoRedoActionCommand + UndoRedoManager.Record()` transaction to:
+
+- mark the YMM4 project unsaved;
+- restore the prior FolderDocument through real Ctrl+Z;
+- restore the forward FolderDocument through real Ctrl+Y;
+- return to saved state through normal SaveProject.
+
+Therefore create / rename / collapse / ungroup share one small FolderHistoryAdapter. No custom history stack or separate dirty flag is needed.
+
+Hands-on may later choose to keep collapse/expand out of visible Undo history for ergonomics, but that would be a UX refinement over a proven safe mechanism.
 
 ## 7. P4 validation sequence
 
