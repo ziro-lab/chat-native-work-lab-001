@@ -73,6 +73,30 @@ internal sealed class StructuralFolderBridge : IDisposable
         return lease;
     }
 
+    internal CompositeOverrideLease PrepareProductCompositeOverride(
+        CommandType type,
+        int layer,
+        FolderProductState before,
+        FolderProductState after,
+        Action? nativeCompanion = null)
+    {
+        if (disposed)
+            throw new ObjectDisposedException(nameof(StructuralFolderBridge));
+        if (compositeOverride is not null)
+            throw new InvalidOperationException(
+                "A structural composite override is already active.");
+
+        var lease = new CompositeOverrideLease(
+            this,
+            type,
+            layer,
+            FolderProductStateRules.NormalizeAndValidate(before),
+            FolderProductStateRules.NormalizeAndValidate(after),
+            nativeCompanion);
+        compositeOverride = lease;
+        return lease;
+    }
+
     private void ReleaseCompositeOverride(CompositeOverrideLease lease)
     {
         if (ReferenceEquals(compositeOverride, lease))
@@ -168,7 +192,33 @@ internal sealed class StructuralFolderBridge : IDisposable
         if (compositeOverride is { } composite
             && composite.Matches(type, layer))
         {
+            if (composite.BeforeProduct is not null
+                && composite.AfterProduct is not null)
+            {
+                var currentProduct =
+                    FolderProductStateRules.NormalizeAndValidate(
+                        state.ProductState);
+                if (FolderProductStateCodec.Save(currentProduct)
+                    != FolderProductStateCodec.Save(
+                        composite.BeforeProduct))
+                {
+                    throw new InvalidOperationException(
+                        "Product state changed while a structural composite command was pending.");
+                }
+
+                composite.NativeCompanion?.Invoke();
+                ApplyPendingState(
+                    composite.BeforeProduct,
+                    composite.AfterProduct,
+                    $"product-composite:{type}:L{layer}");
+                composite.MarkApplied();
+                return;
+            }
+
             var current = FolderDocumentRules.NormalizeAndValidate(state.Document);
+            if (composite.Before is null || composite.After is null)
+                throw new InvalidOperationException("Legacy composite payload is missing.");
+
             if (FolderDocumentCodec.Save(current) != FolderDocumentCodec.Save(composite.Before))
             {
                 throw new InvalidOperationException(
@@ -285,10 +335,29 @@ internal sealed class StructuralFolderBridge : IDisposable
             After = after;
         }
 
+        internal CompositeOverrideLease(
+            StructuralFolderBridge owner,
+            CommandType type,
+            int layer,
+            FolderProductState before,
+            FolderProductState after,
+            Action? nativeCompanion)
+        {
+            this.owner = owner;
+            Type = type;
+            Layer = layer;
+            BeforeProduct = before;
+            AfterProduct = after;
+            NativeCompanion = nativeCompanion;
+        }
+
         internal CommandType Type { get; }
         internal int Layer { get; }
-        internal FolderDocument Before { get; }
-        internal FolderDocument After { get; }
+        internal FolderDocument? Before { get; }
+        internal FolderDocument? After { get; }
+        internal FolderProductState? BeforeProduct { get; }
+        internal FolderProductState? AfterProduct { get; }
+        internal Action? NativeCompanion { get; }
         internal bool Applied { get; private set; }
 
         internal bool Matches(CommandType type, int layer) =>
