@@ -93,15 +93,18 @@ $targetHas=Find-Expected $target $expected
 $checks=[ordered]@{
   source_contains_subject_state=$sourceHas
   subject_plugin_absent_on_second_launch=(-not $controller.subjectAssemblyLoaded)
-  open_path_applied=[bool]$controller.pathApplied
+  source_open_path_applied=[bool]$controller.pathApplied
+  marker_survives_source_open=[bool]$controller.markerAfterSourceOpen
   target_saved=[bool]$controller.targetExists
-  resave_preserves_subject_state=$targetHas
+  target_reopen_path_applied=[bool]$controller.targetPathApplied
+  marker_survives_target_reopen=[bool]$controller.markerAfterTargetReopen
+  absent_plugin_state_is_dropped=(-not $targetHas)
   no_harmony_loaded=(-not $controller.harmonyLoaded)
 }
 $pass=($checks.Values -notcontains $false)
-$final=[ordered]@{status=if($pass){'PASS_P3_PLUGIN_MISSING'}else{'FAIL_P3_PLUGIN_MISSING'};checks=$checks}
+$final=[ordered]@{status=if($pass){'PASS_P3_PLUGIN_MISSING_LIMITATION'}else{'FAIL_P3_PLUGIN_MISSING_LIMITATION'};checks=$checks}
 $final|ConvertTo-Json -Depth 6|Set-Content (Join-Path $OutputDir 'result.json')
 $final|ConvertTo-Json -Depth 6|Write-Host
-if(-not $pass){throw 'Missing-plugin preservation failed'}
+if(-not $pass){throw 'Missing-plugin limitation contract failed'}
 Remove-Item Env:CNWL_P3_MISSING_PHASE -ErrorAction SilentlyContinue
 Remove-Item Env:CNWL_P3_MISSING_DIR -ErrorAction SilentlyContinue
