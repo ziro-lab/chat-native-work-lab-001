@@ -21,7 +21,7 @@ internal sealed class HandsOnController : IDisposable
     private readonly Host host;
     private readonly Timeline timeline;
     private readonly UndoRedoManager undo;
-    private readonly FolderToolViewModel state;
+    private readonly FolderStateStore state;
     private readonly DirectDisplay display;
     private readonly AdornerLayer adornerLayer;
     private readonly MouseButtonEventHandler mouseHandler;
@@ -34,7 +34,7 @@ internal sealed class HandsOnController : IDisposable
         FrameworkElement labels,
         Host host,
         UndoRedoManager undo,
-        FolderToolViewModel state)
+        FolderStateStore state)
     {
         this.window = window;
         this.labels = labels;
