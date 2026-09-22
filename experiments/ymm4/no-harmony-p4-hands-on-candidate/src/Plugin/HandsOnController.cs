@@ -612,7 +612,8 @@ internal sealed class HandsOnController : IDisposable
         private readonly VisualCollection children;
         private readonly DirectDisplay display;
         private readonly PersistedFolder[] folders;
-        private readonly Dictionary<Guid, Rect> hitRects = [];
+        private sealed record FolderHit(Rect Toggle, Rect Name);
+        private readonly Dictionary<Guid, FolderHit> hitRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
@@ -627,11 +628,26 @@ internal sealed class HandsOnController : IDisposable
             Rebuild();
         }
 
-        internal bool TryFolderAt(Point point, out Guid folderId)
+        internal bool TryToggleAt(Point point, out Guid folderId)
         {
             foreach (var pair in hitRects)
             {
-                if (pair.Value.Contains(point))
+                if (pair.Value.Toggle.Contains(point))
+                {
+                    folderId = pair.Key;
+                    return true;
+                }
+            }
+
+            folderId = Guid.Empty;
+            return false;
+        }
+
+        internal bool TryNameAt(Point point, out Guid folderId)
+        {
+            foreach (var pair in hitRects)
+            {
+                if (pair.Value.Name.Contains(point))
                 {
                     folderId = pair.Key;
                     return true;
@@ -669,7 +685,14 @@ internal sealed class HandsOnController : IDisposable
                         Math.Max(48, AdornedElement.RenderSize.Width - x - 4)));
                 var height = Math.Max(18, display.Height - 6);
                 var rect = new Rect(x, y, width, height);
-                hitRects[folder.Id] = rect;
+                var toggleWidth = Math.Min(18, width);
+                hitRects[folder.Id] = new FolderHit(
+                    new Rect(x, y, toggleWidth, height),
+                    new Rect(
+                        x + toggleWidth,
+                        y,
+                        Math.Max(0, width - toggleWidth),
+                        height));
 
                 var border = new Border
                 {
