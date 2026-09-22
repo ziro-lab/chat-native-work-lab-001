@@ -3,11 +3,13 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
 using YukkuriMovieMaker.ViewModels;
 
@@ -15,7 +17,7 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 
 public sealed class StructuralMutationEntry : ILocalizePlugin
 {
-    public string Name => "CNWL no-Harmony structural mutation";
+    public string Name => "CNWL structural mutation";
     public void SetCulture(CultureInfo cultureInfo) => StructuralProbe.Schedule();
 }
 
@@ -126,6 +128,12 @@ internal static class StructuralProbe
                 .OrderBy(x => x.Remark, StringComparer.Ordinal)
                 .Select(x => x.Remark));
 
+    private sealed record RouteResult(
+        string Command,
+        string Target,
+        string Parameter,
+        bool Executed);
+
     private sealed record MutationResult(
         string After,
         string Undo,
@@ -133,32 +141,173 @@ internal static class StructuralProbe
         string Reset,
         string SelectionAfter,
         int TimelineEvents,
-        int SettingsEvents);
+        int SettingsEvents,
+        RouteResult Route);
+
+    private static string DescribeParameter(object? value) =>
+        value switch
+        {
+            null => "<null>",
+            int number => "Int32:" + number,
+            _ => value.GetType().FullName ?? value.GetType().Name
+        };
+
+    private static FrameworkElement? FindElementForDataContext(
+        FrameworkElement root,
+        object dataContext) =>
+        Host.Elements(root)
+            .Where(x => x.IsVisible && ReferenceEquals(x.DataContext, dataContext))
+            .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
+            .FirstOrDefault();
+
+    private static RouteResult ExecuteStandardLayerCommand(
+        CommandType commandType,
+        Window window,
+        FrameworkElement timelineView,
+        TimelineViewModel vm,
+        Timeline timeline,
+        int layer)
+    {
+        var command = CommandSettings.Default[commandType]
+            ?? throw new InvalidOperationException("Command missing: " + commandType);
+
+        var labelVm = layer >= 0 && layer < vm.LayerLabels.Count
+            ? vm.LayerLabels[layer]
+            : null;
+
+        var labelElement = labelVm is null
+            ? null
+            : FindElementForDataContext(timelineView, labelVm);
+
+        if (labelElement is not null)
+        {
+            try { labelElement.Focus(); }
+            catch { }
+        }
+
+        window.Activate();
+        Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
+
+        var targets = new List<(string Name, IInputElement Target)>();
+        if (labelElement is not null)
+            targets.Add(("LayerLabel", labelElement));
+        if (Keyboard.FocusedElement is IInputElement focused)
+            targets.Add(("Focused", focused));
+        targets.Add(("TimelineView", timelineView));
+        targets.Add(("Window", window));
+
+        var parameters = new List<object?>
+        {
+            null,
+            layer,
+            labelVm,
+            timeline
+        };
+
+        var uniqueTargets = targets
+            .GroupBy(x => x.Target, ReferenceEqualityComparer.Instance)
+            .Select(x => x.First())
+            .ToArray();
+
+        if (command is RoutedCommand routed)
+        {
+            foreach (var (targetName, target) in uniqueTargets)
+            {
+                foreach (var parameter in parameters)
+                {
+                    bool can;
+                    try
+                    {
+                        can = routed.CanExecute(parameter, target);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"route_can_exception command={commandType} target={targetName} param={DescribeParameter(parameter)} error={ex.GetBaseException().Message}");
+                        continue;
+                    }
+
+                    Log($"route_can command={commandType} target={targetName} param={DescribeParameter(parameter)} can={can}");
+                    if (!can)
+                        continue;
+
+                    routed.Execute(parameter, target);
+                    var route = new RouteResult(
+                        commandType.ToString(),
+                        targetName,
+                        DescribeParameter(parameter),
+                        true);
+                    Fact(commandType + "_route", $"{route.Target}|{route.Parameter}");
+                    return route;
+                }
+            }
+        }
+        else
+        {
+            foreach (var parameter in parameters)
+            {
+                bool can;
+                try { can = command.CanExecute(parameter); }
+                catch { continue; }
+
+                Log($"route_can command={commandType} target=<direct> param={DescribeParameter(parameter)} can={can}");
+                if (!can)
+                    continue;
+
+                command.Execute(parameter);
+                var route = new RouteResult(
+                    commandType.ToString(),
+                    "<direct>",
+                    DescribeParameter(parameter),
+                    true);
+                Fact(commandType + "_route", $"{route.Target}|{route.Parameter}");
+                return route;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"No executable route for {commandType}; label_element={labelElement?.GetType().FullName ?? "<none>"}");
+    }
 
     private static async Task<MutationResult> Exercise(
         string name,
+        CommandType commandType,
         Window window,
+        FrameworkElement timelineView,
+        TimelineViewModel vm,
         Timeline timeline,
         string baseline,
-        Func<Task> operation,
+        int layer,
         Func<int> timelineEventCount,
         Func<int> settingsEventCount)
     {
         var beforeTimelineEvents = timelineEventCount();
         var beforeSettingsEvents = settingsEventCount();
 
-        Log("phase=" + name + "_operation");
-        await operation();
-        await Task.Delay(500);
+        timeline.SelectedItems = ImmutableList<IItem>.Empty;
+        timeline.LayerSelection.SelectedLayers = ImmutableList.Create(layer);
+        await Task.Delay(150);
+
+        Log("phase=" + name + "_command");
+        var route = ExecuteStandardLayerCommand(
+            commandType,
+            window,
+            timelineView,
+            vm,
+            timeline,
+            layer);
+
+        await Task.Delay(600);
 
         var after = Snapshot(timeline);
         var selectionAfter = Selected(timeline);
         Fact(name + "_after", after);
         Fact(name + "_selection_after", selectionAfter);
+        Check(name + "_route_executed", route.Executed);
         Check(name + "_changed", after != baseline);
 
         window.Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
+
         await Native.Key(0x5A, true);
         var undo = Snapshot(timeline);
         Fact(name + "_undo", undo);
@@ -180,6 +329,10 @@ internal static class StructuralProbe
         Fact(name + "_settings_events", settingsDelta);
         Check(name + "_undo_event_surface", timelineDelta + settingsDelta > 0);
 
+        if (reset != baseline)
+            throw new InvalidOperationException(
+                $"{name} failed to restore baseline; subsequent mutation evidence would be contaminated");
+
         return new(
             after,
             undo,
@@ -187,11 +340,13 @@ internal static class StructuralProbe
             reset,
             selectionAfter,
             timelineDelta,
-            settingsDelta);
+            settingsDelta,
+            route);
     }
 
     private static async Task Run(Window window)
     {
+        Timeline? subscribedTimeline = null;
         EventHandler<UndoRedoEventArgs>? timelineHandler = null;
         EventHandler<UndoRedoEventArgs>? settingsHandler = null;
 
@@ -206,19 +361,20 @@ internal static class StructuralProbe
             Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
             await Task.Delay(1200);
 
-            var view = Host.Elements(window)
+            var timelineView = Host.Elements(window)
                 .Where(x => x.GetType().Name == "TimelineView" && x.IsVisible)
                 .OrderByDescending(x => x.ActualWidth * x.ActualHeight)
                 .First();
 
-            var vm = view.DataContext as TimelineViewModel
+            var vm = timelineView.DataContext as TimelineViewModel
                 ?? throw new InvalidOperationException("Visible TimelineViewModel missing");
 
             var timeline = Host.Get(vm, "Timeline") as Timeline
                 ?? vm.GetType().GetField("timeline", Host.Flags)?.GetValue(vm) as Timeline
                 ?? throw new InvalidOperationException("Visible Timeline missing");
 
-            Check("visible_context_bound", ReferenceEquals(view.DataContext, vm));
+            subscribedTimeline = timeline;
+            Check("visible_context_bound", ReferenceEquals(timelineView.DataContext, vm));
 
             var character = new Character { Name = "CNWL_STRUCTURAL" };
             for (var layer = 0; layer <= 8; layer++)
@@ -259,7 +415,10 @@ internal static class StructuralProbe
             Fact("baseline", baseline);
             Fact("baseline_max_layer", timeline.MaxLayer);
             Fact("baseline_layer_settings_max", timeline.LayerSettings.MaxLayer);
-            Check("fixture_count", timeline.Items.Count(x => x.Remark?.StartsWith("CNWL_STRUCT_", StringComparison.Ordinal) == true) == 9);
+            Check(
+                "fixture_count",
+                timeline.Items.Count(
+                    x => x.Remark?.StartsWith("CNWL_STRUCT_", StringComparison.Ordinal) == true) == 9);
 
             Fact("add_targets_L3", Targets(timeline.GetAddLayerTargetItems(3)));
             Fact("remove_targets_L3", Targets(timeline.GetRemoveLayerTargetItems(3)));
@@ -281,45 +440,39 @@ internal static class StructuralProbe
             timeline.UndoRedoCommandCreated += timelineHandler;
             timeline.LayerSettings.UndoRedoCommandCreated += settingsHandler;
 
-            var add = await Exercise(
+            await Exercise(
                 "add_L3",
+                CommandType.AddLayer,
                 window,
+                timelineView,
+                vm,
                 timeline,
                 baseline,
-                () =>
-                {
-                    timeline.LayerSelection.SelectedLayers = ImmutableList.Create(3);
-                    timeline.AddLayer(3);
-                    return Task.CompletedTask;
-                },
+                3,
                 () => timelineEvents,
                 () => settingsEvents);
 
-            var delete = await Exercise(
+            await Exercise(
                 "delete_L3",
+                CommandType.DeleteLayer,
                 window,
+                timelineView,
+                vm,
                 timeline,
                 baseline,
-                () =>
-                {
-                    timeline.LayerSelection.SelectedLayers = ImmutableList.Create(3);
-                    timeline.DeleteLayer(3);
-                    return Task.CompletedTask;
-                },
+                3,
                 () => timelineEvents,
                 () => settingsEvents);
 
-            var moveDown = await Exercise(
-                "move_L3_plus1",
+            await Exercise(
+                "move_L3_down",
+                CommandType.MoveDownLayer,
                 window,
+                timelineView,
+                vm,
                 timeline,
                 baseline,
-                () =>
-                {
-                    timeline.LayerSelection.SelectedLayers = ImmutableList.Create(3);
-                    timeline.MoveLayer(1);
-                    return Task.CompletedTask;
-                },
+                3,
                 () => timelineEvents,
                 () => settingsEvents);
 
@@ -332,13 +485,22 @@ internal static class StructuralProbe
             Check(
                 "no_harmony_loaded",
                 !AppDomain.CurrentDomain.GetAssemblies().Any(
-                    x => x.GetName().Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
+                    x => string.Equals(
+                        x.GetName().Name,
+                        "0Harmony",
+                        StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(
+                            x.GetName().Name,
+                            "HarmonyLib",
+                            StringComparison.OrdinalIgnoreCase)));
+
             Check(
                 "no_harmony_reference",
                 !typeof(StructuralProbe).Assembly.GetReferencedAssemblies().Any(
-                    x => x.Name?.Contains("Harmony", StringComparison.OrdinalIgnoreCase) == true));
+                    x => string.Equals(x.Name, "0Harmony", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(x.Name, "HarmonyLib", StringComparison.OrdinalIgnoreCase)));
 
-            Log("structural observation complete");
+            Log("structural routed-command observation complete");
         }
         catch (Exception ex)
         {
@@ -348,20 +510,12 @@ internal static class StructuralProbe
         {
             try
             {
-                // The active Timeline is reacquired because bootstrap state can differ by host version.
-                var visible = Host.Elements(window)
-                    .FirstOrDefault(x => x.GetType().Name == "TimelineView" && x.IsVisible);
-                if (visible?.DataContext is TimelineViewModel vm)
+                if (subscribedTimeline is not null)
                 {
-                    var timeline = Host.Get(vm, "Timeline") as Timeline
-                        ?? vm.GetType().GetField("timeline", Host.Flags)?.GetValue(vm) as Timeline;
-                    if (timeline is not null)
-                    {
-                        if (timelineHandler is not null)
-                            timeline.UndoRedoCommandCreated -= timelineHandler;
-                        if (settingsHandler is not null)
-                            timeline.LayerSettings.UndoRedoCommandCreated -= settingsHandler;
-                    }
+                    if (timelineHandler is not null)
+                        subscribedTimeline.UndoRedoCommandCreated -= timelineHandler;
+                    if (settingsHandler is not null)
+                        subscribedTimeline.LayerSettings.UndoRedoCommandCreated -= settingsHandler;
                 }
 
                 Native.Release();
@@ -389,7 +543,10 @@ internal static class StructuralProbe
             temp,
             new[]
             {
-                "status=" + (failed ? "FAIL_STRUCTURAL_MUTATION_SEMANTICS" : "PASS_STRUCTURAL_MUTATION_SEMANTICS"),
+                "status=" + (
+                    failed
+                        ? "FAIL_STRUCTURAL_MUTATION_SEMANTICS"
+                        : "PASS_STRUCTURAL_MUTATION_SEMANTICS"),
                 "assertion_count=" + checks.Count
             }.Concat(checks).Concat(facts));
         File.Move(temp, Path.Combine(output, "result.txt"), true);
