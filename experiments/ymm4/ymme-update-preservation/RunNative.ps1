@@ -33,6 +33,7 @@ function Stop-Ymm4 {
 }
 
 function Write-WindowSnapshot([string]$phase) {
+    try {
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
     foreach ($window in $windows) {
@@ -109,6 +110,12 @@ function Write-WindowSnapshot([string]$phase) {
                 }
             }
         }
+    }
+
+    }
+    catch {
+        "[$phase] ui-automation-transient=$($_.Exception.GetBaseException().Message)" | Add-Content $windowLog
+        return
     }
 }
 
@@ -197,7 +204,9 @@ $pluginData = Join-Path $pluginRoot 'Data\settings-probe.json'
 $pluginNested = Join-Path $pluginRoot 'Data\nested\keep.txt'
 $pluginRootUserFile = Join-Path $pluginRoot 'user-root-probe.txt'
 $userSibling = Join-Path $Ymm4Dir 'user\Ymm4PortableSettingsProbe\settings-probe.json'
-New-Item -ItemType Directory -Force (Split-Path $pluginData),(Split-Path $pluginNested),(Split-Path $userSibling) | Out-Null
+foreach ($dir in @((Split-Path $pluginData), (Split-Path $pluginNested), (Split-Path $userSibling))) {
+    New-Item -ItemType Directory -Force $dir | Out-Null
+}
 Set-Content -NoNewline $pluginData '{"source":"user-created","value":42}'
 Set-Content -NoNewline $pluginNested 'nested-user-data'
 Set-Content -NoNewline $pluginRootUserFile 'root-user-data'
