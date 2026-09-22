@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Threading;
 using Ymm4NoHarmonyProductState;
 using YukkuriMovieMaker.Project;
@@ -122,7 +123,7 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
             return;
 
         pendingCapture?.Abort();
-        pendingCapture = timeline.Dispatcher.BeginInvoke(
+        pendingCapture = Application.Current.Dispatcher.BeginInvoke(
             new Action(CaptureExternalOverrides),
             DispatcherPriority.ContextIdle);
     }
@@ -135,7 +136,7 @@ internal sealed class FolderVisibilityCoordinator : IDisposable
         // State callbacks may run during native Undo/Redo. Defer ownership
         // reconstruction until the host's visibility setters have settled.
         pendingCapture?.Abort();
-        pendingCapture = timeline.Dispatcher.BeginInvoke(
+        pendingCapture = Application.Current.Dispatcher.BeginInvoke(
             new Action(() =>
             {
                 pendingCapture = null;
