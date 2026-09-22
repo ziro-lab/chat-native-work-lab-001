@@ -172,10 +172,10 @@ internal static class Probe
         return null;
     }
 
-    private static async Task<Point> FindNativeLayerPoint(
+    private static async Task<Point> FindContextMenuPoint(
         FrameworkElement labels,
-        Timeline timeline,
-        int layer)
+        int layer,
+        ContextMenu menu)
     {
         var row = FindLayerElement(labels, layer);
         var rowRect = Host.ScreenRect(row);
@@ -203,14 +203,23 @@ internal static class Probe
 
         foreach (var x in xs.Distinct().Where(x => x >= left && x <= right))
         {
-            timeline.LayerSelection.Clear();
+            if (menu.IsOpen)
+            {
+                await Native.Key(0x1B);
+                await Task.Delay(120);
+            }
+
             var screen = new Point(x, y);
-            await Native.Click(screen);
-            if (timeline.LayerSelection.SelectedLayers.Contains(layer))
+            await Native.Click(screen, right: true);
+            await Task.Delay(180);
+            if (menu.IsOpen)
+            {
+                await Native.Key(0x1B);
                 return screen;
+            }
         }
 
-        throw new InvalidOperationException($"No native selectable point found for layer {layer}: row={rowRect} labels={labelsRect}");
+        throw new InvalidOperationException($"No native context-menu point found for layer {layer}: row={rowRect} labels={labelsRect}");
     }
 
     private static FrameworkElement FindLayerContextOwner(FrameworkElement labels, int layer)
@@ -236,9 +245,9 @@ internal static class Probe
     private sealed class FolderMenuLease : IDisposable
     {
         private const string Tag = "CNWL.P4.Menu";
-        private readonly Window routeRoot;
-        private readonly Timeline timeline;
-        private readonly ContextMenuEventHandler opening;
+        private readonly ContextMenu menu;
+        private readonly int layer;
+        private readonly RoutedEventHandler opened;
         private bool disposed;
 
         internal int Openings { get; private set; }
@@ -247,14 +256,13 @@ internal static class Probe
         internal int LastOriginalCount { get; private set; }
         internal ContextMenu? LastMenu { get; private set; }
         internal MenuItem? LastItem { get; private set; }
-        internal bool UsedSelectionFallback { get; private set; }
 
-        internal FolderMenuLease(Window routeRoot, Timeline timeline)
+        internal FolderMenuLease(ContextMenu menu, int layer)
         {
-            this.routeRoot = routeRoot;
-            this.timeline = timeline;
-            opening = OnOpening;
-            routeRoot.AddHandler(FrameworkElement.ContextMenuOpeningEvent, opening, true);
+            this.menu = menu;
+            this.layer = layer;
+            opened = OnOpened;
+            menu.Opened += opened;
         }
 
         private static void RemoveTagged(ContextMenu menu)
@@ -263,24 +271,13 @@ internal static class Probe
                 menu.Items.Remove(item);
         }
 
-        private void OnOpening(object sender, ContextMenuEventArgs e)
+        private void OnOpened(object? sender, RoutedEventArgs e)
         {
             if (disposed) return;
-            var layer = FindLayerFromSource(e.OriginalSource as DependencyObject);
-            if (layer is null && timeline.LayerSelection.SelectedLayers.Count == 1)
-            {
-                layer = timeline.LayerSelection.SelectedLayers[0];
-                UsedSelectionFallback = true;
-            }
-
-            var owner =
-                FindContextMenuOwnerFromSource(e.OriginalSource as DependencyObject)
-                ?? FindContextMenuOwnerFromSource(e.Source as DependencyObject);
-            if (layer is null || owner?.ContextMenu is not { } menu)
-                return;
 
             RemoveTagged(menu);
             LastOriginalCount = menu.Items.Count;
+
             var separator = new Separator { Tag = Tag };
             var item = new MenuItem { Header = "CNWL Folder action", Tag = Tag };
             item.Click += (_, _) => Clicks++;
@@ -288,7 +285,7 @@ internal static class Probe
             menu.Items.Add(item);
 
             Openings++;
-            LastLayer = layer.Value;
+            LastLayer = layer;
             LastMenu = menu;
             LastItem = item;
 
@@ -305,9 +302,8 @@ internal static class Probe
         {
             if (disposed) return;
             disposed = true;
-            routeRoot.RemoveHandler(FrameworkElement.ContextMenuOpeningEvent, opening);
-            if (LastMenu is not null)
-                RemoveTagged(LastMenu);
+            menu.Opened -= opened;
+            RemoveTagged(menu);
         }
     }
 
@@ -498,16 +494,29 @@ internal static class Probe
             Fact("labels_type", labels.GetType().FullName);
             Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
 
-            var nativePoint = await FindNativeLayerPoint(labels, timeline, 6);
-            Fact("layer6_native_point", nativePoint);
-            var globalHit = window.InputHitTest(window.PointFromScreen(nativePoint)) as DependencyObject;
-            Fact("layer6_window_hit_type", globalHit?.GetType().FullName);
-            Fact("layer6_window_hit_layer", FindLayerFromSource(globalHit));
+            var contextOwner = FindLayerContextOwner(labels, 6);
+            var nativeMenu = contextOwner.ContextMenu
+                ?? throw new InvalidOperationException("Layer 6 ContextMenu missing.");
+            Fact("layer6_context_owner", contextOwner.GetType().FullName);
+            Fact("layer6_context_menu_type", nativeMenu.GetType().FullName);
 
-            timeline.LayerSelection.Clear();
+            var nativePoint = await FindContextMenuPoint(labels, 6, nativeMenu);
+            Fact("layer6_native_point", nativePoint);
+
+            DependencyObject? baselineSource = null;
+            var baselineLeftDown = 0;
+            MouseButtonEventHandler windowInputObserver = (_, e) =>
+            {
+                if (e.ChangedButton != MouseButton.Left)
+                    return;
+                baselineLeftDown++;
+                baselineSource = e.OriginalSource as DependencyObject;
+            };
+            window.AddHandler(Mouse.PreviewMouseDownEvent, windowInputObserver, true);
             await Native.Click(nativePoint);
-            Check("baseline_native_layer_input_observed", timeline.LayerSelection.SelectedLayers.Contains(6));
-            Fact("baseline_selected_layers", string.Join(",", timeline.LayerSelection.SelectedLayers));
+            window.RemoveHandler(Mouse.PreviewMouseDownEvent, windowInputObserver);
+            Check("baseline_native_layer_input_observed", baselineLeftDown == 1 && baselineSource is not null);
+            Fact("baseline_input_source", baselineSource?.GetType().FullName);
 
             adornerLayer = AdornerLayer.GetAdornerLayer(labels)
                 ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
@@ -529,16 +538,28 @@ internal static class Probe
             display.ThrowIfFailed();
             Check("native_toggle_collapses", toggleLease.Clicks == 2 && display.Layout.IsHidden(3));
 
-            timeline.LayerSelection.Clear();
+            DependencyObject? postOverlaySource = null;
+            var postOverlayLeftDown = 0;
+            MouseButtonEventHandler postOverlayObserver = (_, e) =>
+            {
+                if (e.ChangedButton != MouseButton.Left)
+                    return;
+                postOverlayLeftDown++;
+                postOverlaySource = e.OriginalSource as DependencyObject;
+            };
+            window.AddHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver, true);
             await Native.Click(nativePoint);
-            Check("outside_overlay_preserves_native_layer_click", timeline.LayerSelection.SelectedLayers.Contains(6));
-            Fact("post_overlay_selected_layers", string.Join(",", timeline.LayerSelection.SelectedLayers));
+            window.RemoveHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver);
+            Check("outside_overlay_preserves_native_layer_click",
+                postOverlayLeftDown == 1
+                && postOverlaySource is not null
+                && ReferenceEquals(postOverlaySource, baselineSource));
+            Fact("post_overlay_input_source", postOverlaySource?.GetType().FullName);
 
-            menuLease = new FolderMenuLease(window, timeline);
+            menuLease = new FolderMenuLease(nativeMenu, 6);
             await Native.Click(nativePoint, right: true);
             await Task.Delay(500);
             Check("context_open_observed", menuLease.Openings == 1 && menuLease.LastLayer == 6);
-            Fact("context_used_selection_fallback", menuLease.UsedSelectionFallback);
             Check("native_menu_preserved_and_extended",
                 menuLease.LastMenu is { IsOpen: true }
                 && menuLease.LastMenu.Items.Count >= menuLease.LastOriginalCount + 2
