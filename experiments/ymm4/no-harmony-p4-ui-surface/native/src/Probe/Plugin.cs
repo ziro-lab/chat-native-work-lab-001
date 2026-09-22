@@ -482,6 +482,17 @@ internal static class Probe
         return new Point(rect.X + rect.Width / 2, rect.Y + rect.Height / 2);
     }
 
+    private static async Task Reveal(Host host, double top)
+    {
+        var current = (Rect)(Host.Reactive(host.Vm, "Viewport")
+            ?? throw new InvalidOperationException("Viewport"));
+        Host.SetReactive(
+            host.Vm,
+            "Viewport",
+            new Rect(new Point(current.X, top), current.Size));
+        await Task.Delay(450);
+    }
+
     private static async Task Run(Window window)
     {
         DirectDisplay? display = null;
@@ -544,6 +555,9 @@ internal static class Probe
             Fact("labels_type", labels.GetType().FullName);
             Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
 
+            var layerHeight = YukkuriMovieMaker.Settings.YMMSettings.Default.LayerHeight;
+            await Reveal(host, 6 * layerHeight);
+
             var contextOwner = FindLayerContextOwner(labels, 6);
             var nativeMenu = contextOwner.ContextMenu
                 ?? throw new InvalidOperationException("Layer 6 ContextMenu missing.");
@@ -562,6 +576,8 @@ internal static class Probe
             await Task.Delay(700);
             display.ThrowIfFailed();
             Check("fixture_folded", display.Layout.IsHidden(3) && !display.Layout.IsHidden(2));
+
+            await Reveal(host, display.Layout.VisualRowOfLogical(6) * layerHeight);
 
             // The label views are visually compacted by DirectDisplay. Route only
             // the label-column right-click Y coordinate back through FoldMap while
