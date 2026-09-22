@@ -16,8 +16,8 @@ public static class P3MissingWindow {
 }
 '@
 
-function Close-NoiseWindows([int]$pid){
-  $script:hostPid=$pid
+function Close-NoiseWindows([int]$processId){
+  $script:hostPid=$processId
   $cb=[P3MissingWindow+Callback]{
     param([IntPtr]$w,[IntPtr]$unused)
     [uint32]$owner=0
