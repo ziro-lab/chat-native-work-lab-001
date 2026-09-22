@@ -2,351 +2,264 @@
 
 Status: **proposed policy for P2-P7**.
 
-This policy starts after P0 Core Spine and P1 Structural Tracking were frozen green.
-Its purpose is to keep the remaining work rigorous without repeating research-grade validation on every change.
+P0 Core Spine / P1 Structural Tracking are already frozen green.
+From P2 onward, keep their proof assets but stop using research-grade validation as the default development loop.
 
-The central rule is:
+Core rule:
 
-> Development checks, canonical host evidence, and release regression are different jobs. Do not run all three at the same density by default.
+> Use the smallest validation level that can falsify the assumption changed by the work.
 
-The frozen P0/P1 suites remain valuable as golden regression assets. They are not the default inner-loop test suite.
+Development checks, canonical YMM4 evidence, and release regression are different jobs.
 
 ---
 
 ## 1. Validation levels
 
-### V0 — Pure / fast verification
+| Level | Purpose | Default scope |
+| --- | --- | --- |
+| **V0 Pure/Fast** | known host-independent logic | unit/invariant/model/build/serialization tests; no YMM4 |
+| **V1 Native Smoke** | ordinary host-sensitive development | one primary pinned host, narrow representative scenario |
+| **V2 Phase Evidence** | freeze a new host-dependent product contract | focused integrated matrix, both pinned hosts when part of support claim, full Evidence identity |
+| **V3 Golden Regression** | protect frozen cross-cutting behavior / RC | affected frozen P0/P1 or later product golden suites |
 
-Use for host-independent logic and ordinary source changes.
+### V0
 
-Typical contents:
+Use whenever possible.
 
-- unit tests;
-- invariant/property tests;
-- deterministic model tests;
-- compile/build;
-- serialization/schema tests that do not require YMM4;
-- static fixture tests.
-
-Expected use: **every relevant change**.
-
-Examples:
+Typical targets:
 
 - `FolderRangeTracker`;
 - `StructuralDeltaDetector`;
-- `FoldMap` / logical-display mapping;
-- persistence schema/migration logic;
-- hidden-destination policy when expressed as pure policy.
+- `FoldMap`;
+- persistence schema/migration;
+- pure hidden-destination or compatibility policy;
+- ordinary compile/build checks.
 
-V0 does not establish undocumented YMM4 host behavior.
+V0 does not establish undocumented YMM4 behavior.
 
-### V1 — Focused native development smoke
+### V1
 
-Use when a change touches real YMM4 interaction or a version-sensitive host surface.
+Use when real YMM4 behavior matters.
 
-Default:
+Default development host: **YMM4 4.56.1.0 Lite**.
 
-- one primary pinned host;
-- one narrow scenario or a small representative set;
-- machine-checkable assertions;
-- no requirement to reproduce the full canonical Evidence chain unless the result will be cited as a host claim.
+Examples:
 
-Current primary development host: **YMM4 4.56.1.0 Lite**.
-
-Typical V1 targets:
-
-- one placement route;
-- one navigation route;
+- one placement/navigation route;
 - one Undo transaction;
-- one drag gesture;
-- one save/reopen route;
-- one host adapter capability.
+- one gesture;
+- one save/reopen path;
+- one `YmmHostAccess` capability.
 
-V1 answers “did this integration still work?” rather than “have we re-proved the whole architecture?”.
+V1 answers “does the changed integration still work?”.
+It does not automatically become a permanent Lab host claim.
 
-### V2 — Phase acceptance / canonical host evidence
+### V2
 
-Use at a phase freeze, or when a new undocumented host behavior becomes a product dependency.
+Use at phase freeze, or when a new undocumented YMM4 behavior becomes a product dependency.
 
-Requirements:
-
-- both pinned hosts when the behavior is part of the supported compatibility claim:
-  - YMM4 4.55.1.1 Lite;
-  - YMM4 4.56.1.0 Lite;
-- focused integrated matrix for the mechanisms changed by the phase;
-- exact PASS / NOT PROVEN boundary;
-- canonical Evidence identity according to Lab policy:
-  - source HEAD;
-  - actual tested checkout when different;
-  - workflow run;
-  - exact host/version;
-  - assertions;
-  - artifact;
-  - digest/hash.
-
-V2 is where exploratory or V1 findings become durable evidence.
-
-### V3 — Golden regression / release confidence
-
-Use only when a change can invalidate already-frozen cross-cutting behavior, or at release-candidate boundaries.
-
-Candidates include:
-
-- frozen P0 Track C acceptance;
-- frozen P1 final integrated structural suite;
-- equivalent product-extraction golden suites once they exist.
-
-Trigger examples:
-
-- `FoldMap` semantics change;
-- folded display geometry changes;
-- `YmmHostAccess` changes a shared host surface;
-- Undo ownership changes;
-- `GestureLease` internals change;
-- placement/navigation routing changes in a way shared by multiple operations;
-- major dependency/runtime change;
-- release candidate.
-
-Do **not** run V3 merely because a leaf UI command, label, or isolated route changed.
-
----
-
-## 2. Manual hands-on validation is a separate track
-
-Manual checks are not a weaker form of V2; they answer different questions.
-
-Use manual live observation for:
-
-- visual discoverability;
-- interaction comfort;
-- animation quality;
-- perceived drag continuity;
-- keyboard ergonomics;
-- error/recovery wording;
-- workflows that are difficult to automate without testing the harness rather than the product.
-
-Record:
-
-- exact host version;
-- task performed;
-- expected result;
-- observed result;
-- remaining uncertainty.
-
-Do not turn visual/perceptual observations into automated PASS claims without a corresponding machine test.
-
-Avoid pixel-perfect automation unless pixel identity itself is the product requirement.
-
----
-
-## 3. Change-to-validation routing
-
-| Change | Default validation |
-| --- | --- |
-| Pure folder/model/policy logic | V0 |
-| Pure persistence/schema/migration logic | V0 |
-| Docs / wording / test comments | V0 or no runtime test |
-| New route using an already-proven mapping mechanism | V0 + focused V1 |
-| New undocumented YMM4 behavior | isolated host probe first; V1 discovery, then V2 if adopted |
-| `YmmHostAccess` change | V0 + V1; V2/V3 if shared contract changes |
-| `FoldMap` / display-row mapping semantics | V0 + V1 + affected V3 before freeze |
-| Folded display geometry / virtualization | V0 + V1 + affected V3 before freeze |
-| Undo transaction ownership | V0 + V1 + affected V3 before freeze |
-| Gesture / drag lifecycle | V0 + V1 + affected V3 before freeze |
-| Leaf UI styling | manual hands-on; no native full regression by default |
-| UX interaction path that changes host behavior | manual + focused V1; V2 at phase exit |
-| Host version bump | revalidate affected subsystem; do not blindly replay all historical probes |
-| Package/runtime/dependency change | build/package smoke + focused V1; V3 for RC |
-| Release candidate | V0 + required V2 phase gates + V3 + package/install/recovery checks |
-
-If uncertain, choose the smallest level that can falsify the changed assumption.
-
----
-
-## 4. Two-host policy
-
-Running both pinned YMM4 versions is valuable, but not necessary for every edit.
-
-Default:
-
-- **development / iteration:** newest pinned supported host only;
-- **phase freeze:** both pinned hosts for host-dependent acceptance;
-- **release candidate:** both pinned hosts;
-- **version-sensitive discrepancy:** both hosts immediately;
-- **pure logic:** no YMM4 host.
-
-When support moves to a newer YMM4 version, re-run the subsystem that materially changed first.
-Do not treat an unrelated YMM4 update as a reason to replay every historical experiment.
-
----
-
-## 5. Evidence and artifact policy
-
-### Development checks
-
-A V0/V1 development check may remain ordinary CI evidence.
-
-It does not need to be promoted into a permanent host-observation record unless it is relied on as a product claim.
-
-### Canonical evidence
-
-V2/V3 evidence keeps the full Lab chain:
+For canonical host evidence record:
 
 ```text
 source / tested tree
-  -> workflow run
-  -> exact host
-  -> assertions
-  -> artifact
-  -> digest
+ -> workflow run
+ -> exact host/version
+ -> assertions
+ -> artifact
+ -> digest
 ```
 
-Independent artifact SHA256 checking is most useful at:
+Keep PASS and NOT PROVEN separate.
+
+### V3
+
+Run only when already-frozen shared behavior can have changed, or at release-candidate boundaries.
+
+Typical triggers:
+
+- `FoldMap` semantics;
+- folded display/virtualization;
+- shared `YmmHostAccess`;
+- Undo ownership;
+- gesture lifecycle;
+- shared placement/navigation routing;
+- major runtime/dependency change;
+- release candidate.
+
+Do not run V3 for an isolated label, styling change, or leaf route that does not alter a shared contract.
+
+---
+
+## 2. Manual hands-on is a separate track
+
+Use manual live observation for:
+
+- discoverability;
+- interaction comfort;
+- animation/visual continuity;
+- keyboard ergonomics;
+- recovery/error wording;
+- perceptual behavior that automation would test poorly.
+
+Record exact host, task, expected result, observed result and uncertainty.
+
+Do not convert manual observations into automated PASS claims.
+Avoid pixel-perfect automation unless exact pixels are the actual requirement.
+
+---
+
+## 3. Change -> validation routing
+
+| Change | Default |
+| --- | --- |
+| Pure model/policy/schema/migration | V0 |
+| Docs/comments/wording | V0 or no runtime test |
+| New route using an existing proven mechanism | V0 + focused V1 |
+| New undocumented YMM4 behavior | isolated V1 probe -> V2 only if adopted |
+| `YmmHostAccess` shared contract | V0 + V1; V2/V3 before freeze |
+| `FoldMap` / folded geometry / virtualization | V0 + V1 + affected V3 |
+| Undo ownership | V0 + V1 + affected V3 |
+| Gesture/drag lifecycle | V0 + V1 + affected V3 |
+| Leaf UI styling | manual; no full native regression |
+| UX path that changes host interaction | manual + focused V1; V2 at phase exit |
+| YMM4 version bump | affected subsystem only first |
+| Package/runtime/dependency change | build/package smoke + V1; V3 for RC |
+| Release candidate | V0 + required V2 + affected V3 + package/recovery checks |
+
+If ownership of the changed assumption is unclear, identify it before adding more tests.
+
+---
+
+## 4. Host and artifact policy
+
+### Host matrix
+
+Default:
+
+- normal development: newest pinned supported host only;
+- phase freeze: both pinned hosts for host-dependent acceptance;
+- RC: both pinned hosts;
+- version-sensitive discrepancy: both hosts immediately;
+- pure logic: no YMM4.
+
+Current pinned hosts:
+
+- YMM4 4.55.1.1 Lite;
+- YMM4 4.56.1.0 Lite.
+
+A future YMM4 update does not automatically require replaying every historical probe.
+Revalidate the subsystem materially touched by the host change.
+
+### Artifacts
+
+Ordinary V0/V1 checks do not need to become permanent canonical Evidence.
+
+Keep full artifact/digest records for:
 
 - phase freeze;
 - architecture freeze;
-- release candidate;
-- difficult-to-reproduce or expensive host proof.
-
-Do not require a new permanent artifact/digest record for every inner-loop smoke run.
+- difficult/expensive host proof;
+- release candidate.
 
 ---
 
-## 6. Frozen P0/P1 treatment
+## 5. Frozen P0/P1 treatment
 
-P0 and P1 are **golden evidence**, not ordinary development loops.
+P0/P1 are **golden assets**, not the normal inner loop.
 
 Keep:
 
-- P0 frozen host-interaction/Track C evidence;
-- P1 `FolderRangeTracker` and `StructuralDeltaDetector` pure suites;
-- P1 final integrated structural acceptance;
-- the exact evidence records already produced.
+- P0 Track C/native interaction evidence;
+- P1 pure tracker/detector suites;
+- P1 final 353/353 integrated structural acceptance;
+- existing Evidence identities.
 
-Default behavior from P2 onward:
+From P2 onward:
 
-- run cheap pure P0/P1-derived logic tests whenever relevant;
-- do not rerun the full native P0/P1 suites for unrelated work;
-- run the affected frozen native suite when a shared invariant is changed;
-- run the final golden set again at the release-candidate boundary.
+- run cheap pure tests whenever relevant;
+- do not rerun full native P0/P1 for unrelated work;
+- rerun only the affected frozen suite when a shared invariant changes;
+- run relevant golden suites again at RC.
 
-A failure in new work should reopen only the affected frozen assumption, not automatically restart P0/P1.
+New evidence should reopen only the affected assumption, not broadly restart P0/P1.
 
 ---
 
-## 7. P2 — Host Interaction Coverage
+## 6. Lean phase gates
 
-Goal: cover remaining routes where folded display coordinates may diverge from logical YMM4 coordinates.
+### P2 — Host Interaction Coverage
 
-### Discovery
+Classify each remaining route as:
 
-Inventory routes and classify each as:
-
-1. native-safe without adaptation;
+1. native-safe;
 2. mapped through existing `FoldMap` / interaction routing;
-3. unsupported with graceful behavior.
+3. intentionally unsupported with graceful behavior.
 
-For a genuinely new host route:
+Mechanism groups:
 
-- use one narrow Lab question;
-- prove it first on the primary host;
-- avoid creating a permanent product adapter until the mechanism is understood.
-
-### Representative mechanism groups
-
-Prefer one or two representative cases per mechanism rather than a Cartesian matrix:
-
-- placement/add routes;
+- placement/add;
 - automatic navigation / ScrollToItem-like behavior;
-- host-driven selection / seek;
+- host-driven selection/seek;
 - keyboard layer navigation;
-- hidden-destination policy;
-- group / multi-layer movement;
+- hidden destination;
+- group/multi-layer movement;
 - context-menu layer resolution.
 
-Include nested/hidden-boundary coverage only where that boundary can change the result.
+Use one or two representative cases per mechanism, plus a nested/hidden boundary only when it can change the result.
 
-### P2 exit
+**Exit:** focused matrix on both pinned hosts. Do not replay all P1 assertions unless P2 changes a P1 mechanism.
 
-- V0 for policy/mapping logic;
-- focused native integration for each supported mechanism group;
-- both pinned hosts for the final supported-route matrix;
-- no need to replay all 353 P1 assertions unless P2 changes a P1 shared mechanism.
+### P3 — Persistence
 
----
-
-## 8. P3 — Folder Data Model & Persistence
-
-Persistence should be mostly cheap and deterministic.
-
-### V0-heavy coverage
-
-Test without YMM4:
+Keep most coverage at V0:
 
 - schema round-trip;
 - hierarchy/range invariants;
-- collapse state;
-- naming/minimal metadata;
-- malformed data;
-- stale references;
-- migrations;
-- version skew;
-- deterministic recovery policy.
+- collapse/name metadata;
+- malformed/stale state;
+- migrations/version skew;
+- deterministic recovery.
 
-### Native coverage
-
-Use YMM4 only for lifecycle behavior that requires the host:
+Use native YMM4 only for:
 
 - save -> close -> reopen;
-- project switch;
-- new project;
-- plugin unavailable / recoverable fallback when practical;
-- one structural edit after reload to prove P1 semantics still attach correctly.
+- project switch/new project;
+- recoverable unavailable/stale state where practical;
+- one structural edit after reload.
 
-Do not execute every malformed-schema case through a full YMM4 launch if the same parser/recovery logic is already covered at V0.
+**Exit:** canonical lifecycle on both pinned hosts. Do not launch YMM4 for every malformed-schema case.
 
-P3 freeze uses both pinned hosts for the canonical lifecycle path.
+### P4 — UX
 
----
+Primary validation:
 
-## 9. P4 — Product UX
-
-P4 should not become a pixel-test project.
-
-Primary verification:
-
-- hands-on task scripts;
+- hands-on task script;
 - state/invariant automation behind the UI;
-- focused native smoke only when a UX operation changes host interaction.
+- focused V1 only where an operation changes host behavior.
 
 Core tasks:
 
-- create folder;
-- collapse / expand;
+- create;
+- collapse/expand;
 - remove folder metadata without deleting items;
 - rename;
-- identify hidden ownership;
-- select/navigate nested folders;
-- keyboard-accessible core actions where implemented;
+- understand hidden ownership;
+- nested selection/navigation;
+- keyboard actions where implemented;
 - recover from unsupported/stale state.
 
-One good end-to-end hands-on task is more valuable than many brittle screenshot assertions.
+No broad screenshot/pixel suite.
+Two-host UX testing is needed only for host-dependent interaction differences, not styling.
 
-Run both hosts only when the UX relies on a host surface known to differ; styling alone does not require a two-host gate.
+### P5 — Compatibility
 
----
-
-## 10. P5 — Compatibility Coverage
-
-Avoid the full product of:
+Do not test the full Cartesian product of:
 
 ```text
 item types x operations x folder states x host versions
 ```
 
-Use equivalence classes.
-
-Representative classes:
+Use equivalence classes:
 
 - voice;
 - text;
@@ -354,117 +267,106 @@ Representative classes:
 - video;
 - audio;
 - shape;
-- effect/transition where structurally different;
-- grouped/multi-layer item;
-- representative third-party/special item when available.
+- structurally distinct effect/transition;
+- group/multi-layer;
+- representative special/third-party item.
 
 For each class, test only operations where its host behavior can differ.
 
-A single common behavior can cover multiple classes if they enter the same verified host mechanism.
-
-The output is a compatibility matrix:
+Output a matrix of:
 
 - supported;
-- supported via common route;
+- supported through common route;
 - graceful fallback;
 - known unsupported;
-- host-version-specific.
+- version-specific.
 
----
+### P6 — Hardening / Performance
 
-## 11. P6 — Hardening & Performance
+Stress is a phase/RC tool, not an inner-loop tool.
 
-Stress tests are phase/RC tools, not inner-loop tests.
-
-Use defined scenarios such as:
+Use defined scenarios:
 
 - many layers/items/folders;
 - deep valid nesting;
-- repeated collapse/expand;
-- repeated structural edits;
-- scroll/zoom/resize cycles;
+- repeated collapse/expand and edits;
+- scroll/zoom/resize;
 - project switching;
 - detach/reload;
-- long idle/soak;
+- idle/soak;
 - failure injection;
 - subscription/memory cleanup.
 
-Policy:
+Long soak: primary host by default.
+Secondary host: shorter compatibility smoke unless a version-specific risk exists.
 
-- long soak on the primary host unless evidence shows a version-specific reason for duplicate long runs;
-- shorter compatibility smoke on the secondary host;
-- measure only defined metrics;
-- do not turn diagnostic counters into performance claims without a benchmark contract.
+Diagnostic counters are not performance claims without a benchmark contract.
 
----
-
-## 12. P7 — Release Gate
-
-Release validation should be strict but finite.
+### P7 — Release
 
 Required:
 
 - V0 clean;
-- relevant phase-acceptance gates green;
-- affected golden V3 suites green;
-- both supported pinned hosts;
-- package built from the same tested source;
+- relevant V2 gates green;
+- affected V3 golden suites green;
+- both supported hosts;
+- exact tested package/source identity;
 - install/startup/basic operation;
-- persistence recovery path;
-- uninstall/disable behavior where relevant;
+- persistence recovery;
+- disable/uninstall behavior where relevant;
 - no Harmony reference/assembly;
-- known unsupported cases fail safely;
-- artifact identity recorded.
+- unsupported cases fail safely.
 
-Do not rerun every historical discovery probe. The release suite should verify the current product contracts, not reproduce the entire research history.
+Do not replay every historical discovery probe. Verify current product contracts.
 
 ---
 
-## 13. Practical default loop from P2 onward
+## 7. Default loop
 
-For ordinary development:
+Ordinary development:
 
 ```text
 edit
  -> V0
- -> if host-sensitive: focused V1 on primary host
+ -> host-sensitive? focused V1 on primary host
  -> continue
 ```
 
-At a phase boundary:
+Phase boundary:
 
 ```text
-focused integrated suite
- -> both pinned hosts (V2)
+focused integrated matrix
+ -> V2 on required pinned hosts
  -> manual hands-on where relevant
- -> freeze evidence
+ -> freeze
 ```
 
-When a shared frozen mechanism changes or at RC:
+Shared frozen mechanism change / RC:
 
 ```text
 V0
- -> focused V1
+ -> V1
  -> affected V2
- -> affected golden V3
- -> freeze/release evidence
+ -> affected V3
+ -> freeze/release
 ```
-
-This is the default. Escalate only when the changed assumption requires it.
 
 ---
 
-## 14. Anti-overengineering rules
+## 8. Anti-overengineering rules
 
-- Do not add assertions merely to increase assertion count.
-- Do not duplicate the same behavioral claim at pure, synthetic, and native levels unless each level catches a distinct failure mode.
-- Do not run two YMM4 versions when the test contains no YMM4 behavior.
-- Do not make every successful development run permanent Evidence.
-- Do not build new Lab abstractions before the same need appears more than once.
-- Do not create a new product adapter just because a Lab probe has its own adapter.
-- Do not cross every dimension of the compatibility matrix when equivalence classes establish the same mechanism.
-- Do not use full golden regression to compensate for unclear change ownership; first identify which contract changed.
-- Do not delete frozen safeguards merely to reduce test count.
+- Do not add assertions just to increase the count.
+- Do not duplicate one behavioral claim at multiple levels unless each catches a distinct failure mode.
+- Do not run YMM4 for host-independent logic.
+- Do not run both hosts by default during iteration.
+- Do not make every green development run permanent Evidence.
+- Do not build a new Lab abstraction until the need repeats.
+- Do not create a product adapter just because an isolated Lab probe has one.
+- Do not cross every compatibility dimension when equivalence classes establish the same mechanism.
+- Do not use full golden regression as a substitute for knowing what changed.
+- Do not remove frozen safeguards merely to make the test suite smaller.
 - Prefer fewer assertions with clear failure meaning over a large assertion total.
 
-The desired end state is **research-grade evidence at uncertain boundaries, ordinary engineering tests for known logic, and release-grade regression only at release-relevant boundaries**.
+Target balance:
+
+> research-grade evidence at uncertain boundaries, ordinary engineering tests for known logic, release-grade regression at release-relevant boundaries.
