@@ -577,12 +577,19 @@ internal static class Probe
             display.ThrowIfFailed();
             Check("fixture_folded", display.Layout.IsHidden(3) && !display.Layout.IsHidden(2));
 
-            await Reveal(host, display.Layout.VisualRowOfLogical(6) * layerHeight);
+            await Reveal(host, 0);
 
             // The label views are visually compacted by DirectDisplay. Route only
             // the label-column right-click Y coordinate back through FoldMap while
             // keeping YMM4's existing ContextMenu instance/commands.
             labelRouter = new LayerLabelInputRouter(labels, display);
+
+            var foldedContextOwner = FindLayerContextOwner(labels, 6);
+            var foldedMenu = foldedContextOwner.ContextMenu
+                ?? throw new InvalidOperationException("Folded layer 6 ContextMenu missing.");
+            Fact("layer6_folded_context_owner", foldedContextOwner.GetType().FullName);
+            Fact("layer6_context_recreated", !ReferenceEquals(foldedContextOwner, contextOwner));
+            Fact("layer6_menu_recreated", !ReferenceEquals(foldedMenu, nativeMenu));
 
             var foldedRow6 = FindLayerElement(labels, 6);
             var foldedRect6 = Host.ScreenRect(foldedRow6);
@@ -603,8 +610,13 @@ internal static class Probe
             window.AddHandler(Mouse.PreviewMouseDownEvent, windowInputObserver, true);
             await Native.Click(nativePoint);
             window.RemoveHandler(Mouse.PreviewMouseDownEvent, windowInputObserver);
-            Check("baseline_native_layer_input_observed", baselineLeftDown == 1 && baselineSource is not null);
+            var baselineOwner = FindContextMenuOwnerFromSource(baselineSource);
+            Check("baseline_native_layer_input_observed",
+                baselineLeftDown == 1
+                && baselineSource is not null
+                && baselineOwner is not null);
             Fact("baseline_input_source", baselineSource?.GetType().FullName);
+            Fact("baseline_input_owner", baselineOwner?.GetType().FullName);
 
             adornerLayer = AdornerLayer.GetAdornerLayer(labels)
                 ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
@@ -614,14 +626,18 @@ internal static class Probe
             await Task.Delay(500);
             Check("adorner_attached", adornerLayer.GetAdorners(labels)?.Contains(adorner) == true);
             Check("adorner_input_transparent", !adorner.IsHitTestVisible);
-            Check("toggle_on_screen", Host.ScreenRect(labels).Contains(Center(adorner.Toggle)));
+            var toggleRect = adorner.ToggleRect;
+            var togglePoint = labels.PointToScreen(new Point(
+                toggleRect.X + toggleRect.Width / 2,
+                toggleRect.Y + toggleRect.Height / 2));
+            Check("toggle_on_screen", Host.ScreenRect(labels).Contains(togglePoint));
 
-            await Native.Click(Center(adorner.Toggle));
+            await Native.Click(togglePoint);
             await Task.Delay(500);
             display.ThrowIfFailed();
             Check("native_toggle_expands", toggleLease.Clicks == 1 && !display.Layout.IsHidden(3));
 
-            await Native.Click(Center(adorner.Toggle));
+            await Native.Click(togglePoint);
             await Task.Delay(500);
             display.ThrowIfFailed();
             Check("native_toggle_collapses", toggleLease.Clicks == 2 && display.Layout.IsHidden(3));
@@ -638,20 +654,23 @@ internal static class Probe
             window.AddHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver, true);
             await Native.Click(nativePoint);
             window.RemoveHandler(Mouse.PreviewMouseDownEvent, postOverlayObserver);
+            var postOverlayOwner = FindContextMenuOwnerFromSource(postOverlaySource);
             Check("outside_overlay_preserves_native_layer_click",
                 postOverlayLeftDown == 1
                 && postOverlaySource is not null
-                && ReferenceEquals(postOverlaySource, baselineSource));
+                && postOverlayOwner is not null
+                && ReferenceEquals(postOverlayOwner, baselineOwner));
             Fact("post_overlay_input_source", postOverlaySource?.GetType().FullName);
+            Fact("post_overlay_input_owner", postOverlayOwner?.GetType().FullName);
 
-            menuLease = new FolderMenuLease(nativeMenu, 6);
+            menuLease = new FolderMenuLease(foldedMenu, 6);
             await Native.Click(nativePoint, right: true);
             await Task.Delay(500);
             Check("context_open_observed", menuLease.Openings == 1 && menuLease.LastLayer == 6);
             Check("label_right_map_exact",
                 labelRouter.RightMaps == 1
                 && labelRouter.LastLogicalLayer == 6
-                && ReferenceEquals(labelRouter.LastMenu, nativeMenu));
+                && ReferenceEquals(labelRouter.LastMenu, foldedMenu));
             Check("native_menu_preserved_and_extended",
                 menuLease.LastMenu is { IsOpen: true }
                 && menuLease.LastMenu.Items.Count >= menuLease.LastOriginalCount + 2
