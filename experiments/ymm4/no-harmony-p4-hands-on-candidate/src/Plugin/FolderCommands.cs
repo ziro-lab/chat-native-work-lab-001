@@ -2,8 +2,10 @@ using System.Windows;
 using System.Windows.Media;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
+using Ymm4NoHarmonyS3;
 using Ymm4NoHarmonyUx;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
 
@@ -246,6 +248,167 @@ internal sealed class FolderCommands
         log(
             $"folder_command apply_color id={folderId} " +
             $"range={folder.Start}-{folder.End} color={option?.Color ?? "<default>"}");
+    }
+
+    internal void InsertLayerAtFolderEnd(Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        InsertLayerIntoFolder(
+            folderId,
+            checked(folder.End + 1));
+    }
+
+    internal void InsertLayerAfterInFolder(
+        Guid folderId,
+        int logicalLayer)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+
+        if (logicalLayer < folder.Start
+            || logicalLayer > folder.End)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(logicalLayer));
+        }
+
+        InsertLayerIntoFolder(
+            folderId,
+            checked(logicalLayer + 1));
+    }
+
+    internal IReadOnlyList<GroupIssue> GetGroupIssues(
+        Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var groups = GroupItems();
+
+        return StructuralConvenienceRules.FindGroupIssues(
+            folder,
+            groups
+                .Select(x => new GroupSpan(
+                    x.Layer,
+                    x.GroupRange))
+                .ToArray());
+    }
+
+    internal int FitGroupsToFolder(Guid folderId)
+    {
+        var folder = FindFolder(folderId)
+            ?? throw new KeyNotFoundException(
+                $"Folder '{folderId}' was not found.");
+        var groups = GroupItems();
+        var planned = StructuralConvenienceRules.FitGroupRanges(
+            folder,
+            groups
+                .Select(x => new GroupSpan(
+                    x.Layer,
+                    x.GroupRange))
+                .ToArray());
+
+        var changed = 0;
+        for (var i = 0; i < groups.Count; i++)
+        {
+            if (groups[i].GroupRange == planned[i])
+                continue;
+
+            groups[i].GroupRange = planned[i];
+            changed++;
+        }
+
+        if (changed == 0)
+            return 0;
+
+        undo.Record();
+        log(
+            $"folder_command fit_groups id={folderId} changed={changed}");
+        return changed;
+    }
+
+    private List<GroupItem> GroupItems() =>
+        timeline.Items
+            .OfType<GroupItem>()
+            .OrderBy(x => x.Layer)
+            .ThenBy(x => x.Frame)
+            .ToList();
+
+    private void InsertLayerIntoFolder(
+        Guid folderId,
+        int position)
+    {
+        if (state.IsRecoveryBlocked)
+            throw new InvalidOperationException(
+                "Unreadable saved folder state is preserved; editing is blocked.");
+
+        if (!HandsOnHostAccess.CanExecuteTimelineCommand(
+                host,
+                window,
+                CommandType.AddLayer,
+                position))
+        {
+            throw new InvalidOperationException(
+                $"YMM4 cannot add a layer at L{position}.");
+        }
+
+        var before = FolderProductStateRules.NormalizeAndValidate(
+            state.ProductState);
+        var groups = GroupItems();
+        var plan = StructuralConvenienceRules.PlanInsertIntoFolder(
+            before,
+            TimelineKey,
+            folderId,
+            position,
+            1,
+            groups
+                .Select(x => new GroupSpan(
+                    x.Layer,
+                    x.GroupRange))
+                .ToArray());
+
+        Action nativeCompanion = () =>
+        {
+            for (var i = 0; i < groups.Count; i++)
+            {
+                if (groups[i].GroupRange != plan.GroupRanges[i])
+                    groups[i].GroupRange = plan.GroupRanges[i];
+            }
+        };
+
+        using var composite =
+            structural.PrepareProductCompositeOverride(
+                CommandType.AddLayer,
+                position,
+                before,
+                plan.State,
+                nativeCompanion);
+
+        if (!HandsOnHostAccess.TryExecuteTimelineCommand(
+                host,
+                window,
+                CommandType.AddLayer,
+                position))
+        {
+            throw new InvalidOperationException(
+                "The preflighted YMM4 Add Layer command was not executable.");
+        }
+
+        if (!composite.Applied)
+        {
+            throw new InvalidOperationException(
+                "Owned layer insertion did not enter the shared structural history boundary.");
+        }
+
+        timeline.LayerSelection.Clear();
+
+        log(
+            $"folder_command insert_owned id={folderId} " +
+            $"position={position} groups={groups.Count}");
     }
 
     internal void Ungroup(Guid folderId) =>
