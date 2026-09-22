@@ -81,6 +81,21 @@ This is a UX candidate, not yet frozen. Hands-on may justify a later convenience
 
 ## 5. Interaction constraints
 
+P4.1 exact-host discovery adds two host facts:
+
+- the visible folded layer-label row is not guaranteed to be the front-most WPF input source; a sibling Grid may receive the OS event;
+- virtualization / collapse changes can recycle the realized row Grid and its ContextMenu, so those WPF instances are ephemeral.
+
+Therefore the accepted routing direction is:
+
+- one handled-events-too Window input router;
+- immediately ignore events outside the current LayerLabels screen rectangle;
+- left click is handled only inside an explicit folder-control rectangle;
+- folded right click maps display Y -> logical Layer through FoldMap, reacquires the **current** realized row and opens that row's existing YMM4 ContextMenu;
+- never cache a row Grid / ContextMenu as durable state.
+
+Additional constraints:
+
 - clicking outside the small folder control must preserve native layer-label interaction;
 - standard YMM4 right-click menu items must remain available;
 - injected menu items are removed cleanly when the menu closes / plugin detaches;
@@ -110,6 +125,10 @@ P4 must not introduce a second folder model inside ViewModels or WPF elements.
 ## 7. P4 validation sequence
 
 ### P4.1 — UI surface viability
+
+**GREEN on YMM4 4.56.1.0.**
+
+Accepted source `8f588cbf9f88c4b823561782ae0c1aaf58973327`, run `35732312277`, 19/19 named assertions PASS.
 
 Exact-host V1 on YMM4 4.56.1.0:
 
