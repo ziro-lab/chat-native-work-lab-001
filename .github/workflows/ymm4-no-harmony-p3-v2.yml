@@ -1,0 +1,150 @@
+name: YMM4 no-Harmony P3 V2 secondary
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ymm4-no-harmony-p3-v2.yml'
+      - 'docs/YMM4_NO_HARMONY_P3_V2_TRIGGER.md'
+permissions: { contents: read }
+concurrency:
+  group: p3-v2-secondary-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secondary:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    env:
+      HOST_VERSION: '4.55.1.1'
+      HOST_HASH: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+      ROUNDTRIP_REF: '0600506b55b379880e4f30c5ef3c958bf6869491'
+      NEW_PROJECT_REF: '66d97f4b310d1de83c5f46ece47b0344ce54e2c0'
+      RELOAD_STRUCTURAL_REF: 'bfacff67e400eebab1a105be5cdc183b9d83cf3c'
+
+    steps:
+      - name: Checkout V2 control
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout frozen roundtrip source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ env.ROUNDTRIP_REF }}'
+          path: p3-roundtrip
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout frozen new-project source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ env.NEW_PROJECT_REF }}'
+          path: p3-new-project
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout frozen reload-structural source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ env.RELOAD_STRUCTURAL_REF }}'
+          path: p3-reload-structural
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Acquire pinned secondary host once
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @(
+            "control_head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "roundtrip_ref=$env:ROUNDTRIP_REF",
+            "new_project_ref=$env:NEW_PROJECT_REF",
+            "reload_structural_ref=$env:RELOAD_STRUCTURAL_REF",
+            "host_version=$env:HOST_VERSION",
+            "host_zip_sha256=$env:HOST_HASH",
+            "run=$env:GITHUB_RUN_ID",
+            "level=V2-secondary"
+          )|Set-Content out/evidence/manifest.txt
+
+      - name: V2 roundtrip
+        shell: pwsh
+        run: |
+          Remove-Item (Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3ToolStateRoundtrip') -Recurse -Force -ErrorAction SilentlyContinue
+          dotnet build p3-roundtrip/experiments/ymm4/no-harmony-p3-persistence/native-roundtrip/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/roundtrip-probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Roundtrip build failed'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3ToolStateRoundtrip'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/roundtrip-probe/Ymm4P3ToolStateRoundtrip.dll $d
+          if(Get-ChildItem out/roundtrip-probe -Filter '*Harmony*.dll'){throw 'Unexpected Harmony dependency'}
+          New-Item -ItemType Directory -Force out/evidence/roundtrip|Out-Null
+          ./p3-roundtrip/experiments/ymm4/no-harmony-p3-persistence/native-roundtrip/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence/roundtrip')
+          Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: V2 new-project
+        shell: pwsh
+        run: |
+          Remove-Item (Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3NewProject') -Recurse -Force -ErrorAction SilentlyContinue
+          dotnet build p3-new-project/experiments/ymm4/no-harmony-p3-new-project/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/new-project-probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'New-project build failed'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3NewProject'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/new-project-probe/Ymm4P3NewProjectProbe.dll $d
+          if(Get-ChildItem out/new-project-probe -Filter '*Harmony*.dll'){throw 'Unexpected Harmony dependency'}
+          New-Item -ItemType Directory -Force out/evidence/new-project|Out-Null
+          ./p3-new-project/experiments/ymm4/no-harmony-p3-new-project/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence/new-project')
+          Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: V2 reload-structural
+        shell: pwsh
+        run: |
+          Remove-Item (Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3ReloadStructural') -Recurse -Force -ErrorAction SilentlyContinue
+          dotnet build p3-reload-structural/experiments/ymm4/no-harmony-p3-reload-structural/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/reload-probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Reload-structural build failed'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P3ReloadStructural'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/reload-probe/Ymm4P3ReloadStructuralProbe.dll $d
+          if(Get-ChildItem out/reload-probe -Filter '*Harmony*.dll'){throw 'Unexpected Harmony dependency'}
+          New-Item -ItemType Directory -Force out/evidence/reload-structural|Out-Null
+          ./p3-reload-structural/experiments/ymm4/no-harmony-p3-reload-structural/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence/reload-structural')
+          Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Verify V2 markers
+        shell: pwsh
+        run: |
+          $expected=@{
+            'roundtrip'='PASS_P3_TOOLSTATE_ROUNDTRIP'
+            'new-project'='PASS_P3_NEW_PROJECT'
+            'reload-structural'='PASS_P3_RELOAD_STRUCTURAL'
+          }
+          foreach($name in $expected.Keys){
+            $p=Join-Path "out/evidence/$name" 'result.json'
+            if(-not(Test-Path $p)){throw "Missing result: $name"}
+            $r=Get-Content $p -Raw|ConvertFrom-Json -AsHashtable
+            if($r.status -ne $expected[$name]){throw "Unexpected status for ${name}: $($r.status)"}
+          }
+          'PASS_P3_V2_SECONDARY'|Set-Content out/evidence/PASS_P3_V2_SECONDARY.txt
+
+      - if: always()
+        name: Show V2 results
+        shell: pwsh
+        run: |
+          Get-Content out/evidence/manifest.txt
+          foreach($name in @('roundtrip','new-project','reload-structural')){
+            $p=Join-Path "out/evidence/$name" 'result.json'
+            if(Test-Path $p){Write-Host "=== $name ===";Get-Content $p}
+          }
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-p3-v2-4.55.1.1
+          path: out/evidence/
+          retention-days: 30
