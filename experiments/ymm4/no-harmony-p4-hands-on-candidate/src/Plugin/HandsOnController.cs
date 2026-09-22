@@ -23,6 +23,9 @@ internal sealed class HandsOnController : IDisposable
     private readonly UndoRedoManager undo;
     private readonly FolderStateStore state;
     private readonly DirectDisplay display;
+    private readonly StructuralFolderBridge structural;
+    private readonly InputMapAdapter input;
+    private readonly FileDropMapAdapter fileDrop;
     private readonly AdornerLayer adornerLayer;
     private readonly MouseButtonEventHandler mouseHandler;
 
@@ -44,6 +47,14 @@ internal sealed class HandsOnController : IDisposable
         timeline = host.Timeline;
 
         display = new DirectDisplay(host, HandsOnRuntime.Diagnostic);
+        structural = new StructuralFolderBridge(
+            window,
+            timeline,
+            undo,
+            state,
+            HandsOnRuntime.Diagnostic);
+        input = new InputMapAdapter(host, display, HandsOnRuntime.Diagnostic);
+        fileDrop = new FileDropMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         adornerLayer = AdornerLayer.GetAdornerLayer(labels)
             ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
 
@@ -390,6 +401,9 @@ internal sealed class HandsOnController : IDisposable
             adorner = null;
         }
 
+        fileDrop.Dispose();
+        input.Dispose();
+        structural.Dispose();
         display.Dispose();
     }
 
