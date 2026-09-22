@@ -172,7 +172,16 @@ internal static class Probe
         return null;
     }
 
+    private static bool IsUnder(DependencyObject? child, DependencyObject ancestor)
+    {
+        for (var current = child; current is not null; current = Parent(current))
+            if (ReferenceEquals(current, ancestor))
+                return true;
+        return false;
+    }
+
     private static (Point Screen, string HitType, string OwnerType) FindNativeLayerPoint(
+        Window window,
         FrameworkElement labels,
         int layer)
     {
@@ -200,9 +209,10 @@ internal static class Probe
             for (var x = left; x <= right; x += 4)
             {
                 var screen = new Point(x, y);
-                var local = labels.PointFromScreen(screen);
-                var hit = VisualTreeHelper.HitTest(labels, local)?.VisualHit;
-                if (hit is null || FindLayerFromSource(hit) != layer)
+                var hit = window.InputHitTest(window.PointFromScreen(screen)) as DependencyObject;
+                if (hit is null
+                    || !IsUnder(hit, labels)
+                    || FindLayerFromSource(hit) != layer)
                     continue;
 
                 var owner = FindContextMenuOwnerFromSource(hit);
@@ -495,7 +505,7 @@ internal static class Probe
             Fact("labels_type", labels.GetType().FullName);
             Check("layer_labels_found", labels.IsVisible && ItemsBindingPath(labels) == "LayerLabels");
 
-            var nativeRoute = FindNativeLayerPoint(labels, 6);
+            var nativeRoute = FindNativeLayerPoint(window, labels, 6);
             var nativePoint = nativeRoute.Screen;
             Fact("layer6_hit_type", nativeRoute.HitType);
             Fact("layer6_context_owner", nativeRoute.OwnerType);
