@@ -208,6 +208,8 @@ internal static class Probe
             Fact("raw_layer_scroll_lower", rawLayerLower);
             Fact("raw_layer_scroll_higher", rawLayerHigher);
             Check("raw_layer_scroll_offsets_finite", double.IsFinite(rawLayerLower) && double.IsFinite(rawLayerHigher));
+            Check("raw_lower_layer_is_one_display_row", Math.Abs((rawLayerLower - rawLayerStart) - display.Height) < 1);
+            Check("raw_higher_layer_roundtrips", Math.Abs(rawLayerHigher - rawLayerStart) < 1);
             Check("raw_layer_scroll_preserves_fold_state", collapsed.SequenceEqual(Baseline));
             Check("raw_navigation_methods_preserve_item_state", State(timeline) == original);
             await Reset();
@@ -235,6 +237,40 @@ internal static class Probe
             await Wait("visible offscreen selection", () => activeNavigation.Failure is not null || Visible(host, items[45]));
             Check("offscreen_selection_followed", Visible(host, items[45]));
             Check("visible_target_preserves_collapses", collapsed.SequenceEqual(Baseline));
+
+            // P2.2 mapped route: product-owned navigation can enter the same
+            // fold-aware path without changing native selection.
+            await Reset();
+            var explicitSignalsBefore = navigation.SelectionSignals;
+            Check("explicit_far_target_initially_offscreen", !Visible(host, items[45]));
+            navigation.NavigateTo(items[45]);
+            await Wait("explicit visible navigation", () => activeNavigation.Failure is not null || Visible(host, items[45]));
+            Check("explicit_visible_target_followed", Visible(host, items[45]));
+            Check("explicit_navigation_preserves_empty_selection", timeline.SelectedItems.Count == 0);
+            Check("explicit_navigation_preserves_collapses", collapsed.SequenceEqual(Baseline));
+            Check("explicit_navigation_needs_no_selection_signal", navigation.SelectionSignals == explicitSignalsBefore);
+
+            await Reset();
+            timeline.SelectedItems = ImmutableList.Create(items[4]);
+            await Wait("prepare same-item route", () => activeNavigation.Failure is not null || (!activeDisplay.Layout.IsHidden(4) && Visible(host, items[4])));
+            // Re-close without changing selection. A subsequent bare ScrollToItem
+            // now has no SelectedItems signal for the observer to use.
+            collapsed = Baseline;
+            activeDisplay.SetSpans(Baseline.Select(x => new CollapsedSpan(x.Start, x.End)).ToArray());
+            scroll.ScrollToVerticalOffset(0);
+            await Task.Delay(650);
+            Check("same_item_fixture_reclosed", activeDisplay.Layout.IsHidden(4));
+            var sameItemSignalsBefore = navigation.SelectionSignals;
+            var sameItemAppliedBefore = navigation.Applied;
+            vm.ScrollToItem(items[4]);
+            await Task.Delay(650);
+            Check("bare_same_item_scroll_has_no_selection_signal", navigation.SelectionSignals == sameItemSignalsBefore);
+            Check("bare_same_item_scroll_not_fold_aware", activeDisplay.Layout.IsHidden(4) && !Visible(host, items[4]));
+            Check("bare_same_item_scroll_not_claimed_as_applied", navigation.Applied == sameItemAppliedBefore);
+            navigation.NavigateTo(items[4]);
+            await Wait("explicit same-item recovery", () => activeNavigation.Failure is not null || (!activeDisplay.Layout.IsHidden(4) && Visible(host, items[4])));
+            Check("explicit_same_item_recovered", !activeDisplay.Layout.IsHidden(4) && Visible(host, items[4]));
+            Check("explicit_same_item_preserves_native_selection", timeline.SelectedItems.Count == 1 && ReferenceEquals(timeline.SelectedItems[0], items[4]));
 
             await Reset();
             var appliedBefore = navigation.Applied;
