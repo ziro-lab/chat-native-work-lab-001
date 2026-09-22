@@ -142,6 +142,8 @@ Exact-host V1 on YMM4 4.56.1.0:
 
 ### P4.2 — pure UX command policy
 
+**GREEN.** Run `35726360348`, `PASS_P4_UX_POLICY`, 27/27 PASS.
+
 Host-independent:
 
 - creation eligibility;
@@ -153,6 +155,10 @@ Host-independent:
 
 ### P4.3 — integrated minimum workflow
 
+**Automated V1 smoke GREEN on YMM4 4.56.1.0.**
+
+Accepted source `9cd5748c6ddf54c5b88ea961e99a5cb9b6c1de70`, run `35733202539`, `PASS_P4_MINIMUM_WORKFLOW`, 24/24 named assertions PASS.
+
 Primary host hands-on + focused native smoke:
 
 1. select contiguous layers;
@@ -163,6 +169,12 @@ Primary host hands-on + focused native smoke:
 6. ungroup;
 7. verify items/layers remain unchanged;
 8. save/reopen and repeat collapse.
+
+### P4.4 — hands-on
+
+**NEXT.** Use `docs/YMM4_NO_HARMONY_P4_HANDS_ON.md`.
+
+Manual work owns discoverability, selection ergonomics, naming prompt, nesting clarity, destructive-action wording and visual comfort. It does not replay automated mechanism assertions.
 
 ### P4 exit
 
