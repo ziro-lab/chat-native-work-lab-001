@@ -148,14 +148,20 @@ internal static class Probe
 
     private static object? TryFindToolArea(object root)
     {
-        if (PublicProperty(root, "ToolMenuItems") is not IEnumerable items)
+        // Discovery P3.1 proved the host-owned ToolAreaViewModel is present in
+        // the public AnchorableAreaViewModels collection even before the tool
+        // is shown. ToolMenuItems describes menu entries and is not the state
+        // owner used by project SaveState/LoadState.
+        if (PublicProperty(root, "AnchorableAreaViewModels") is not IEnumerable areas)
             return null;
 
-        foreach (var item in items.Cast<object>())
+        foreach (var area in areas.Cast<object>())
         {
-            var viewModelType = item.GetType().GetProperty("ViewModelType", BindingFlags.Instance | BindingFlags.Public)?.GetValue(item) as Type;
+            var viewModelType = area.GetType()
+                .GetProperty("ViewModelType", BindingFlags.Instance | BindingFlags.Public)
+                ?.GetValue(area) as Type;
             if (viewModelType == typeof(RoundtripToolViewModel))
-                return item;
+                return area;
         }
         return null;
     }
