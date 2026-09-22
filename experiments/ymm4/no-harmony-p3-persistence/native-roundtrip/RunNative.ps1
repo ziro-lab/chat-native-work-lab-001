@@ -52,8 +52,8 @@ try {
     'timeline_a_id_nonempty','timeline_id_public_guid','tool_area_found',
     'area_seed_a_roundtrip','project_a_saved','project_a_toolstate_embedded',
     'area_seed_b_roundtrip','project_b_saved','project_b_toolstate_embedded','project_files_hold_distinct_toolstate',
-    'open_a_project_path_applied','open_a_timeline_id_stable','open_a_timeline_callback_observed','open_a_host_area_synced','open_a_loadstate_not_required','open_a_area_state_restored','open_a_document_valid',
-    'open_b_project_path_applied','open_b_timeline_id_stable','open_b_timeline_callback_observed','open_b_host_area_synced','open_b_loadstate_not_required','open_b_area_state_restored',
+    'open_a_project_path_applied','open_a_timeline_id_stable','open_a_project_path_signal_observed','open_a_host_area_synced','open_a_loadstate_not_required','open_a_area_state_restored','open_a_document_valid',
+    'open_b_project_path_applied','open_b_timeline_id_stable','open_b_project_path_signal_observed','open_b_host_area_synced','open_b_loadstate_not_required','open_b_area_state_restored',
     'project_state_isolated','no_harmony_loaded')
   foreach($name in $required){if(-not $r.checks.ContainsKey($name) -or $r.checks[$name] -ne $true){throw "Missing/failed assertion: $name"}}
 } finally {
