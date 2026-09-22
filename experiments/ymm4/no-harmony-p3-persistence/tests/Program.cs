@@ -123,4 +123,33 @@ Check("load_invalid_range_safe", FolderDocumentCodec.Load(
     "{\"schemaVersion\":1,\"timelines\":[{\"timelineKey\":\"x\",\"folders\":[{\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"start\":5,\"end\":2,\"name\":\"bad\",\"isCollapsed\":true}]}]}")
     .Status == FolderDocumentLoadStatus.Invalid);
 
+// Recovery session: unreadable project state must survive an unrelated save
+// byte-for-byte instead of being silently replaced by an empty document.
+var session = new FolderPersistenceSession();
+var sessionValid = session.Load(json);
+Check("session_valid_loaded", sessionValid.Success && !session.IsRecoveryBlocked);
+Check("session_valid_save_canonical", session.Save() == json);
+
+const string malformedRaw = "{ definitely-not-json";
+var sessionMalformed = session.Load(malformedRaw);
+Check("session_malformed_runtime_empty", sessionMalformed.Status == FolderDocumentLoadStatus.Malformed && session.Document == FolderDocument.Empty);
+Check("session_malformed_quarantined", session.IsRecoveryBlocked && session.PreservedUnreadableState == malformedRaw);
+Check("session_malformed_save_preserves_raw", session.Save() == malformedRaw);
+
+const string futureRaw = "{\"schemaVersion\":99,\"timelines\":[{\"timelineKey\":\"future\",\"folders\":[]}]}";
+var sessionFuture = session.Load(futureRaw);
+Check("session_future_quarantined", sessionFuture.Status == FolderDocumentLoadStatus.UnsupportedVersion && session.IsRecoveryBlocked);
+Check("session_future_save_preserves_raw", session.Save() == futureRaw);
+
+const string invalidRaw = "{\"schemaVersion\":1,\"timelines\":[{\"timelineKey\":\"x\",\"folders\":[{\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"start\":8,\"end\":2,\"name\":\"broken\",\"isCollapsed\":true}]}]}";
+var sessionInvalid = session.Load(invalidRaw);
+Check("session_invalid_quarantined", sessionInvalid.Status == FolderDocumentLoadStatus.Invalid && session.IsRecoveryBlocked);
+Check("session_invalid_save_preserves_raw", session.Save() == invalidRaw);
+
+session.Replace(normalized);
+Check("session_explicit_replace_clears_quarantine", !session.IsRecoveryBlocked && session.Save() == json);
+session.Load(malformedRaw);
+session.Reset();
+Check("session_explicit_reset_clears_quarantine", !session.IsRecoveryBlocked && session.Save() is null && session.Document == FolderDocument.Empty);
+
 Console.WriteLine($"status=PASS_P3_FOLDER_DOCUMENT\nassertion_count={count}");

@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../src/FolderDocument.cs" Link="FolderDocument.cs" />
     <Compile Include="../src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
+    <Compile Include="../src/FolderPersistenceSession.cs" Link="FolderPersistenceSession.cs" />
     <Compile Include="../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
   </ItemGroup>
 </Project>
