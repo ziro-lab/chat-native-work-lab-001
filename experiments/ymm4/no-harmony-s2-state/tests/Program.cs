@@ -257,4 +257,48 @@ Check("deterministic_save",
                 VisibilityRestore = session.VisibilityRestore.Reverse().ToArray()
             }));
 
+// Runtime P3 raw-quarantine policy remains exact after switching to outer v2.
+var runtime = new Ymm4NoHarmonyFolderLayoutProbe.FolderPersistenceSession();
+var runtimeLegacy = runtime.Load(legacyRaw);
+Check("runtime_v1_loads",
+    runtimeLegacy.Success
+    && runtimeLegacy.Status == FolderSessionLoadStatus.LoadedV1
+    && !runtime.IsRecoveryBlocked
+    && FolderDocumentCodec.Save(runtime.Document) == legacyRaw);
+
+var promotedRaw = runtime.Save();
+Check("runtime_v1_promotes_to_v2_on_save",
+    promotedRaw is not null
+    && FolderSessionDocumentCodec.Load(promotedRaw).Status
+        == FolderSessionLoadStatus.LoadedV2
+    && FolderDocumentCodec.Load(promotedRaw).Status
+        == FolderDocumentLoadStatus.UnsupportedVersion);
+
+var futureRaw = "{\"schemaVersion\":99,\"sentinel\":\"keep-me-exactly\"}";
+var futureRuntime = new Ymm4NoHarmonyFolderLayoutProbe.FolderPersistenceSession();
+var futureResult = futureRuntime.Load(futureRaw);
+Check("runtime_future_quarantined",
+    !futureResult.Success
+    && futureRuntime.IsRecoveryBlocked
+    && futureRuntime.Save() == futureRaw);
+
+var malformedRaw = "{ definitely not json";
+var malformedRuntime = new Ymm4NoHarmonyFolderLayoutProbe.FolderPersistenceSession();
+var malformedResult = malformedRuntime.Load(malformedRaw);
+Check("runtime_malformed_quarantined",
+    !malformedResult.Success
+    && malformedRuntime.IsRecoveryBlocked
+    && malformedRuntime.Save() == malformedRaw);
+
+futureRuntime.ReplaceDocument(core);
+Check("runtime_replace_clears_quarantine",
+    !futureRuntime.IsRecoveryBlocked
+    && futureRuntime.Document.Timelines.Count == 1
+    && FolderSessionDocumentCodec.Load(futureRuntime.Save()).Success);
+
+malformedRuntime.Reset();
+Check("runtime_reset_clears_quarantine",
+    !malformedRuntime.IsRecoveryBlocked
+    && malformedRuntime.Save() is null);
+
 Console.WriteLine($"status=PASS_S2_STATE_V2\nassertion_count={count}");
