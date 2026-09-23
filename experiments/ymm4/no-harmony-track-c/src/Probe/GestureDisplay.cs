@@ -26,6 +26,7 @@ internal sealed class DirectDisplay : IDisposable
     private readonly Action<string> log;
     private readonly Dictionary<object, Slot> slots = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<INotifyPropertyChanged> watched = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<INotifyPropertyChanged> permanentWatched = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<INotifyCollectionChanged> collections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IItem> gestureItems = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FrameworkElement, object> gestureTransforms = [];
@@ -62,13 +63,22 @@ internal sealed class DirectDisplay : IDisposable
         this.log = log;
         vm = (TimelineViewModel)host.Vm;
         oldMaxHeight = host.Source.ReadLocalValue(FrameworkElement.MaxHeightProperty);
-        Watch(vm);
-        Watch(vm.Viewport);
-        Watch(SettingsBase<YMMSettings>.Default);
+        WatchPermanent(vm);
+        WatchPermanent(vm.Viewport);
+        WatchPermanent(SettingsBase<YMMSettings>.Default);
         WatchCollection(vm.Items);
         WatchCollection(vm.LayerLabels);
         WatchCollection(vm.LayerLines);
         RefreshSlots();
+    }
+
+    private void WatchPermanent(object value)
+    {
+        if (value is INotifyPropertyChanged notify)
+        {
+            permanentWatched.Add(notify);
+            Watch(notify);
+        }
     }
 
     private void Watch(object value)
@@ -374,18 +384,94 @@ internal sealed class DirectDisplay : IDisposable
 
     private void RefreshSlots()
     {
+        var current = new HashSet<object>(
+            ReferenceEqualityComparer.Instance);
+
         foreach (var item in vm.Items)
+        {
+            current.Add(item);
             AddSlot(item, () => item.Item.Layer, true);
-        AddRows((IList)vm.LayerLabels);
-        AddRows((IList)vm.LayerLines);
+        }
+
+        AddRows(
+            (IList)vm.LayerLabels,
+            current);
+        AddRows(
+            (IList)vm.LayerLines,
+            current);
+
+        PruneSlots(current);
     }
 
-    private void AddRows(IList rows)
+    private void AddRows(
+        IList rows,
+        HashSet<object> current)
     {
         for (var i = 0; i < rows.Count; i++)
         {
             var layer = i;
-            AddSlot(rows[i] ?? throw new InvalidOperationException("Null row"), () => layer, false);
+            var target = rows[i]
+                ?? throw new InvalidOperationException(
+                    "Null row");
+
+            current.Add(target);
+            AddSlot(
+                target,
+                () => layer,
+                false);
+        }
+    }
+
+    private void PruneSlots(
+        HashSet<object> current)
+    {
+        foreach (var target in slots.Keys
+            .Where(target => !current.Contains(target))
+            .ToArray())
+        {
+            var slot = slots[target];
+
+            // A virtualized/replaced VM can be reused by the host later.
+            // Restore native logical geometry before releasing our reference so
+            // a reappearing VM is never treated as a 6px folded native item.
+            var layer = slot.Layer();
+            var nativeTop = layer * (double)Height;
+            var nativeHeight =
+                slot.HeightRatio * Height;
+
+            if (Math.Abs(
+                    Convert.ToDouble(
+                        slot.Top.GetValue(slot.Target))
+                    - nativeTop)
+                >= 0.001)
+            {
+                slot.Top.SetValue(
+                    slot.Target,
+                    nativeTop);
+                Mutations++;
+            }
+
+            if (Math.Abs(
+                    Convert.ToDouble(
+                        slot.Height.GetValue(slot.Target))
+                    - nativeHeight)
+                >= 0.001)
+            {
+                slot.Height.SetValue(
+                    slot.Target,
+                    nativeHeight);
+                Mutations++;
+            }
+
+            slots.Remove(target);
+
+            if (target
+                    is INotifyPropertyChanged notify
+                && !permanentWatched.Contains(notify)
+                && watched.Remove(notify))
+            {
+                notify.PropertyChanged -= Changed;
+            }
         }
     }
 
@@ -519,6 +605,7 @@ internal sealed class DirectDisplay : IDisposable
             notify.CollectionChanged -= CollectionChanged;
 
         watched.Clear();
+        permanentWatched.Clear();
         collections.Clear();
         Phase = "restore";
 
