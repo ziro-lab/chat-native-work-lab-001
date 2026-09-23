@@ -82,7 +82,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/speakers":
             self._json([{
                 "name": "CNWL Speaker",
-                "speaker_uuid": "cnwl-speaker",
+                "speaker_uuid": "11111111-1111-1111-1111-111111111111",
                 "styles": [{"name": "Normal", "id": 1, "type": "talk"}],
                 "version": "0.0.0",
                 "supported_features": {"permitted_synthesis_morphing": "SELF_ONLY"}
