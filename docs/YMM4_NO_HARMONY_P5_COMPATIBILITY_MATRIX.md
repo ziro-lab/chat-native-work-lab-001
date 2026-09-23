@@ -39,9 +39,9 @@ Do not add a type-specific adapter merely because setup differs.
 | --- | --- | --- | --- | --- | --- |
 | Voice / speech | `VoiceItem` | parameterless common path; configured speaker needed for history | Common-path with setup | Common-path with setup | Geometry/fold/timing/select confirmed; configured-voice history pending |
 | Text-like | `TextItem` | public parameterless ctor | **Confirmed** | **Confirmed** | Full P5.3 common path + block move Undo/Redo |
-| Image | `ImageItem` | parameterless common path; file-backed fixture next | Common path confirmed | Common path confirmed | Full P5.3 path confirmed; real PNG FileDrop already P0 evidence |
-| Video | `VideoItem` | parameterless common path; media fixture next | Common path confirmed | Common path confirmed | Full P5.3 path confirmed; media-backed playback/resource path pending |
-| Audio | `AudioItem` | parameterless common path; media fixture next | Common path confirmed | Common path confirmed | Full P5.3 path confirmed; media-backed resource path pending |
+| Image | `ImageItem` | real PNG via public `ImageItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
+| Video | `VideoItem` | real MP4 via public `VideoItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
+| Audio | `AudioItem` | real PCM WAV via public `AudioItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
 | Shape | `ShapeItem` | public parameterless ctor | **Confirmed** | **Confirmed** | Full P5.3 common path + block move Undo/Redo |
 | Group Control | `GroupItem` | public item construction | **P4 confirmed** | **P4 confirmed** | P5 may reuse as baseline/special-item control |
 | Effect-bearing item | discovery pending | one representative item + effect | Pending | Pending | Effect itself need not become a folder-owned model |
@@ -186,6 +186,52 @@ No built-in type has yet justified:
 - a type-specific timing-coordinate formula.
 
 The remaining built-in work is **resource realism**, not core folder architecture: configured Voice history and media-backed Image/Video/Audio behavior.
+
+## 5.4 Real media-backed compatibility — COMPLETE
+
+Workflow:
+
+- `35844737768`
+
+The workflow creates deterministic local fixtures without downloading media:
+
+- PNG image;
+- PCM WAV audio;
+- H.264 MP4 video.
+
+Fixture SHA256:
+
+- image: `785090597e739d0ec824dc66223d33f26ae4be8da5fc5711f202d5a41dafffb5`;
+- audio: `3fa20276d8a4131431490ed129d0b05fafa4e9c82d4339b5cf635512103d6615`;
+- video: `507246f89713a5f008a495371976daf4a4afdf9ed67ec9236b4257f91ffbbb9b`.
+
+Both pinned hosts returned:
+
+- `PASS_P5_MEDIA_REALISM`;
+- real-file construction = **3/3**;
+- add / live / public geometry = **3/3**;
+- FoldMap owner mapping = **3/3**;
+- hidden timing summary = **3/3**;
+- folder item selection = **3/3**;
+- explicit block move + one-step Undo/Redo = **3/3**;
+- no item-type-specific folder adapter.
+
+Media-backed types:
+
+- `ImageItem(string file)`;
+- `AudioItem(string file)`;
+- `VideoItem(string file)`.
+
+Artifacts:
+
+- 4.55.1.1: `10742972187`, `sha256:1cc3ac3a99acb91ef056528e83643a7e90495a97b544a821d43d2e80bee2625b`;
+- 4.56.1.0: `10743305164`, `sha256:4247cc21921c02ac8e61c45f193cfea747ebfcc876008d445c4ee0194879cb57`.
+
+### P5.4 media conclusion
+
+The file-backed Image / Audio / Video paths do not require a media-specific folder architecture. Resource realism preserves the same P4 common path that the parameterless fixtures used.
+
+Remaining resource/setup work is now narrowed to configured Voice and any special/third-party plugin semantics that are not represented by the built-in BaseItem path.
 
 ## 6. Exit gate
 
