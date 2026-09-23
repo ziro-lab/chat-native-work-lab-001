@@ -170,6 +170,10 @@ internal static class Probe
             };
             voice.Character = projectCharacter;
             voice.VoiceParameter = parameter;
+            voice.Serif = "ア";
+            voice.Hatsuon = "ア";
+            voice.CharacterName = projectCharacter.Name;
+            Check("voice_hatsuon_ready_after_character_binding", voice.Hatsuon == "ア");
 
             Check("voice_added_to_real_timeline", timeline.TryAddItems([voice], 240, 6));
             Check("voice_present_in_real_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
