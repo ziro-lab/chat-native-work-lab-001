@@ -164,7 +164,6 @@ internal static class Probe
             var voice = new VoiceItem
             {
                 Serif = "ア",
-                Hatsuon = "ア",
                 CharacterName = projectCharacter.Name,
                 VoiceParameter = parameter
             };
@@ -175,6 +174,28 @@ internal static class Probe
             Check("voice_present_in_real_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
             Check("voice_uses_fake_character",
                 ReferenceEquals(voice.Character, projectCharacter));
+
+            Exception? analysisError = null;
+            try
+            {
+                await voice.SerifToHatsuonAsync();
+            }
+            catch (Exception ex)
+            {
+                analysisError = ex;
+            }
+            Check("serif_to_hatsuon_completed", analysisError is null);
+            if (analysisError is not null)
+                throw new InvalidOperationException("SerifToHatsuonAsync failed.", analysisError);
+
+            var initialPronounce = voice.Pronounce
+                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after SerifToHatsuonAsync.");
+            Check("initial_voicevox_pronounce_created",
+                initialPronounce.GetType().FullName?.Contains("VOICEVOXVoicePronounce", StringComparison.Ordinal) == true);
+
+            var initialQuery = GetAudioQuery(initialPronounce);
+            var initialPause = GetPauseVowelLength(initialQuery);
+            Check("initial_pause_from_audio_query_nonzero", initialPause > 0.0);
 
             Exception? initialError = null;
             try
@@ -189,41 +210,29 @@ internal static class Probe
             if (initialError is not null)
                 throw new InvalidOperationException("Initial VoiceItem generation failed.", initialError);
 
-            var initialPronounce = voice.Pronounce
-                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after initial generation.");
-            Check("initial_voicevox_pronounce_created",
-                initialPronounce.GetType().FullName?.Contains("VOICEVOXVoicePronounce", StringComparison.Ordinal) == true);
-
-            var initialQuery = GetAudioQuery(initialPronounce);
-            var initialPause = GetPauseVowelLength(initialQuery);
-            Check("initial_pause_from_audio_query_nonzero", initialPause > 0.0);
-
+            voice.BeginEdit();
             SetPauseVowelLength(initialQuery, 0.0);
             var patchedPause = GetPauseVowelLength(initialQuery);
             Check("patched_pause_is_zero", patchedPause == 0.0);
 
-            voice.ClearVoiceCache();
-            voice.Pronounce = initialPronounce;
-            voice.IsHatsuonChanged = true;
-
-            Exception? regenerationError = null;
+            Exception? editError = null;
             try
             {
-                await voice.CreateVoiceFileAsync();
+                await voice.EndEditAsync();
             }
             catch (Exception ex)
             {
-                regenerationError = ex;
+                editError = ex;
             }
-            Check("public_voiceitem_regeneration_completed", regenerationError is null);
-            if (regenerationError is not null)
-                throw new InvalidOperationException("Public VoiceItem regeneration failed.", regenerationError);
+            Check("public_voice_edit_lifecycle_completed", editError is null);
+            if (editError is not null)
+                throw new InvalidOperationException("VoiceItem EndEditAsync failed.", editError);
 
             var finalPronounce = voice.Pronounce
-                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after regeneration.");
+                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after edit lifecycle.");
             var finalQuery = GetAudioQuery(finalPronounce);
             var finalPause = GetPauseVowelLength(finalQuery);
-            Check("patched_pause_survives_regeneration", finalPause == 0.0);
+            Check("patched_pause_survives_edit_lifecycle", finalPause == 0.0);
 
             File.WriteAllText(
                 Path.Combine(output, "lifecycle-observation.json"),
