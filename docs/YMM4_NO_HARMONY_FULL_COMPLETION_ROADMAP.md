@@ -778,19 +778,29 @@ Completed:
 
 Host mutation remains owned by the no-Harmony structural/Undo boundary. No second structural observer, persistence store, Undo stack or FoldMap was introduced.
 
-#### S4 — management panel parity
+#### S4 — management panel parity — COMPLETE / FROZEN
 
-- folder/layer list projection;
-- inline rename / F2 / Ctrl+G / Delete;
+Freeze record:
+- `docs/YMM4_NO_HARMONY_S4_MANAGEMENT_PANEL_FREEZE.md`
+
+Completed:
+
+- flat folder/layer projection over the existing FolderProductState;
+- inline rename / F2 / Ctrl+G / Delete / Left / Right / Enter;
 - expand/collapse all;
-- Follow Timeline;
+- Follow Timeline through the existing FoldMap/DirectDisplay;
 - current-item-at-playhead display;
 - Group warning lanes;
-- Before / Into / After block drag/drop.
+- color / visibility / select-items / Group add / Fit / destructive delete command parity;
+- multi-select Before / Into / After block drag/drop;
+- pure **40/40 PASS**;
+- dual-host S4 integration GREEN on 4.56.1.0 / 4.55.1.1;
+- one-step block-move Undo/Redo across FolderProductState, item Layer, LayerSettings and visibility restore;
+- S0 / S1 / S2 / S3 / startup / real .ymme regressions GREEN.
 
-The panel must not become a second structural engine or persistence model.
+The panel remains a View/projection and does not own a second structural engine or persistence model.
 
-#### S5 — visual parity requiring redesign
+#### S5 — visual parity requiring redesign — ACTIVE / NEXT
 
 - collapsed-owner-row inner timing summary;
 - folded Group/background visual compatibility;
@@ -927,8 +937,8 @@ P0 Core Spine                 DONE
   -> S1 common commands / low-risk parity DONE
   -> S2 color / visibility / persistence extension DONE
   -> S3 structural convenience / Group Control DONE
-  -> S4 management panel parity NEXT
-  -> S5 visual parity redesign
+  -> S4 management panel parity DONE
+  -> S5 visual parity redesign NEXT
   -> P4 freeze
   -> P5 compatibility
   -> P6 hardening
