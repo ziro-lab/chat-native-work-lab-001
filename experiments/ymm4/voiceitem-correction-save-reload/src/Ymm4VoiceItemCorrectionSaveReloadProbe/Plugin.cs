@@ -212,12 +212,12 @@ internal static class Probe
                && FindVoice(main, Remark) is not null,
             12000);
 
-        var reloaded = FindVoice(main, Remark)
+        VoiceItem reloaded = FindVoice(main, Remark)
             ?? throw new InvalidOperationException("Reloaded VoiceItem was not found.");
         var reloadedEffect = GetAssistEffect(reloaded);
 
         Check("project_a_reopened", SamePath(GetProjectFilePath(main), pathA));
-        Check("reloaded_voice_found", reloaded is not null);
+        Check("reloaded_voice_found", true);
         Check("reloaded_serif_marker_exact", reloaded.Serif == MarkerSerifA);
         Check("reloaded_hatsuon_exact", reloaded.Hatsuon == HatsuonA);
         Check("reloaded_assist_effect_found", reloadedEffect is not null);
