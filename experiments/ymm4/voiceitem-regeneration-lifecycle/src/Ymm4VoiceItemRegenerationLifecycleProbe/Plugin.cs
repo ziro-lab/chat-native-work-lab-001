@@ -4,10 +4,12 @@ using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
-using YukkuriMovieMaker.Commons;
+using Newtonsoft.Json.Linq;
 using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Plugin.Voice;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YukkuriMovieMaker.Voice;
 
 namespace Ymm4VoiceItemRegenerationLifecycleProbe;
 
@@ -26,16 +28,19 @@ internal static class Probe
     internal static void Schedule()
     {
         var dir = Environment.GetEnvironmentVariable("CNWL_VOICEITEM_REGEN_OUTPUT");
-        if (scheduled || string.IsNullOrWhiteSpace(dir))
+        var url = Environment.GetEnvironmentVariable("CNWL_FAKE_VOICEVOX_URL");
+        if (scheduled || string.IsNullOrWhiteSpace(dir) || string.IsNullOrWhiteSpace(url))
             return;
 
         scheduled = true;
         output = Path.GetFullPath(dir);
         Directory.CreateDirectory(output);
-        Application.Current.Dispatcher.BeginInvoke(new Action(Start), DispatcherPriority.ApplicationIdle);
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => Start(url)),
+            DispatcherPriority.ApplicationIdle);
     }
 
-    static void Start()
+    static void Start(string url)
     {
         int ticks = 0;
         bool created = false;
@@ -44,7 +49,7 @@ internal static class Probe
             Interval = TimeSpan.FromMilliseconds(300)
         };
 
-        timer.Tick += (_, _) =>
+        timer.Tick += async (_, _) =>
         {
             try
             {
@@ -73,224 +78,291 @@ internal static class Probe
                 }
 
                 timer.Stop();
-                Run(main, active);
-                Write("PASS_VOICEITEM_REGENERATION_SURFACE_INVENTORY", null);
+                await RunAsync(active, url);
+                Write("PASS_VOICEITEM_REGENERATION_LIFECYCLE", null);
             }
             catch (Exception ex)
             {
                 timer.Stop();
-                Write("FAIL_VOICEITEM_REGENERATION_SURFACE_INVENTORY", ex.ToString());
+                Write("FAIL_VOICEITEM_REGENERATION_LIFECYCLE", ex.ToString());
             }
         };
 
         timer.Start();
     }
 
-    static void Run(object main, object active)
+    static async Task RunAsync(object active, string url)
     {
         var timeline = FindTimeline(active)
             ?? throw new InvalidOperationException("Timeline could not be resolved.");
         Check("timeline_resolved", true);
 
-        var voice = new VoiceItem
+        var engine = new VOICEVOXEngine(new VOICEVOXEngineContext())
         {
-            Serif = "CNWL lifecycle probe",
-            Hatsuon = "しーえぬだぶりゅーえる",
-            CharacterName = "CNWL Probe"
+            Name = "CNWL Fake VOICEVOX",
+            URL = url,
+            Path = "",
+            Timeout = 10_000
         };
 
-        Check("voice_added_to_real_timeline", timeline.TryAddItems([voice], 240, 6));
-        Check("edit_service_interface_loaded", typeof(IVoiceItemEditService) is not null);
+        const string fakeSpeakerUuid = "11111111-1111-1111-1111-111111111111";
+        engine.SpeakerInfos.Add(new VOICEVOXSpeakerInfo(fakeSpeakerUuid, ""));
 
-        var assemblies = AppDomain.CurrentDomain.GetAssemblies()
-            .Concat([typeof(VoiceItem).Assembly, typeof(IVoiceItemEditService).Assembly])
-            .Distinct()
-            .ToArray();
+        var speakerJson = JObject.Parse("""
+        {
+          "name": "CNWL Speaker",
+          "speaker_uuid": "11111111-1111-1111-1111-111111111111",
+          "styles": [
+            { "name": "Normal", "id": 1, "type": "talk" }
+          ],
+          "version": "0.0.0",
+          "supported_features": {
+            "permitted_synthesis_morphing": "SELF_ONLY"
+          }
+        }
+        """);
 
-        var editServiceType = typeof(IVoiceItemEditService);
-        var implementors = assemblies
-            .SelectMany(SafeTypes)
-            .Where(t => !t.IsInterface && editServiceType.IsAssignableFrom(t))
-            .Distinct()
-            .OrderBy(t => t.FullName)
-            .Select(DescribeType)
-            .ToArray();
+        engine.SpeakersJsonCache = new JArray(speakerJson).ToString(Newtonsoft.Json.Formatting.None);
+        Check("fake_engine_character_resolved",
+            engine.Characters.Any(x => x.SpeakerUuid == fakeSpeakerUuid));
 
-        var factories = assemblies
-            .SelectMany(SafeTypes)
-            .SelectMany(SafeMethods)
-            .Where(m =>
+        var vvCharacter = new VOICEVOXCharacter(
+            speakerJson,
+            Array.Empty<VOICEVOXSpeakerInfo>(),
+            false);
+
+        var speakerType = typeof(VOICEVOXEngine).Assembly.GetType("YukkuriMovieMaker.Voice.VOICEVOXVoiceSpeaker")
+            ?? throw new InvalidOperationException("VOICEVOXVoiceSpeaker type not found.");
+        var speakerObject = Activator.CreateInstance(speakerType, engine, vvCharacter)
+            ?? throw new InvalidOperationException("VOICEVOXVoiceSpeaker construction failed.");
+        if (speakerObject is not IVoiceSpeaker speaker)
+            throw new InvalidOperationException("Built-in VOICEVOX speaker does not implement IVoiceSpeaker.");
+        Check("builtin_voicevox_speaker_constructed", true);
+
+        var registration = RegisterEngineInYmmSettings(engine, speaker.ID);
+        try
+        {
+            Check("fake_engine_registered",
+                registration.ResolvedEngine is not null &&
+                ReferenceEquals(registration.ResolvedEngine, engine));
+
+            var parameter = speaker.CreateVoiceParameter();
+            var styleProperty = parameter.GetType().GetProperty("StyleID", BindingFlags.Instance | BindingFlags.Public);
+            styleProperty?.SetValue(parameter, 1);
+
+            var voiceDescription = new VoiceDescription(speaker);
+            Check("voice_description_binds_speaker",
+                ReferenceEquals(voiceDescription.Speaker, speaker));
+
+            var projectCharacter = new Character
             {
-                var returnsEditService = editServiceType.IsAssignableFrom(m.ReturnType);
-                var mentionsVoice = m.GetParameters().Any(p =>
-                    p.ParameterType == typeof(VoiceItem) ||
-                    p.ParameterType.IsAssignableFrom(typeof(VoiceItem)) ||
-                    typeof(VoiceItem).IsAssignableFrom(p.ParameterType));
-                return returnsEditService || (mentionsVoice &&
-                    (m.Name.Contains("Edit", StringComparison.OrdinalIgnoreCase) ||
-                     m.Name.Contains("Voice", StringComparison.OrdinalIgnoreCase) ||
-                     m.Name.Contains("Service", StringComparison.OrdinalIgnoreCase)));
-            })
-            .OrderBy(m => m.DeclaringType?.FullName)
-            .ThenBy(m => m.Name)
-            .Select(DescribeMethodWithDeclaringType)
-            .ToArray();
+                Name = "CNWL Lifecycle",
+                Voice = voiceDescription,
+                VoiceParameter = parameter
+            };
 
-        var voiceMethods = typeof(VoiceItem)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(m => Relevant(m.Name) ||
-                        editServiceType.IsAssignableFrom(m.ReturnType) ||
-                        m.GetParameters().Any(p => editServiceType.IsAssignableFrom(p.ParameterType)))
-            .OrderBy(m => m.Name)
-            .Select(DescribeMethod)
-            .ToArray();
-
-        var voiceProperties = typeof(VoiceItem)
-            .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(p => Relevant(p.Name) ||
-                        editServiceType.IsAssignableFrom(p.PropertyType))
-            .OrderBy(p => p.Name)
-            .Select(DescribeProperty)
-            .ToArray();
-
-        var reachable = new List<object>();
-        InspectObject("voice", voice, reachable);
-        InspectObject("timeline", timeline, reachable);
-        InspectObject("activeTimelineViewModel", active, reachable);
-        InspectObject("mainViewModel", main, reachable);
-
-        Check("voiceitem_surface_inventoried", voiceMethods.Length > 0 || voiceProperties.Length > 0);
-        Check("edit_service_implementors_inventoried", true);
-        Check("edit_service_factories_inventoried", true);
-        Check("reachable_host_objects_inventoried", true);
-        Check("voice_present_in_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
-
-        var voiceDescriptionType = typeof(YukkuriMovieMaker.Plugin.Voice.IVoiceSpeaker).Assembly
-            .GetType("YukkuriMovieMaker.Plugin.Voice.VoiceDescription")
-            ?? throw new InvalidOperationException("VoiceDescription type not found.");
-        var voiceDescriptionSurface = new
-        {
-            type = voiceDescriptionType.FullName,
-            constructors = voiceDescriptionType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .Select(x => new { visibility = Visibility(x), signature = x.ToString() }).ToArray(),
-            properties = voiceDescriptionType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .OrderBy(p => p.Name)
-                .Select(DescribeProperty).ToArray(),
-            methods = voiceDescriptionType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .Where(m => !m.IsSpecialName &&
-                    (m.Name.Contains("Speaker", StringComparison.OrdinalIgnoreCase) ||
-                     m.Name.Contains("Voice", StringComparison.OrdinalIgnoreCase) ||
-                     m.Name.Contains("Set", StringComparison.OrdinalIgnoreCase)))
-                .OrderBy(m => m.Name)
-                .Select(DescribeMethod).ToArray()
-        };
-        Check("voice_description_surface_inventoried", true);
-
-        var characterType = typeof(YukkuriMovieMaker.Project.Character);
-        var characterSurface = new
-        {
-            type = characterType.FullName,
-            constructors = characterType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .Select(x => new { visibility = Visibility(x), signature = x.ToString() }).ToArray(),
-            properties = characterType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .Select(DescribeProperty).OrderBy(x => x.ToString()).ToArray(),
-            methods = characterType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .Where(m => Relevant(m.Name) || m.Name.Contains("Name", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(m => m.Name)
-                .Select(DescribeMethod).ToArray()
-        };
-
-        var observation = new
-        {
-            host = "4.56.1.0 Lite",
-            voiceItemType = typeof(VoiceItem).FullName,
-            voiceItemIsEditService = voice is IVoiceItemEditService,
-            editService = new
+            var voice = new VoiceItem
             {
-                type = editServiceType.FullName,
-                properties = editServiceType.GetProperties().Select(DescribeProperty).ToArray(),
-                methods = editServiceType.GetMethods().Where(m => !m.IsSpecialName).Select(DescribeMethod).ToArray()
-            },
-            voiceItem = new
-            {
-                properties = voiceProperties,
-                methods = voiceMethods
-            },
-            character = characterSurface,
-            voiceDescription = voiceDescriptionSurface,
-            implementors,
-            factories,
-            reachable
-        };
+                Serif = "ア",
+                Hatsuon = "ア",
+                CharacterName = projectCharacter.Name,
+                VoiceParameter = parameter
+            };
+            voice.Character = projectCharacter;
+            voice.VoiceParameter = parameter;
 
-        File.WriteAllText(
-            Path.Combine(output, "surface.json"),
-            JsonSerializer.Serialize(observation, new JsonSerializerOptions { WriteIndented = true }));
+            Check("voice_added_to_real_timeline", timeline.TryAddItems([voice], 240, 6));
+            Check("voice_present_in_real_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
+            Check("voice_uses_fake_character",
+                ReferenceEquals(voice.Character, projectCharacter));
+
+            Exception? initialError = null;
+            try
+            {
+                await voice.CreateVoiceFileAsync();
+            }
+            catch (Exception ex)
+            {
+                initialError = ex;
+            }
+            Check("initial_voiceitem_generation_completed", initialError is null);
+            if (initialError is not null)
+                throw new InvalidOperationException("Initial VoiceItem generation failed.", initialError);
+
+            var initialPronounce = voice.Pronounce
+                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after initial generation.");
+            Check("initial_voicevox_pronounce_created",
+                initialPronounce.GetType().FullName?.Contains("VOICEVOXVoicePronounce", StringComparison.Ordinal) == true);
+
+            var initialQuery = GetAudioQuery(initialPronounce);
+            var initialPause = GetPauseVowelLength(initialQuery);
+            Check("initial_pause_from_audio_query_nonzero", initialPause > 0.0);
+
+            SetPauseVowelLength(initialQuery, 0.0);
+            var patchedPause = GetPauseVowelLength(initialQuery);
+            Check("patched_pause_is_zero", patchedPause == 0.0);
+
+            voice.ClearVoiceCache();
+            voice.Pronounce = initialPronounce;
+            voice.IsHatsuonChanged = true;
+
+            Exception? regenerationError = null;
+            try
+            {
+                await voice.CreateVoiceFileAsync();
+            }
+            catch (Exception ex)
+            {
+                regenerationError = ex;
+            }
+            Check("public_voiceitem_regeneration_completed", regenerationError is null);
+            if (regenerationError is not null)
+                throw new InvalidOperationException("Public VoiceItem regeneration failed.", regenerationError);
+
+            var finalPronounce = voice.Pronounce
+                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after regeneration.");
+            var finalQuery = GetAudioQuery(finalPronounce);
+            var finalPause = GetPauseVowelLength(finalQuery);
+            Check("patched_pause_survives_regeneration", finalPause == 0.0);
+
+            File.WriteAllText(
+                Path.Combine(output, "lifecycle-observation.json"),
+                JsonSerializer.Serialize(new
+                {
+                    host = "4.56.1.0 Lite",
+                    speakerId = speaker.ID,
+                    voiceDescription = new
+                    {
+                        voiceDescription.API,
+                        voiceDescription.Arg,
+                        voiceDescription.Display,
+                        speakerType = voiceDescription.Speaker?.GetType().FullName
+                    },
+                    initial = new
+                    {
+                        pronounceType = initialPronounce.GetType().FullName,
+                        pauseVowelLength = initialPause,
+                        voice.FilePath,
+                        voiceCacheLength = voice.VoiceCache?.Length ?? 0
+                    },
+                    patched = new
+                    {
+                        pauseVowelLength = patchedPause
+                    },
+                    regenerated = new
+                    {
+                        pronounceType = finalPronounce.GetType().FullName,
+                        pauseVowelLength = finalPause,
+                        samePronounceReference = ReferenceEquals(initialPronounce, finalPronounce),
+                        voice.FilePath,
+                        voiceCacheLength = voice.VoiceCache?.Length ?? 0
+                    }
+                }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        finally
+        {
+            registration.Restore();
+        }
     }
 
-    static bool Relevant(string name) =>
-        name.Contains("Voice", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("Pronounce", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("Hatsuon", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("Speaker", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("Character", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("Edit", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("Service", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains("File", StringComparison.OrdinalIgnoreCase);
-
-    static void InspectObject(string label, object target, List<object> output)
+    static object GetAudioQuery(IVoicePronounce pronounce)
     {
-        var t = target.GetType();
-        foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            if (p.GetIndexParameters().Length != 0)
-                continue;
+        var p = pronounce.GetType().GetProperty("AudioQuery", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(pronounce.GetType().FullName, "AudioQuery");
+        return p.GetValue(pronounce)
+            ?? throw new InvalidOperationException("VOICEVOX AudioQuery was null.");
+    }
 
-            var interestingType = typeof(IVoiceItemEditService).IsAssignableFrom(p.PropertyType);
-            if (!interestingType && !Relevant(p.Name) && !Relevant(p.PropertyType.Name))
-                continue;
+    static double GetPauseVowelLength(object query)
+    {
+        var phrasesProperty = query.GetType().GetProperty("AccentPhrases", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(query.GetType().FullName, "AccentPhrases");
+        var phrases = phrasesProperty.GetValue(query) as System.Collections.IEnumerable
+            ?? throw new InvalidOperationException("AccentPhrases was not enumerable.");
+        var phrase = phrases.Cast<object>().FirstOrDefault()
+            ?? throw new InvalidOperationException("AccentPhrases was empty.");
+        var pauseProperty = phrase.GetType().GetProperty("PauseMora", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(phrase.GetType().FullName, "PauseMora");
+        var pause = pauseProperty.GetValue(phrase)
+            ?? throw new InvalidOperationException("PauseMora was null.");
+        var valueProperty = pause.GetType().GetProperty("VowelLength", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(pause.GetType().FullName, "VowelLength");
+        return Convert.ToDouble(valueProperty.GetValue(pause), CultureInfo.InvariantCulture);
+    }
 
-            object? value = null;
-            string? error = null;
-            try { value = p.GetValue(target); }
-            catch (Exception ex) { error = ex.GetType().Name; }
+    static void SetPauseVowelLength(object query, double value)
+    {
+        var phrasesProperty = query.GetType().GetProperty("AccentPhrases", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(query.GetType().FullName, "AccentPhrases");
+        var phrases = phrasesProperty.GetValue(query) as System.Collections.IEnumerable
+            ?? throw new InvalidOperationException("AccentPhrases was not enumerable.");
+        var phrase = phrases.Cast<object>().FirstOrDefault()
+            ?? throw new InvalidOperationException("AccentPhrases was empty.");
+        var pauseProperty = phrase.GetType().GetProperty("PauseMora", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(phrase.GetType().FullName, "PauseMora");
+        var pause = pauseProperty.GetValue(phrase)
+            ?? throw new InvalidOperationException("PauseMora was null.");
+        var valueProperty = pause.GetType().GetProperty("VowelLength", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(pause.GetType().FullName, "VowelLength");
+        if (valueProperty.SetMethod?.IsPublic != true)
+            throw new InvalidOperationException("VowelLength is not publicly writable.");
+        valueProperty.SetValue(pause, value);
+    }
 
-            output.Add(new
+    sealed record SettingsRegistration(string SettingsType, object? ResolvedEngine, Action Restore);
+
+    static SettingsRegistration RegisterEngineInYmmSettings(VOICEVOXEngine engine, string speakerId)
+    {
+        var settingsType = typeof(VOICEVOXEngine).Assembly.GetType("YukkuriMovieMaker.Settings.VOICEVOXSettings")
+            ?? throw new InvalidOperationException("VOICEVOXSettings type not found.");
+
+        var defaultProperty = settingsType.GetProperty(
+            "Default",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy)
+            ?? settingsType.BaseType?.GetProperty(
+                "Default",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy)
+            ?? throw new MissingMemberException(settingsType.FullName, "Default");
+
+        var settings = defaultProperty.GetValue(null)
+            ?? throw new InvalidOperationException("VOICEVOXSettings.Default returned null.");
+
+        var enginesProperty = settingsType.GetProperty("Engines", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new MissingMemberException(settingsType.FullName, "Engines");
+        if (enginesProperty.SetMethod?.IsPublic != true)
+            throw new InvalidOperationException("VOICEVOXSettings.Engines is not publicly settable.");
+
+        var original = enginesProperty.GetValue(settings)
+            ?? throw new InvalidOperationException("VOICEVOXSettings.Engines returned null.");
+
+        var add = original.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(m => m.Name == "Add"
+                              && m.GetParameters().Length == 1
+                              && m.GetParameters()[0].ParameterType.IsAssignableFrom(typeof(VOICEVOXEngine)))
+            ?? throw new MissingMethodException(original.GetType().FullName, "Add(VOICEVOXEngine)");
+
+        var augmented = add.Invoke(original, [engine])
+            ?? throw new InvalidOperationException("Immutable Engines.Add returned null.");
+        enginesProperty.SetValue(settings, augmented);
+
+        var findEngine = settingsType.GetMethod(
+            "FindEngine",
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types: [typeof(string)],
+            modifiers: null)
+            ?? throw new MissingMethodException(settingsType.FullName, "FindEngine(string)");
+
+        var resolved = findEngine.Invoke(settings, [speakerId]);
+
+        return new SettingsRegistration(
+            settingsType.FullName ?? settingsType.Name,
+            resolved,
+            () =>
             {
-                owner = label,
-                kind = "property",
-                name = p.Name,
-                declaredType = p.PropertyType.FullName,
-                publicGet = p.GetMethod?.IsPublic == true,
-                runtimeType = value?.GetType().FullName,
-                isEditService = value is IVoiceItemEditService,
-                error
+                try { enginesProperty.SetValue(settings, original); }
+                catch { }
             });
-        }
-
-        foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            var interestingType = typeof(IVoiceItemEditService).IsAssignableFrom(f.FieldType);
-            if (!interestingType && !Relevant(f.Name) && !Relevant(f.FieldType.Name))
-                continue;
-
-            object? value = null;
-            string? error = null;
-            try { value = f.GetValue(target); }
-            catch (Exception ex) { error = ex.GetType().Name; }
-
-            output.Add(new
-            {
-                owner = label,
-                kind = "field",
-                name = f.Name,
-                declaredType = f.FieldType.FullName,
-                publicGet = f.IsPublic,
-                runtimeType = value?.GetType().FullName,
-                isEditService = value is IVoiceItemEditService,
-                error
-            });
-        }
     }
 
     static Timeline? FindTimeline(object active)
@@ -313,89 +385,8 @@ internal static class Probe
                 catch { }
             }
         }
-
         return null;
     }
-
-    static Type[] SafeTypes(Assembly assembly)
-    {
-        try { return assembly.GetTypes(); }
-        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null).Cast<Type>().ToArray(); }
-        catch { return []; }
-    }
-
-    static MethodInfo[] SafeMethods(Type type)
-    {
-        try
-        {
-            return type.GetMethods(BindingFlags.Instance | BindingFlags.Static |
-                                   BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch { return []; }
-    }
-
-    static object DescribeType(Type t) => new
-    {
-        type = t.FullName,
-        isPublic = t.IsPublic || t.IsNestedPublic,
-        isAbstract = t.IsAbstract,
-        constructors = t.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Select(c => new
-            {
-                visibility = Visibility(c),
-                signature = c.ToString()
-            }).ToArray(),
-        properties = t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(p => Relevant(p.Name) || typeof(IVoiceItemEditService).IsAssignableFrom(p.PropertyType))
-            .Select(DescribeProperty)
-            .ToArray(),
-        methods = SafeMethods(t)
-            .Where(m => Relevant(m.Name) || typeof(IVoiceItemEditService).IsAssignableFrom(m.ReturnType))
-            .Select(DescribeMethod)
-            .ToArray()
-    };
-
-    static object DescribeProperty(PropertyInfo p) => new
-    {
-        name = p.Name,
-        type = p.PropertyType.FullName,
-        publicGet = p.GetMethod?.IsPublic == true,
-        publicSet = p.SetMethod?.IsPublic == true
-    };
-
-    static object DescribeMethod(MethodInfo m) => new
-    {
-        name = m.Name,
-        visibility = Visibility(m),
-        isStatic = m.IsStatic,
-        returnType = m.ReturnType.FullName,
-        parameters = m.GetParameters().Select(p => new
-        {
-            p.Name,
-            type = p.ParameterType.FullName
-        }).ToArray()
-    };
-
-    static object DescribeMethodWithDeclaringType(MethodInfo m) => new
-    {
-        declaringType = m.DeclaringType?.FullName,
-        name = m.Name,
-        visibility = Visibility(m),
-        isStatic = m.IsStatic,
-        returnType = m.ReturnType.FullName,
-        parameters = m.GetParameters().Select(p => new
-        {
-            p.Name,
-            type = p.ParameterType.FullName
-        }).ToArray()
-    };
-
-    static string Visibility(MethodBase m) =>
-        m.IsPublic ? "public" :
-        m.IsFamily ? "protected" :
-        m.IsAssembly ? "internal" :
-        m.IsPrivate ? "private" :
-        "nonpublic";
 
     static void Check(string id, bool passed) =>
         requirements.Add(new { id, passed });
@@ -406,7 +397,7 @@ internal static class Probe
             Path.Combine(output, "result.json"),
             JsonSerializer.Serialize(new
             {
-                schema = "cnwl.voiceitem-regeneration-lifecycle.v1",
+                schema = "cnwl.voiceitem-regeneration-lifecycle.v2",
                 status,
                 host = "4.56.1.0 Lite",
                 sourceHead = Environment.GetEnvironmentVariable("GITHUB_SHA"),
