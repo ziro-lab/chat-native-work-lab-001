@@ -182,6 +182,74 @@ internal static class VoiceSetupProbe
                         "Speaker",
                         StringComparison.OrdinalIgnoreCase))
                 .ToArray();
+            var interestingTypeNames = new[]
+            {
+                "YukkuriMovieMaker.Plugin.Voice.VoiceDescription",
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoicePlugin",
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoiceSpeaker",
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoiceParameter"
+            };
+
+            string DescribeTypeSurface(Type type)
+            {
+                var constructors = type
+                    .GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+                    .OrderBy(ctor => ctor.GetParameters().Length)
+                    .Select(ctor =>
+                        type.Name
+                        + "("
+                        + string.Join(
+                            ",",
+                            ctor.GetParameters().Select(parameter =>
+                                (parameter.ParameterType.FullName
+                                    ?? parameter.ParameterType.Name)
+                                + " "
+                                + parameter.Name))
+                        + ")")
+                    .ToArray();
+
+                var properties = type
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(property => property.GetIndexParameters().Length == 0)
+                    .OrderBy(property => property.Name)
+                    .Select(property =>
+                        property.Name
+                        + ":"
+                        + (property.PropertyType.FullName
+                            ?? property.PropertyType.Name)
+                        + ":get="
+                        + (property.GetMethod?.IsPublic == true)
+                        + ":set="
+                        + (property.SetMethod?.IsPublic == true))
+                    .ToArray();
+
+                var interfaces = type.GetInterfaces()
+                    .Select(@interface =>
+                        @interface.FullName
+                        ?? @interface.Name)
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .ToArray();
+
+                return "type="
+                    + (type.FullName ?? type.Name)
+                    + "|ctors="
+                    + string.Join(";", constructors)
+                    + "|properties="
+                    + string.Join(";", properties)
+                    + "|interfaces="
+                    + string.Join(";", interfaces);
+            }
+
+            var detailedVoiceTypes = loadedAssemblies
+                .SelectMany(SafeTypes)
+                .Where(type =>
+                    type.FullName is not null
+                    && interestingTypeNames.Contains(
+                        type.FullName,
+                        StringComparer.Ordinal))
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .Select(DescribeTypeSurface)
+                .ToArray();
 
             var lines = new List<string>
             {
@@ -217,6 +285,9 @@ internal static class VoiceSetupProbe
             lines.AddRange(
                 pluginLikeTypes.Select(value =>
                     "voice_surface_type=" + value));
+            lines.AddRange(
+                detailedVoiceTypes.Select(value =>
+                    "voice_detailed_surface=" + value));
 
             File.WriteAllLines(
                 Path.Combine(output, "result.txt"),
