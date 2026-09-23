@@ -114,3 +114,20 @@ The next slice freezes the candidate product rule as:
 > A pronunciation boundary marker is an official timing tag where Type=Wait, Value=0, Operator=Set.
 
 It also verifies that multiple `<w0>` markers map to clean-text positions and that a non-zero wait (for example `<w100>`) is not mistaken for a pronunciation boundary.
+
+
+## Phase 3 native result — boundary rule frozen
+
+Run `35858159742`, job `107171565049`, source `58132f1cc053ed2bce7947772f036f5c829ee022`:
+
+- native acceptance: **20/20 PASS**
+- `A<w0>B<w0>C` -> clean text `ABC`
+- zero-wait positions -> `[1, 2]`
+- `A<w100>B` -> non-zero wait value `100`
+- the non-zero wait is **not** selected as a pronunciation boundary
+
+Frozen candidate boundary selector:
+
+`TimingTag.Type == Wait && TimingTag.Value == 0 && TimingTag.Operator == Set`
+
+Artifact `10747969928`, SHA256 `ab6f6e89752ebe0c6d8fcf3de0e22039fb554336160b6198eec2876c069a5efe`.
