@@ -58,7 +58,14 @@ internal sealed partial class HandsOnController : IDisposable
         timeline = host.Timeline;
 
         display = new DirectDisplay(host, HandsOnRuntime.Diagnostic);
-        display.RegisterRefreshTarget(labels);
+        foreach (var canvas in Host.Elements(window)
+            .Where(element =>
+                element.IsVisible
+                && HandsOnHostAccess.ItemsBindingPath(element)
+                    is "LayerLabels" or "LayerLines"))
+        {
+            display.RegisterRefreshTarget(canvas);
+        }
         display.Applied += OnDisplayApplied;
         structural = new StructuralFolderBridge(
             window,
@@ -1514,24 +1521,73 @@ internal sealed partial class HandsOnController : IDisposable
                         $"owner={ownerCenter:R}, folder={folderCenter:R}.");
                 }
 
+                var childLayers =
+                    new[] { 2, 3, 4 };
+
                 var realizedChildren =
-                    new[] { 2, 3, 4 }
-                        .Count(layer =>
-                            adorner.TryGetRenderedRowRect(
-                                layer,
-                                out _));
+                    childLayers.Count(layer =>
+                        adorner.TryGetRenderedRowRect(
+                            layer,
+                            out _));
+
+                var viewPortProperty =
+                    labels.GetType().GetProperty(
+                        "ViewPort",
+                        System.Reflection.BindingFlags.Instance
+                        | System.Reflection.BindingFlags.Public);
+                var labelViewPort =
+                    viewPortProperty?.GetValue(labels)
+                        is Rect observed
+                    && !observed.IsEmpty
+                        ? observed
+                        : new Rect(
+                            0,
+                            0,
+                            Math.Max(1, labels.ActualWidth),
+                            Math.Max(1, labels.ActualHeight));
+
+                var labelRows =
+                    Host.Get(host.Vm, "LayerLabels")
+                        as System.Collections.IEnumerable
+                    ?? throw new InvalidOperationException(
+                        "S5 LayerLabels VM collection is unavailable.");
 
                 var expectedChildren =
                     collapsed
                         ? 0
-                        : 3;
+                        : childLayers.Count(layer =>
+                        {
+                            var row = labelRows
+                                .Cast<object>()
+                                .FirstOrDefault(candidate =>
+                                    HandsOnHostAccess.LayerId(
+                                        candidate)
+                                    == layer);
+
+                            if (row is null)
+                                return false;
+
+                            var top = Convert.ToDouble(
+                                Host.Get(row, "Top")
+                                ?? double.NaN);
+                            var height = Convert.ToDouble(
+                                Host.Get(row, "Height")
+                                ?? double.NaN);
+
+                            return double.IsFinite(top)
+                                && double.IsFinite(height)
+                                && height > 0
+                                && top < labelViewPort.Bottom
+                                && top + height > labelViewPort.Top;
+                        });
 
                 if (realizedChildren
                     != expectedChildren)
                 {
                     throw new InvalidOperationException(
                         $"S5 LayerLabels did not refresh without scrolling at {phase}: " +
-                        $"realized_children={realizedChildren}, expected={expectedChildren}.");
+                        $"realized_children={realizedChildren}, expected_viewport_children={expectedChildren}, " +
+                        $"viewport={labelViewPort}.");
                 }
             }
 
