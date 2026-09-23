@@ -166,21 +166,21 @@ internal sealed class HandsOnController : IDisposable
                             ]
                         })));
 
-            var movingMarker = new GroupItem
+            var movingMarker = new YmmGroupItem
             {
                 Frame = 0,
                 Length = Math.Max(1, timeline.Length),
                 Layer = 2,
                 GroupRange = 1
             };
-            var stationaryMarker = new GroupItem
+            var stationaryMarker = new YmmGroupItem
             {
                 Frame = 0,
                 Length = Math.Max(1, timeline.Length),
                 Layer = 4,
                 GroupRange = 1
             };
-            var laterMarker = new GroupItem
+            var laterMarker = new YmmGroupItem
             {
                 Frame = 0,
                 Length = Math.Max(1, timeline.Length),
@@ -226,7 +226,7 @@ internal sealed class HandsOnController : IDisposable
                     group => group.Key,
                     group => group.Count());
             var spans = timeline.Items
-                .OfType<GroupItem>()
+                .OfType<YmmGroupItem>()
                 .OrderBy(item => item.Layer)
                 .ThenBy(item => item.Frame)
                 .Select(item => new GroupSpan(
@@ -404,11 +404,11 @@ internal sealed class HandsOnController : IDisposable
         (int Start, int End) expectedOuter,
         (int Start, int End) expectedInner,
         (int Start, int End) expectedLater,
-        GroupItem movingMarker,
+        YmmGroupItem movingMarker,
         int expectedMovingLayer,
-        GroupItem stationaryMarker,
+        YmmGroupItem stationaryMarker,
         int expectedStationaryLayer,
-        GroupItem laterMarker,
+        YmmGroupItem laterMarker,
         int expectedLaterLayer,
         Color colorAtMovedStart,
         Color colorAtMovedEnd,
