@@ -367,7 +367,10 @@ internal static class Probe
 
     static object[] DiscoverControlTagParserMethods()
     {
-        var type = typeof(VoiceItem).Assembly.GetType("YukkuriMovieMaker.Commons.ControlTagParser");
+        var type = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true)
+            .Select(a => a.GetType("YukkuriMovieMaker.Commons.ControlTagParser", throwOnError: false))
+            .FirstOrDefault(t => t is not null);
         if (type is null)
             return [new { error = "ControlTagParser not found" }];
 
