@@ -22,7 +22,7 @@ modified Pronounce -> built-in YMM4 VOICEVOX synthesis route.
 
 ## Native result — modified AudioQuery reaches synthesis unchanged
 
-Final run `35862420856`, job `107185599961`, source `69023e9197d4b91557d115f7c8c81167aa9bfcf2` completed GREEN on real YMM4 Lite 4.56.1.0.
+Final run `35862648969`, job `107186361371`, source `1bfa9e7f6e55365da393d8bba6d93a77e521d29d` completed GREEN on real YMM4 Lite 4.56.1.0.
 
 Observed:
 
@@ -44,7 +44,7 @@ Captured synthesis fragment:
 }
 ```
 
-Artifact `10751315999`, SHA256 `d76416efc6cc799f1f42a2d3ef2415b7e8a7b095861fd4dac85fa5ea5d3857f5`.
+Artifact `10750448495`, SHA256 `563d021b230a881d0cbd7a1ec83b4e9a8dc4d19d6bcb9df2d77569dd87bffe91`.
 
 ### Proven boundary
 
