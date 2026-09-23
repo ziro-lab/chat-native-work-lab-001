@@ -74,6 +74,12 @@ internal static class Probe
             var audio = await ObserveSerifToHatsuonAsync();
             var tagTypes = DiscoverTagRelatedTypes();
             var parserMethods = DiscoverControlTagParserMethods();
+            var plainText = ObserveOfficialGetPlainText();
+
+            Check("official_control_tag_parser_public", plainText.ParserTypePublic);
+            Check("official_get_plain_text_public", plainText.GetPlainTextPublic);
+            Check("official_get_plain_text_strips_w0", plainText.ValidResult == BaselineText);
+            Check("official_get_plain_text_keeps_invalid_tag", plainText.InvalidResult == InvalidTagText);
 
             File.WriteAllText(Path.Combine(output, "behavior.json"),
                 JsonSerializer.Serialize(new
@@ -87,6 +93,7 @@ internal static class Probe
                     textSource = textObservation,
                     jimakuSource = jimakuObservation,
                     pronunciationObservation = audio,
+                    officialPlainText = plainText,
                     controlTagParserMethods = parserMethods,
                     tagRelatedTypes = tagTypes
                 }, new JsonSerializerOptions { WriteIndented = true }));
@@ -365,12 +372,59 @@ internal static class Probe
         return args;
     }
 
-    static object[] DiscoverControlTagParserMethods()
+    sealed record PlainTextObservation(
+        bool ParserTypePublic,
+        string? ParserAssembly,
+        bool GetPlainTextPublic,
+        string? MethodSignature,
+        string? ValidResult,
+        string? InvalidResult,
+        string? Error);
+
+    static PlainTextObservation ObserveOfficialGetPlainText()
     {
-        var type = AppDomain.CurrentDomain.GetAssemblies()
+        try
+        {
+            var type = FindControlTagParserType();
+            if (type is null)
+                return new(false, null, false, null, null, null, "ControlTagParser not found");
+
+            var method = type.GetMethod("GetPlainText",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: [typeof(string)],
+                modifiers: null);
+
+            if (method is null)
+                return new(type.IsPublic, type.Assembly.GetName().Name, false, null, null, null, "GetPlainText not found");
+
+            var valid = method.Invoke(null, [ValidTagText]) as string;
+            var invalid = method.Invoke(null, [InvalidTagText]) as string;
+
+            return new(
+                type.IsPublic,
+                type.Assembly.GetName().Name,
+                method.IsPublic,
+                method.ToString(),
+                valid,
+                invalid,
+                null);
+        }
+        catch (Exception ex)
+        {
+            return new(false, null, false, null, null, null, ex.ToString());
+        }
+    }
+
+    static Type? FindControlTagParserType()
+        => AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true)
             .Select(a => a.GetType("YukkuriMovieMaker.Commons.ControlTagParser", throwOnError: false))
             .FirstOrDefault(t => t is not null);
+
+    static object[] DiscoverControlTagParserMethods()
+    {
+        var type = FindControlTagParserType();
         if (type is null)
             return [new { error = "ControlTagParser not found" }];
 
