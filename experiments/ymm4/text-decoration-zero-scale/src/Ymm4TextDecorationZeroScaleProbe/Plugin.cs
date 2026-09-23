@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Immutable;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -111,9 +110,9 @@ internal static class Probe
         const int fps = 30;
         const int length = 300;
         var timeline = new TimelineSourceDescription(
-            new Size(1920, 1080),
-            new FrameTime(0, fps),
-            new FrameTime(length, fps),
+            new System.Drawing.Size(1920, 1080),
+            new YukkuriMovieMaker.Player.Video.FrameTime(0, fps),
+            new YukkuriMovieMaker.Player.Video.FrameTime(length, fps),
             fps,
             TimelineSourceUsage.Playing,
             Guid.Empty,
