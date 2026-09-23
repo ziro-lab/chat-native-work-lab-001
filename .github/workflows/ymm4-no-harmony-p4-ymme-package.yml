@@ -63,7 +63,9 @@ jobs:
           $root=Join-Path $extract 'Ymm4NoHarmonyFolderHandsOn'
           if(-not(Test-Path (Join-Path $root 'Ymm4NoHarmonyFolderHandsOn.dll'))){throw 'ymme root DLL missing'}
           if(-not(Test-Path (Join-Path $root 'README.md'))){throw 'ymme README missing'}
-          if(-not(Test-Path (Join-Path $root 'HANDS_ON.md'))){throw 'ymme HANDS_ON missing'}
+          if(-not(Test-Path (Join-Path $root 'LICENSE'))){throw 'ymme LICENSE missing'}
+          if(-not(Test-Path (Join-Path $root 'THIRD_PARTY_NOTICES.md'))){throw 'ymme THIRD_PARTY_NOTICES missing'}
+          if(Test-Path (Join-Path $root 'HANDS_ON.md')){throw 'legacy P4 HANDS_ON unexpectedly packaged'}
           if(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){throw 'Harmony file present inside .ymme'}
 
           @(
