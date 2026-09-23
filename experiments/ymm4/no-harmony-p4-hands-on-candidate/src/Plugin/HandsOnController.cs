@@ -86,6 +86,217 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS2IntegrationSmoke();
         ScheduleS3IntegrationSmoke();
         ScheduleS4IntegrationSmoke();
+        ScheduleS5CoordinateSmoke();
+    }
+
+    private void ScheduleS5CoordinateSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S5_COORDINATE_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS5CoordinateSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS5CoordinateSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "S5 coordinate smoke must start from a resource-free Timeline.");
+
+            for (var layer = 0; layer <= 3; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(90);
+            }
+
+            var a = new YmmGroupItem
+            {
+                Frame = 120,
+                Length = 80,
+                Layer = 1,
+                GroupRange = 1
+            };
+            var b = new YmmGroupItem
+            {
+                Frame = 360,
+                Length = 120,
+                Layer = 2,
+                GroupRange = 1
+            };
+
+            foreach (var item in new[] { a, b })
+            {
+                if (!timeline.TryAddItems(
+                        [item],
+                        item.Frame,
+                        item.Layer,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"S5 fixture item add failed at F{item.Frame}/L{item.Layer}.");
+                }
+            }
+
+            undo.Record();
+            await Task.Delay(700);
+
+            string DescribeItem(
+                string key,
+                YmmGroupItem item)
+            {
+                var view = host.ItemView(item);
+                var vm = view.DataContext
+                    ?? throw new InvalidOperationException(
+                        "TimelineItemView has no DataContext.");
+                var local = view.TranslatePoint(
+                    new Point(),
+                    host.Source);
+
+                var candidates = vm.GetType()
+                    .GetProperties(Host.Flags)
+                    .Where(property =>
+                        property.GetIndexParameters().Length == 0
+                        && (property.Name.Contains(
+                                "Left",
+                                StringComparison.OrdinalIgnoreCase)
+                            || property.Name.Contains(
+                                "Width",
+                                StringComparison.OrdinalIgnoreCase)
+                            || property.Name.Contains(
+                                "Frame",
+                                StringComparison.OrdinalIgnoreCase)
+                            || property.Name.Contains(
+                                "X",
+                                StringComparison.OrdinalIgnoreCase)))
+                    .Select(property =>
+                    {
+                        object? value;
+                        try
+                        {
+                            value = property.GetValue(vm);
+                        }
+                        catch (Exception ex)
+                        {
+                            value = "<error:"
+                                + ex.GetBaseException().Message
+                                + ">";
+                        }
+
+                        return property.Name
+                            + "="
+                            + (value ?? "<null>");
+                    })
+                    .Take(80)
+                    .ToArray();
+
+                return string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        $"{key}_frame={item.Frame}",
+                        $"{key}_length={item.Length}",
+                        $"{key}_layer={item.Layer}",
+                        $"{key}_view_x={local.X:R}",
+                        $"{key}_view_y={local.Y:R}",
+                        $"{key}_actual_width={view.ActualWidth:R}",
+                        $"{key}_actual_height={view.ActualHeight:R}",
+                        $"{key}_vm_type={vm.GetType().FullName}",
+                        $"{key}_vm_candidates={string.Join("|", candidates)}"
+                    });
+            }
+
+            var timelineVm = host.Vm;
+            var vmCandidates = timelineVm.GetType()
+                .GetProperties(Host.Flags)
+                .Where(property =>
+                    property.GetIndexParameters().Length == 0
+                    && (property.Name.Contains(
+                            "Viewport",
+                            StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Contains(
+                            "Scale",
+                            StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Contains(
+                            "Zoom",
+                            StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Contains(
+                            "Frame",
+                            StringComparison.OrdinalIgnoreCase)))
+                .Select(property =>
+                {
+                    object? value;
+                    try
+                    {
+                        value = property.GetValue(timelineVm);
+                    }
+                    catch (Exception ex)
+                    {
+                        value = "<error:"
+                            + ex.GetBaseException().Message
+                            + ">";
+                    }
+
+                    return property.Name
+                        + "="
+                        + (value ?? "<null>");
+                })
+                .Take(100)
+                .ToArray();
+
+            var result = string.Join(
+                Environment.NewLine,
+                new[]
+                {
+                    "PASS_S5_COORDINATE_DISCOVERY",
+                    $"host_version={typeof(Timeline).Assembly.GetName().Version}",
+                    $"source_type={host.Source.GetType().FullName}",
+                    $"source_width={host.Source.ActualWidth:R}",
+                    $"scroll_h_offset={host.Scroll.HorizontalOffset:R}",
+                    $"scroll_h_extent={host.Scroll.ExtentWidth:R}",
+                    $"scroll_h_viewport={host.Scroll.ViewportWidth:R}",
+                    $"timeline_vm_type={timelineVm.GetType().FullName}",
+                    $"timeline_vm_candidates={string.Join("|", vmCandidates)}",
+                    DescribeItem("a", a),
+                    DescribeItem("b", b)
+                });
+
+            WriteS5CoordinateResult(
+                result + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "s5_coordinate_smoke_error=" + ex);
+            WriteS5CoordinateResult(
+                "FAIL_S5_COORDINATE_DISCOVERY\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteS5CoordinateResult(
+        string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(
+                dir,
+                "s5-coordinate-result.txt"),
+            text);
     }
 
     private void ScheduleS4IntegrationSmoke()
