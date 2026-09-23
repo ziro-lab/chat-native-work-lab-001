@@ -40,6 +40,7 @@ internal sealed partial class HandsOnController : IDisposable
     private readonly MouseButtonEventHandler mouseHandler;
 
     private FolderOverlayAdorner? adorner;
+    private bool overlayRefreshQueued;
     private bool disposed;
 
     internal HandsOnController(
@@ -57,6 +58,8 @@ internal sealed partial class HandsOnController : IDisposable
         timeline = host.Timeline;
 
         display = new DirectDisplay(host, HandsOnRuntime.Diagnostic);
+        display.RegisterRefreshTarget(labels);
+        display.Applied += OnDisplayApplied;
         structural = new StructuralFolderBridge(
             window,
             timeline,
@@ -3765,10 +3768,22 @@ internal sealed partial class HandsOnController : IDisposable
             .ToArray() ?? [];
 
         display.SetSpans(spans);
+    }
 
-        Application.Current.Dispatcher.BeginInvoke(
-            new Action(RebuildOverlay),
-            DispatcherPriority.ContextIdle);
+    private void OnDisplayApplied(object? sender, EventArgs e)
+    {
+        if (disposed || overlayRefreshQueued)
+            return;
+
+        overlayRefreshQueued = true;
+        labels.Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                overlayRefreshQueued = false;
+                if (!disposed)
+                    RebuildOverlay();
+            }),
+            DispatcherPriority.Render);
     }
 
     private void RebuildOverlay()
@@ -4293,6 +4308,7 @@ internal sealed partial class HandsOnController : IDisposable
             adorner = null;
         }
 
+        display.Applied -= OnDisplayApplied;
         visualSummary?.Dispose();
         fileDrop.Dispose();
         input.Dispose();
@@ -4315,6 +4331,7 @@ internal sealed partial class HandsOnController : IDisposable
         private readonly string timelineKey;
         private sealed record FolderHit(Rect Toggle, Rect Name);
         private readonly Dictionary<Guid, FolderHit> hitRects = [];
+        private readonly Dictionary<Guid, Rect> folderRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
@@ -4363,10 +4380,75 @@ internal sealed partial class HandsOnController : IDisposable
             return false;
         }
 
+        internal bool TryGetFolderRect(Guid folderId, out Rect rect) =>
+            folderRects.TryGetValue(folderId, out rect);
+
+        internal bool TryGetRenderedRowRect(int logicalLayer, out Rect rect)
+        {
+            FrameworkElement? best = null;
+            double bestTop = 0;
+            var bestArea = -1.0;
+
+            foreach (var element in Host.Elements(AdornedElement))
+            {
+                if (ReferenceEquals(element, AdornedElement)
+                    || !element.IsVisible
+                    || element.ActualWidth <= 0
+                    || element.ActualHeight <= 0
+                    || HandsOnHostAccess.LayerId(element.DataContext)
+                        != logicalLayer)
+                {
+                    continue;
+                }
+
+                Point point;
+                try
+                {
+                    point = element.TranslatePoint(
+                        new Point(),
+                        AdornedElement);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!double.IsFinite(point.Y))
+                    continue;
+
+                var area =
+                    element.ActualWidth
+                    * element.ActualHeight;
+
+                if (area <= bestArea)
+                    continue;
+
+                best = element;
+                bestTop = point.Y;
+                bestArea = area;
+            }
+
+            if (best is null)
+            {
+                rect = Rect.Empty;
+                return false;
+            }
+
+            rect = new Rect(
+                0,
+                bestTop,
+                Math.Max(
+                    0,
+                    AdornedElement.RenderSize.Width),
+                best.ActualHeight);
+            return true;
+        }
+
         private void Rebuild()
         {
             canvas.Children.Clear();
             hitRects.Clear();
+            folderRects.Clear();
 
             foreach (var folder in folders
                 .OrderBy(x => x.Start)
@@ -4381,15 +4463,36 @@ internal sealed partial class HandsOnController : IDisposable
                     && folder.End <= parent.End);
 
                 var x = 2 + depth * 9;
-                var y = display.Layout.VisualRowOfLogical(folder.Start)
-                    * display.Height + 3;
+                var rowTop =
+                    display.Layout.VisualRowOfLogical(folder.Start)
+                    * (double)display.Height;
+                var rowHeight = (double)display.Height;
+
+                if (TryGetRenderedRowRect(
+                        folder.Start,
+                        out var renderedRow))
+                {
+                    rowTop = renderedRow.Y;
+                    rowHeight = renderedRow.Height;
+                }
+
                 var width = Math.Max(
                     48,
                     Math.Min(
                         120,
                         Math.Max(48, AdornedElement.RenderSize.Width - x - 4)));
-                var height = Math.Max(18, display.Height - 6);
+
+                var verticalInset = Math.Min(
+                    3.0,
+                    Math.Max(
+                        0,
+                        (rowHeight - 18.0) / 2.0));
+                var height = Math.Max(
+                    1,
+                    rowHeight - verticalInset * 2.0);
+                var y = rowTop + verticalInset;
                 var rect = new Rect(x, y, width, height);
+                folderRects[folder.Id] = rect;
                 var toggleWidth = Math.Min(18, width);
                 hitRects[folder.Id] = new FolderHit(
                     new Rect(x, y, toggleWidth, height),
