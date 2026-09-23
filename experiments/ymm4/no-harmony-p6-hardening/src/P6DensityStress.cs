@@ -343,6 +343,53 @@ internal sealed partial class HandsOnController
                 throw new InvalidOperationException(
                     "P6.1 final expanded geometry mismatch.");
 
+            // Bounded idle soak: allow any already-queued host notification to
+            // settle, then verify that the runtime does not keep refreshing,
+            // mutating geometry, or accumulating subscriptions while untouched.
+            await Task.Delay(1200);
+            display.ThrowIfFailed();
+
+            const int idleSeconds = 8;
+            var idleApplicationsStart = display.Applications;
+            var idleMutationsStart = display.Mutations;
+            var idleRefreshesStart = display.CanvasRefreshes;
+            var idleSubscriptionsStart = display.SubscriptionCount;
+
+            await Task.Delay(TimeSpan.FromSeconds(idleSeconds));
+            display.ThrowIfFailed();
+
+            var idleApplicationsDelta =
+                display.Applications - idleApplicationsStart;
+            var idleMutationsDelta =
+                display.Mutations - idleMutationsStart;
+            var idleRefreshesDelta =
+                display.CanvasRefreshes - idleRefreshesStart;
+            var idleSubscriptionGrowth =
+                display.SubscriptionCount - idleSubscriptionsStart;
+
+            if (idleApplicationsDelta > 2)
+            {
+                throw new InvalidOperationException(
+                    $"P6.1 idle application count grew by {idleApplicationsDelta}; expected <= 2.");
+            }
+
+            if (idleMutationsDelta != 0
+                || idleRefreshesDelta != 0
+                || idleSubscriptionGrowth != 0)
+            {
+                throw new InvalidOperationException(
+                    "P6.1 idle activity did not settle: "
+                    + $"mutations={idleMutationsDelta}, "
+                    + $"canvas={idleRefreshesDelta}, "
+                    + $"subscriptions={idleSubscriptionGrowth}.");
+            }
+
+            if (!display.GeometryMatches())
+            {
+                throw new InvalidOperationException(
+                    "P6.1 idle geometry drifted.");
+            }
+
             WriteP6DensityResult(
                 string.Join(
                     Environment.NewLine,
@@ -370,6 +417,12 @@ internal sealed partial class HandsOnController
                         $"subscriptions_settled={settledSubscriptions}",
                         $"subscriptions_final={finalSubscriptions}",
                         $"subscriptions_measured_growth={finalSubscriptions - settledSubscriptions}",
+                        $"idle_seconds={idleSeconds}",
+                        $"idle_applications_delta={idleApplicationsDelta}",
+                        $"idle_mutations_delta={idleMutationsDelta}",
+                        $"idle_canvas_refreshes_delta={idleRefreshesDelta}",
+                        $"idle_subscriptions_growth={idleSubscriptionGrowth}",
+                        "idle_applications_bounded=true",
                         $"display_failure={(display.Failure is null ? "none" : display.Failure.GetType().Name)}",
                         "final_geometry=true",
                         "folder_validation=true",
