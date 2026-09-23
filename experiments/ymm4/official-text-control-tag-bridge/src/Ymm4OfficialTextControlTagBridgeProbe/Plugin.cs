@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -75,11 +76,15 @@ internal static class Probe
             var tagTypes = DiscoverTagRelatedTypes();
             var parserMethods = DiscoverControlTagParserMethods();
             var plainText = ObserveOfficialGetPlainText();
+            var parse = ObserveOfficialParse();
 
             Check("official_control_tag_parser_public", plainText.ParserTypePublic);
             Check("official_get_plain_text_public", plainText.GetPlainTextPublic);
             Check("official_get_plain_text_strips_w0", plainText.ValidResult == BaselineText);
             Check("official_get_plain_text_keeps_invalid_tag", plainText.InvalidResult == InvalidTagText);
+            Check("official_parse_public", parse.ParsePublic);
+            Check("official_parse_clean_text_strips_w0", parse.CleanText == BaselineText);
+            Check("official_parse_returns_timing_tag", parse.TimingTagCount > 0);
 
             File.WriteAllText(Path.Combine(output, "behavior.json"),
                 JsonSerializer.Serialize(new
@@ -94,6 +99,7 @@ internal static class Probe
                     jimakuSource = jimakuObservation,
                     pronunciationObservation = audio,
                     officialPlainText = plainText,
+                    officialParse = parse,
                     controlTagParserMethods = parserMethods,
                     tagRelatedTypes = tagTypes
                 }, new JsonSerializerOptions { WriteIndented = true }));
@@ -370,6 +376,72 @@ internal static class Probe
             else args[i] = null;
         }
         return args;
+    }
+
+    sealed record ParseObservation(
+        bool ParsePublic,
+        string? MethodSignature,
+        string? CleanText,
+        int TimingTagCount,
+        object[] TimingTags,
+        string? Error);
+
+    static ParseObservation ObserveOfficialParse()
+    {
+        try
+        {
+            var method = typeof(ControlTagParser).GetMethods(BindingFlags.Static | BindingFlags.Public)
+                .Where(x => x.Name == "Parse")
+                .OrderBy(x => x.GetParameters().Length)
+                .FirstOrDefault();
+
+            if (method is null)
+                return new(false, null, null, 0, [], "Public Parse not found");
+
+            var result = ControlTagParser.Parse(
+                ValidTagText,
+                ImmutableList<TextDecoration>.Empty,
+                32.0,
+                "Yu Gothic UI",
+                false,
+                false);
+
+            var tags = result.Item3.Select(tag => (object)new
+            {
+                type = tag.GetType().FullName,
+                properties = tag.GetType()
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(p => p.GetIndexParameters().Length == 0)
+                    .ToDictionary(
+                        p => p.Name,
+                        p =>
+                        {
+                            try { return p.GetValue(tag)?.ToString(); }
+                            catch { return "<error>"; }
+                        }),
+                fields = tag.GetType()
+                    .GetFields(BindingFlags.Instance | BindingFlags.Public)
+                    .ToDictionary(
+                        p => p.Name,
+                        p =>
+                        {
+                            try { return p.GetValue(tag)?.ToString(); }
+                            catch { return "<error>"; }
+                        })
+            }).ToArray();
+
+            return new(
+                method.IsPublic,
+                method.ToString(),
+                result.Item1,
+                result.Item3.Count,
+                tags,
+                null);
+        }
+        catch (Exception ex)
+        {
+            return new(false, null, null, 0, [], ex.ToString());
+        }
     }
 
     sealed record PlainTextObservation(
