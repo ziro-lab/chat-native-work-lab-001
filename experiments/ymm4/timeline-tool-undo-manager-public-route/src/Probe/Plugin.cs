@@ -175,12 +175,19 @@ internal static class Probe
 
                     if (!attemptedOpen)
                     {
-                        attemptedOpen = true;
                         var item = FindMenuItem(main, ToolName);
+                        if (item is null)
+                        {
+                            Log("tool menu item not available yet");
+                            continue;
+                        }
+
                         DumpMenuItem(item);
-                        Check("tool_menu_item_found", item is not null);
-                        Check("tool_menu_open_invoked", item is not null && TryInvokeMenuItem(item));
-                        Log("menu open attempted");
+                        Check("tool_menu_item_found", true);
+                        var invoked = TryInvokeMenuItem(item);
+                        Check("tool_menu_open_invoked", invoked);
+                        attemptedOpen = invoked;
+                        Log("menu open attempted invoked=" + invoked);
                     }
                 }
 
