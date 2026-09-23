@@ -160,6 +160,13 @@ internal sealed partial class HandsOnController
             FolderProductStateRules.NormalizeAndValidate(
                 state.ProductState);
 
+            // Fixture creation above uses direct public setup routes. Commit that
+            // setup as its own native history boundary so the first measured
+            // standard command cannot absorb pending fixture mutations.
+            undo.Record();
+            await Task.Delay(350);
+            display.ThrowIfFailed();
+
             string Snapshot()
             {
                 var itemState = string.Join(
