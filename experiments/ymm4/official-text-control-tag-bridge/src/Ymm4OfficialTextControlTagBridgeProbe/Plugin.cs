@@ -91,7 +91,7 @@ internal static class Probe
             Check("multiple_w0_positions_are_clean_text_positions",
                 boundaries.ZeroWaitPositions.SequenceEqual(new[] { 1, 2 }));
             Check("nonzero_wait_is_not_boundary_marker",
-                boundaries.NonzeroWaitValues.Count == 1 &&
+                boundaries.NonzeroWaitValues.Length == 1 &&
                 Math.Abs(boundaries.NonzeroWaitValues[0] - 100.0) < 0.001 &&
                 boundaries.NonzeroSelectedBoundaryCount == 0);
 
