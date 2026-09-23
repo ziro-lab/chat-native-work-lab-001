@@ -53,6 +53,11 @@ internal static class Probe
                 !string.IsNullOrWhiteSpace(activeUrl) &&
                 activeUrl.StartsWith(url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
 
+            const string fakeSpeakerUuid = "11111111-1111-1111-1111-111111111111";
+            engine.SpeakerInfos.Add(new VOICEVOXSpeakerInfo(fakeSpeakerUuid, ""));
+            Check("fake_engine_has_speaker_info",
+                engine.SpeakerInfos.Any(x => x.SpeakerUuid == fakeSpeakerUuid));
+
             var speakerJson = JObject.Parse("""
             {
               "name": "CNWL Speaker",
