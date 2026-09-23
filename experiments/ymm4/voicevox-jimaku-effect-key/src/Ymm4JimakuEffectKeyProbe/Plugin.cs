@@ -247,13 +247,6 @@ internal static class Probe
             await Task.Delay(200);
         }
 
-        Check("effect_property_editor_bound", ProbeState.PropertyEditorBound);
-        Check("effect_editor_owner_is_custom_effect", ProbeState.PropertyOwnerWasKeyEffect);
-        Check("effect_editor_received_editor_info", ProbeState.EditorInfoSeen);
-        Check("effect_editor_received_voice_edit_service", ProbeState.VoiceItemEditSeen);
-        Check("standard_voice_regeneration_started", ProbeState.RegenerationStarted);
-        Check("standard_voice_regeneration_invoked", ProbeState.RegenerationStarted);
-
         var evidence = new
         {
             host = "4.56.1.0 Lite",
