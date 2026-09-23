@@ -892,6 +892,83 @@ public sealed partial class FolderToolViewModel
         }
     }
 
+    private FolderPanelRowViewModel? CurrentSelectedRow() =>
+        Rows.LastOrDefault(row => row.IsSelected);
+
+    private FolderPanelRowViewModel? CurrentSelectedFolder() =>
+        Rows.LastOrDefault(row =>
+            row.IsSelected
+            && row.FolderId is not null);
+
+    internal void SelectItemsCurrent()
+    {
+        if (CurrentSelectedRow() is { } row)
+            SelectItems(row);
+    }
+
+    internal void SetColorCurrent(string? color)
+    {
+        if (CurrentSelectedFolder()?.FolderId
+            is not { } id)
+        {
+            return;
+        }
+
+        RunPanelAction(
+            () => RequirePanelCommands().SetColor(
+                id,
+                color));
+    }
+
+    internal void ApplyColorCurrent()
+    {
+        if (CurrentSelectedFolder()?.FolderId
+            is not { } id)
+        {
+            return;
+        }
+
+        RunPanelAction(
+            () => RequirePanelCommands()
+                .ApplyFolderColorToLayers(id));
+    }
+
+    internal void DeleteCurrentFolderWithLayers()
+    {
+        if (panelTimeline is null
+            || CurrentSelectedFolder()
+                is not { FolderId: { } id } row)
+        {
+            return;
+        }
+
+        var layerCount =
+            row.Last - row.First + 1;
+        var itemCount = panelTimeline.Items.Count(
+            item =>
+                row.First <= item.Layer
+                && item.Layer <= row.Last);
+
+        var message =
+            $"フォルダ「{row.DisplayName}」と中の {layerCount} レイヤー" +
+            $"（アイテム {itemCount} 個）を削除します。\n" +
+            "元に戻すには YMM4 の「元に戻す」を使ってください。";
+
+        if (MessageBox.Show(
+                message,
+                DisplayTitle,
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning)
+            != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        RunPanelAction(
+            () => RequirePanelCommands()
+                .DeleteFolderContents(id));
+    }
+
     internal void AddGroupToCurrent()
     {
         var row = Rows.LastOrDefault(
@@ -1386,11 +1463,51 @@ internal static class FolderPanelUi
             AddButton("表示/非表示", vm =>
                 vm.ToggleVisibilitySelection()));
         panel.Children.Add(
+            AddButton("中身選択", vm =>
+                vm.SelectItemsCurrent()));
+
+        var colorButton = AddButton("色", _ => { });
+        var colorMenu = new ContextMenu();
+
+        foreach (var choice in FolderCommands.Palette)
+        {
+            var item = new MenuItem
+            {
+                Header = choice.Name
+            };
+            var captured = choice.Color;
+            item.Click += (_, _) =>
+            {
+                if (view.DataContext
+                    is FolderToolViewModel vm)
+                {
+                    vm.SetColorCurrent(captured);
+                }
+            };
+            colorMenu.Items.Add(item);
+        }
+
+        colorButton.Click += (_, _) =>
+        {
+            colorMenu.PlacementTarget = colorButton;
+            colorMenu.Placement =
+                PlacementMode.Bottom;
+            colorMenu.IsOpen = true;
+        };
+        panel.Children.Add(colorButton);
+
+        panel.Children.Add(
+            AddButton("色→レイヤー", vm =>
+                vm.ApplyColorCurrent()));
+        panel.Children.Add(
             AddButton("Group追加", vm =>
                 vm.AddGroupToCurrent()));
         panel.Children.Add(
             AddButton("Group Fit", vm =>
                 vm.FitGroupsCurrent()));
+        panel.Children.Add(
+            AddButton("内容削除", vm =>
+                vm.DeleteCurrentFolderWithLayers()));
         panel.Children.Add(
             AddButton("全開", vm =>
                 vm.SetAllCollapsed(false)));
