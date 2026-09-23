@@ -35,3 +35,22 @@ Run 35844795943 on real YMM4 Lite 4.56.1.0 showed:
 - A§B with § Scale=0: 57.1094 px
 
 Therefore Scale=0 is not a width-collapse operation in YMM4's text renderer. The next slice tests small positive scales (0.01 / 0.001) with transparent foreground; zero remains a negative control.
+
+
+## Native slice 2 result — tiny/transparent scale also does not collapse layout
+
+Run `35845054587`, real YMM4 Lite 4.56.1.0:
+
+- baseline `AB`: 41.4209 px
+- visible `A§B`: 56.6611 px
+- transparent marker, Scale=0: 57.1094 px
+- transparent marker, Scale=0.01: 57.1094 px
+- transparent marker, Scale=0.001: 57.1094 px
+
+The marker's layout advance is unchanged. `TextDecoration.Scale` is therefore rejected as a hidden-control-marker mechanism.
+
+Artifact `10743325493`, SHA256 `7705b2d08c7828d82a8a3ade2774fe9f9cea632538e0cb88e8db186ebf5c45f3`.
+
+### Design consequence
+
+Keep `TextDecoration` out of the product path for marker removal. The next route must filter/replace the text before layout, or use another zero-advance representation proven independently.
