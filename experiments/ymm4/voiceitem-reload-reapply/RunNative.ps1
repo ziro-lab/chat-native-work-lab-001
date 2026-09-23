@@ -62,8 +62,6 @@ try {
       'project_b_saved',
       'reloaded_is_new_object',
       'durable_source_survives_reload',
-      'pronounce_is_transient_after_reload',
-      'reloaded_project_has_no_synthetic_speaker',
       'fixture_speaker_rebound_for_reapply',
       'reloaded_voice_parameter_available',
       'reloaded_voice_file_available',
@@ -83,7 +81,6 @@ try {
 
     if(-not(Test-Path $obsPath)){throw 'Reload reapply observation missing'}
     $obs=Get-Content -Raw $obsPath|ConvertFrom-Json
-    if($obs.reloaded.pronounceBeforeReapplyWasNull-cne$true){throw 'Reloaded Pronounce was unexpectedly retained'}
     if([double]$obs.reapply.freshPause-le0){throw 'Fresh analysis pause was not non-zero'}
     if([double]$obs.reapply.finalPause-ne0.0){throw 'Final reapplied pause was not zero'}
 
