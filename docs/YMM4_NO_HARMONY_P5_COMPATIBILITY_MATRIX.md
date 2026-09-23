@@ -43,10 +43,10 @@ Do not add a type-specific adapter merely because setup differs.
 | Video | `VideoItem` | real MP4 via public `VideoItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
 | Audio | `AudioItem` | real PCM WAV via public `AudioItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
 | Shape | `ShapeItem` | public parameterless ctor | **Confirmed** | **Confirmed** | Full P5.3 common path + block move Undo/Redo |
-| Group Control | `GroupItem` | public item construction | **P4 confirmed** | **P4 confirmed** | P5 may reuse as baseline/special-item control |
-| Effect-bearing item | discovery pending | one representative item + effect | Pending | Pending | Effect itself need not become a folder-owned model |
-| Transition / special multi-layer | discovery pending | pending | Pending | Pending | Only test if a concrete shipped item uses distinct layer/visual semantics |
-| Third-party item | candidate pending | opt-in redistribution-safe plugin | Pending | Pending | One reasonable plugin implementation is enough for P5 representative coverage |
+| Group Control | `GroupItem` | public item construction | **Confirmed** | **Confirmed** | P5.3 common path + block move Undo/Redo; P4 GroupRange-specific behavior also frozen |
+| Effect-bearing timeline item | `EffectItem` | public parameterless ctor | **Confirmed** | **Confirmed** | P5.3 common geometry/fold/timing/select + block move Undo/Redo |
+| Transition / special timeline item | `TransitionItem` | public parameterless ctor | **Confirmed** | **Confirmed** | P5.3 common geometry/fold/timing/select + block move Undo/Redo |
+| Third-party custom item | `YMM43D.Project.Items.LightItem` | pinned MIT YMM43D build | Testing | Testing | Commit `a5fe44443d9b62912dec6861edf68cbdff9e7810`; dedicated P5 gate in progress |
 
 ## 4. Frozen assumptions that P5 may challenge
 
