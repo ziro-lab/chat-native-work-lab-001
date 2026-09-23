@@ -153,13 +153,21 @@ internal sealed class HandsOnController : IDisposable
                 string key,
                 YmmGroupItem item)
             {
-                var view = host.ItemView(item);
-                var vm = view.DataContext
-                    ?? throw new InvalidOperationException(
-                        "TimelineItemView has no DataContext.");
-                var local = view.TranslatePoint(
-                    new Point(),
-                    host.Source);
+                var vm = item == a
+                    ? itemVmA
+                    : itemVmB;
+
+                var view = host.ItemViews()
+                    .FirstOrDefault(candidate =>
+                        ReferenceEquals(
+                            Host.Item(candidate.DataContext),
+                            item));
+
+                var local = view is null
+                    ? (Point?)null
+                    : view.TranslatePoint(
+                        new Point(),
+                        host.Source);
 
                 var candidates = vm.GetType()
                     .GetProperties(Host.Flags)
@@ -205,10 +213,11 @@ internal sealed class HandsOnController : IDisposable
                         $"{key}_frame={item.Frame}",
                         $"{key}_length={item.Length}",
                         $"{key}_layer={item.Layer}",
-                        $"{key}_view_x={local.X:R}",
-                        $"{key}_view_y={local.Y:R}",
-                        $"{key}_actual_width={view.ActualWidth:R}",
-                        $"{key}_actual_height={view.ActualHeight:R}",
+                        $"{key}_view_realized={view is not null}",
+                        $"{key}_view_x={(local?.X.ToString("R") ?? "<unrealized>")}",
+                        $"{key}_view_y={(local?.Y.ToString("R") ?? "<unrealized>")}",
+                        $"{key}_actual_width={(view?.ActualWidth.ToString("R") ?? "<unrealized>")}",
+                        $"{key}_actual_height={(view?.ActualHeight.ToString("R") ?? "<unrealized>")}",
                         $"{key}_vm_type={vm.GetType().FullName}",
                         $"{key}_vm_candidates={string.Join("|", candidates)}"
                     });
@@ -216,9 +225,25 @@ internal sealed class HandsOnController : IDisposable
 
             var timelineVm = host.Vm;
 
-            var itemVmA = host.ItemView(a).DataContext
+            var vmItems = Host.Get(
+                    timelineVm,
+                    "Items")
+                as System.Collections.IEnumerable
                 ?? throw new InvalidOperationException(
-                    "S5 item A DataContext missing.");
+                    "TimelineViewModel.Items is not enumerable.");
+
+            object FindItemVm(IItem target) =>
+                vmItems.Cast<object>()
+                    .FirstOrDefault(candidate =>
+                        ReferenceEquals(
+                            Host.Item(candidate),
+                            target))
+                ?? throw new InvalidOperationException(
+                    $"Timeline item VM missing for F{target.Frame}/L{target.Layer}.");
+
+            var itemVmA = FindItemVm(a);
+            var itemVmB = FindItemVm(b);
+
             var leftProperty = itemVmA.GetType()
                 .GetProperty("Left", Host.Flags)
                 ?? throw new MissingMemberException(
@@ -247,16 +272,28 @@ internal sealed class HandsOnController : IDisposable
 
             string ZoomSnapshot(string prefix)
             {
-                var aView = host.ItemView(a);
-                var bView = host.ItemView(b);
-                var aVm = aView.DataContext!;
-                var bVm = bView.DataContext!;
-                var aPoint = aView.TranslatePoint(
-                    new Point(),
-                    host.Source);
-                var bPoint = bView.TranslatePoint(
-                    new Point(),
-                    host.Source);
+                var aVm = itemVmA;
+                var bVm = itemVmB;
+
+                FrameworkElement? ViewFor(IItem item) =>
+                    host.ItemViews()
+                        .FirstOrDefault(candidate =>
+                            ReferenceEquals(
+                                Host.Item(candidate.DataContext),
+                                item));
+
+                var aView = ViewFor(a);
+                var bView = ViewFor(b);
+                var aPoint = aView is null
+                    ? (Point?)null
+                    : aView.TranslatePoint(
+                        new Point(),
+                        host.Source);
+                var bPoint = bView is null
+                    ? (Point?)null
+                    : bView.TranslatePoint(
+                        new Point(),
+                        host.Source);
 
                 return string.Join(
                     Environment.NewLine,
@@ -265,12 +302,12 @@ internal sealed class HandsOnController : IDisposable
                         $"{prefix}_zoom={zoomValueProperty?.GetValue(zoomHolder) ?? "<null>"}",
                         $"{prefix}_a_left={leftProperty.GetValue(aVm)}",
                         $"{prefix}_a_width={widthProperty.GetValue(aVm)}",
-                        $"{prefix}_a_view_x={aPoint.X:R}",
-                        $"{prefix}_a_actual_width={aView.ActualWidth:R}",
+                        $"{prefix}_a_view_x={(aPoint?.X.ToString("R") ?? "<unrealized>")}",
+                        $"{prefix}_a_actual_width={(aView?.ActualWidth.ToString("R") ?? "<unrealized>")}",
                         $"{prefix}_b_left={leftProperty.GetValue(bVm)}",
                         $"{prefix}_b_width={widthProperty.GetValue(bVm)}",
-                        $"{prefix}_b_view_x={bPoint.X:R}",
-                        $"{prefix}_b_actual_width={bView.ActualWidth:R}",
+                        $"{prefix}_b_view_x={(bPoint?.X.ToString("R") ?? "<unrealized>")}",
+                        $"{prefix}_b_actual_width={(bView?.ActualWidth.ToString("R") ?? "<unrealized>")}",
                         $"{prefix}_scroll_h_offset={host.Scroll.HorizontalOffset:R}",
                         $"{prefix}_viewport={Host.Reactive(timelineVm, "Viewport")}"
                     });
