@@ -92,6 +92,389 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS3IntegrationSmoke();
         ScheduleS4IntegrationSmoke();
         ScheduleS5CoordinateSmoke();
+        ScheduleS5IntegrationSmoke();
+    }
+
+    private void ScheduleS5IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S5_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS5IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS5IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "S5 integration smoke must start from a resource-free Timeline.");
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(90);
+            }
+
+            var owner = new YmmGroupItem
+            {
+                Frame = 40,
+                Length = 80,
+                Layer = 1,
+                GroupRange = 3
+            };
+            var hiddenA = new YmmGroupItem
+            {
+                Frame = 150,
+                Length = 60,
+                Layer = 2,
+                GroupRange = 1
+            };
+            var hiddenB = new YmmGroupItem
+            {
+                Frame = 300,
+                Length = 90,
+                Layer = 4,
+                GroupRange = 1
+            };
+            var visible = new YmmGroupItem
+            {
+                Frame = 430,
+                Length = 50,
+                Layer = 5,
+                GroupRange = 1
+            };
+
+            foreach (var item in new[]
+            {
+                owner,
+                hiddenA,
+                hiddenB,
+                visible
+            })
+            {
+                if (!timeline.TryAddItems(
+                        [item],
+                        item.Frame,
+                        item.Layer,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"S5 visual fixture add failed at F{item.Frame}/L{item.Layer}.");
+                }
+            }
+
+            undo.Record();
+            await Task.Delay(650);
+
+            var folderId = Guid.Parse(
+                "99999999-9999-9999-9999-999999999999");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 4,
+                                            Name = "Visual",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(700);
+            display.ThrowIfFailed();
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "S5 item-area visual summary overlay is not attached.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 2)
+            {
+                throw new InvalidOperationException(
+                    $"Expected 2 hidden timing bands, got {visualSummary.TimingBandCount}.");
+            }
+
+            var geometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(
+                    host.Vm);
+            TimelineItemGeometry Geometry(IItem item) =>
+                geometry.Single(current =>
+                    ReferenceEquals(current.Item, item));
+
+            var hiddenAGeometry = Geometry(hiddenA);
+            var hiddenBGeometry = Geometry(hiddenB);
+            var visibleGeometry = Geometry(visible);
+
+            bool HasTiming(
+                TimelineItemGeometry expected) =>
+                visualSummary.TimingRects.Any(rect =>
+                    Math.Abs(rect.X - expected.Left) < 0.01
+                    && Math.Abs(rect.Width - expected.Width) < 0.01);
+
+            if (!HasTiming(hiddenAGeometry)
+                || !HasTiming(hiddenBGeometry)
+                || HasTiming(visibleGeometry))
+            {
+                throw new InvalidOperationException(
+                    "S5 timing band X/Width projection does not match hidden-item geometry.");
+            }
+
+            var ownerRow =
+                display.Layout.VisualRowOfLogical(1);
+            var ownerTop =
+                ownerRow * (double)display.Height;
+            var ownerBottom =
+                ownerTop + display.Height;
+
+            if (visualSummary.TimingRects.Any(rect =>
+                    rect.Y < ownerTop - 0.01
+                    || rect.Bottom > ownerBottom + 0.01))
+            {
+                throw new InvalidOperationException(
+                    "S5 timing bands escaped the collapsed owner row.");
+            }
+
+            if (visualSummary.GroupSegmentCount < 1)
+                throw new InvalidOperationException(
+                    "S5 Group visual projection produced no segments.");
+
+            var ownerGeometry = Geometry(owner);
+            if (!visualSummary.GroupRects.Any(rect =>
+                    Math.Abs(rect.X - ownerGeometry.Left) < 0.01
+                    && Math.Abs(rect.Width - ownerGeometry.Width) < 0.01
+                    && rect.Y <= ownerTop + 0.01
+                    && ownerTop < rect.Bottom))
+            {
+                throw new InvalidOperationException(
+                    "S5 Group visual segment is not aligned to the owner GroupItem.");
+            }
+
+            var zoomHolder = Host.Get(
+                host.Vm,
+                "TimelineZoom");
+            var zoomValue = zoomHolder?.GetType()
+                .GetProperty(
+                    "Value",
+                    System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Public);
+            var zoomBefore = zoomValue?.GetValue(
+                zoomHolder);
+
+            if (zoomHolder is null
+                || zoomValue?.SetMethod?.IsPublic != true
+                || zoomBefore is null)
+            {
+                throw new InvalidOperationException(
+                    "S5 requires the observed public TimelineZoom.Value surface.");
+            }
+
+            var beforeZoomRect =
+                visualSummary.TimingRects
+                    .Single(rect =>
+                        Math.Abs(
+                            rect.X - hiddenAGeometry.Left)
+                        < 0.01);
+
+            zoomValue.SetValue(
+                zoomHolder,
+                150.0);
+            await Task.Delay(700);
+
+            var zoomGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(
+                    host.Vm);
+            var hiddenAZoom = zoomGeometry.Single(
+                current =>
+                    ReferenceEquals(
+                        current.Item,
+                        hiddenA));
+
+            if (Math.Abs(
+                    hiddenAZoom.Left
+                    - hiddenAGeometry.Left)
+                < 0.01
+                || Math.Abs(
+                    hiddenAZoom.Width
+                    - hiddenAGeometry.Width)
+                < 0.01)
+            {
+                throw new InvalidOperationException(
+                    "S5 zoom did not update YMM4 item geometry.");
+            }
+
+            if (!visualSummary.TimingRects.Any(rect =>
+                    Math.Abs(
+                        rect.X - hiddenAZoom.Left)
+                    < 0.01
+                    && Math.Abs(
+                        rect.Width - hiddenAZoom.Width)
+                    < 0.01))
+            {
+                throw new InvalidOperationException(
+                    "S5 overlay did not follow YMM4 zoom geometry.");
+            }
+
+            zoomValue.SetValue(
+                zoomHolder,
+                zoomBefore);
+            await Task.Delay(600);
+
+            var restoredGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(
+                    host.Vm)
+                .Single(current =>
+                    ReferenceEquals(
+                        current.Item,
+                        hiddenA));
+
+            if (Math.Abs(
+                    restoredGeometry.Left
+                    - hiddenAGeometry.Left)
+                > 0.01
+                || Math.Abs(
+                    restoredGeometry.Width
+                    - hiddenAGeometry.Width)
+                > 0.01)
+            {
+                throw new InvalidOperationException(
+                    "S5 zoom reset did not restore item geometry.");
+            }
+
+            var rectBeforeScroll =
+                visualSummary.TimingRects
+                    .Single(rect =>
+                        Math.Abs(
+                            rect.X - restoredGeometry.Left)
+                        < 0.01);
+            var maxScroll = Math.Max(
+                0,
+                host.Scroll.ExtentWidth
+                    - host.Scroll.ViewportWidth);
+            var targetScroll = Math.Min(
+                120,
+                maxScroll);
+            host.Scroll.ScrollToHorizontalOffset(
+                targetScroll);
+            await Task.Delay(350);
+
+            var rectAfterScroll =
+                visualSummary.TimingRects
+                    .Single(rect =>
+                        Math.Abs(
+                            rect.X - restoredGeometry.Left)
+                        < 0.01);
+
+            if (Math.Abs(
+                    rectAfterScroll.X
+                    - rectBeforeScroll.X)
+                > 0.01)
+            {
+                throw new InvalidOperationException(
+                    "S5 content-coordinate overlay moved under horizontal scroll.");
+            }
+
+            host.Scroll.ScrollToHorizontalOffset(0);
+            await Task.Delay(250);
+
+            var ownerView = host.ItemViews()
+                .FirstOrDefault(view =>
+                    ReferenceEquals(
+                        Host.Item(view.DataContext),
+                        owner));
+
+            var nativeVisuals =
+                ownerView is null
+                    ? "<owner-view-unrealized>"
+                    : string.Join(
+                        "|",
+                        Host.Elements(ownerView)
+                            .Take(80)
+                            .Select(element =>
+                            {
+                                double y;
+                                try
+                                {
+                                    y = element.TranslatePoint(
+                                        new Point(),
+                                        host.Source).Y;
+                                }
+                                catch
+                                {
+                                    y = double.NaN;
+                                }
+
+                                return element.GetType().Name
+                                    + ":H="
+                                    + element.ActualHeight.ToString("R")
+                                    + ":Y="
+                                    + y.ToString("R");
+                            }));
+
+            WriteS5Result(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_S5_INTEGRATION",
+                        $"timeline={key}",
+                        "overlay_attached=true",
+                        $"timing_bands={visualSummary.TimingBandCount}",
+                        $"group_segments={visualSummary.GroupSegmentCount}",
+                        "timing_x_width_y=true",
+                        "zoom_follow=true",
+                        "horizontal_scroll_content_alignment=true",
+                        $"owner_native_visuals={nativeVisuals}"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "s5_integration_smoke_error=" + ex);
+            WriteS5Result(
+                "FAIL_S5_INTEGRATION\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteS5Result(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "s5-result.txt"),
+            text);
     }
 
     private void ScheduleS5CoordinateSmoke()
