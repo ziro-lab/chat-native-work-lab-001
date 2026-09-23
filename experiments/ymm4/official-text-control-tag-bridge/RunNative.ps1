@@ -33,7 +33,11 @@ try {
     'jimakusource_baseline_rendered',
     'jimakusource_valid_tag_rendered',
     'official_tag_is_layout_invisible_jimaku',
-    'voice_serif_retained_after_render'
+    'voice_serif_retained_after_render',
+    'official_control_tag_parser_public',
+    'official_get_plain_text_public',
+    'official_get_plain_text_strips_w0',
+    'official_get_plain_text_keeps_invalid_tag'
   )
   if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count) != $($req.Count)"}
   foreach($id in $req){
