@@ -33,7 +33,7 @@
     <Compile Include="../../../no-harmony-s4-panel/src/PanelProjection.cs" Link="PanelProjection.cs" />
     <Compile Include="../../../no-harmony-s4-panel/src/PanelMoveRules.cs" Link="PanelMoveRules.cs" />
     <Compile Include="../../../no-harmony-s5-visual-summary/src/VisualSummaryRules.cs" Link="VisualSummaryRules.cs" />
-    <Compile Include="../../../no-harmony-p6-hardening/src/P6DensityStress.cs" Link="P6DensityStress.cs" Condition="'$(EnableP6Hardening)' == 'true'" />
+    <Compile Include="../../../no-harmony-p6-hardening/src/*.cs" Link="P6Hardening/%(Filename)%(Extension)" Condition="'$(EnableP6Hardening)' == 'true'" />
   </ItemGroup>
 
   <Target Name="MakeYmme" AfterTargets="Build" Condition="'$(PackYmme)' == 'true'">
