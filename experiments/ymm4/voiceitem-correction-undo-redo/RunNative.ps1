@@ -31,6 +31,12 @@ try {
     $r=Get-Content -Raw $result|ConvertFrom-Json
     Get-Content $result
 
+    $progressPath=Join-Path $OutputDir 'progress.txt'
+    if(Test-Path $progressPath){
+      Write-Output '--- progress ---'
+      Get-Content $progressPath
+    }
+
     $obsPath=Join-Path $OutputDir 'undo-redo-observation.json'
     if(Test-Path $obsPath){
       Write-Output '--- undo redo observation ---'
@@ -65,6 +71,7 @@ try {
       'baseline_snapshot_attached',
       'correction_committed_as_single_record',
       'corrected_state_after_apply',
+      'timeline_view_found_for_history_input',
       'one_user_undo_event',
       'one_plugin_undo_callback',
       'undo_restores_baseline_pronounce',
