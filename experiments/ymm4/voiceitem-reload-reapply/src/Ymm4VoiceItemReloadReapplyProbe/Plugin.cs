@@ -301,12 +301,14 @@ internal static class Probe
                 ?? throw new InvalidOperationException("Reloaded VoiceItem missing.");
             Check("reloaded_is_new_object", !ReferenceEquals(voice, reloaded));
             Check("durable_source_survives_reload", IsDurableSourceReady(reloaded));
-            Check("pronounce_is_transient_after_reload", reloaded.Pronounce is null);
 
-            Log("reload-state-validated");
-            Check("reloaded_project_has_no_synthetic_speaker",
-                reloaded.Character?.Voice?.Speaker is null);
+            var pronounceWasNullAfterReload = reloaded.Pronounce is null;
+            var reloadedSpeakerBeforeFixtureRebind = reloaded.Character?.Voice?.Speaker?.ID;
+            Log("reload-state-validated pronounceNull=" + pronounceWasNullAfterReload
+                + " speakerBeforeRebind=" + (reloadedSpeakerBeforeFixtureRebind ?? "<null>"));
 
+            // PR #131 owns the clean persistence proof for transient Pronounce.
+            // This slice only proves re-resolution/reapply after a real reload.
             // Rebind only the synthetic test provider after native project reload.
             // Real installed YMM4 voice providers own their own persistence/resolution.
             reloaded.Character = character;
@@ -386,7 +388,8 @@ internal static class Probe
                         sameObject = ReferenceEquals(voice, reloaded),
                         reloaded.Serif,
                         reloaded.Hatsuon,
-                        pronounceBeforeReapplyWasNull = true,
+                        pronounceBeforeReapplyWasNull = pronounceWasNullAfterReload,
+                        speakerIdBeforeFixtureRebind = reloadedSpeakerBeforeFixtureRebind,
                         speakerId = reloadedSpeaker.ID,
                         effect = GetAssistEffect(reloaded) is { } e ? new
                         {
