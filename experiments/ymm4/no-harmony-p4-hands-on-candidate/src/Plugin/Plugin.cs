@@ -29,32 +29,13 @@ public sealed class FolderToolPlugin : IToolPlugin
 
 public sealed class FolderToolView : UserControl
 {
-    public FolderToolView()
-    {
-        Content = new StackPanel
-        {
-            Margin = new Thickness(12),
-            Children =
-            {
-                new TextBlock
-                {
-                    Text = "レイヤーフォルダ（no-Harmony Hands-on）",
-                    FontWeight = FontWeights.SemiBold,
-                    Margin = new Thickness(0, 0, 0, 8)
-                },
-                new TextBlock
-                {
-                    Text = "通常操作はタイムライン左側のレイヤー名列から行います。\n" +
-                           "連続した2レイヤー以上を選択して右クリックしてください。\n" +
-                           "このパネルを開いておく必要はありません。",
-                    TextWrapping = TextWrapping.Wrap
-                }
-            }
-        };
-    }
+    public FolderToolView() => FolderPanelUi.Build(this);
 }
 
-public sealed class FolderToolViewModel : IToolViewModel
+public sealed partial class FolderToolViewModel :
+    IToolViewModel,
+    ITimelineToolViewModel,
+    IDisposable
 {
     internal const string DisplayTitle = "レイヤーフォルダ (no-Harmony)";
 
@@ -65,11 +46,12 @@ public sealed class FolderToolViewModel : IToolViewModel
     public string StatusText =>
         Store.IsRecoveryBlocked
             ? "保存済みフォルダ情報を読み込めません。元データは保持されています。"
-            : "タイムライン左側のレイヤー名列から操作できます。";
+            : panelStatusText;
 
     public void LoadState(ToolState stateData)
     {
         Store.LoadRaw(stateData.SavedState);
+        RebuildPanel();
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusText)));
     }
 
@@ -101,6 +83,13 @@ internal static class HandsOnRuntime
     private static bool smokeTimelinePrepared;
     private static bool synchronizingToolArea;
     private static string? lastProjectSignature;
+
+    internal static event EventHandler? ActiveControllerChanged;
+
+    internal static HandsOnController? ControllerFor(Guid timelineId) =>
+        controller is not null && controller.Matches(timelineId)
+            ? controller
+            : null;
 
     internal static void Start()
     {
@@ -406,6 +395,7 @@ internal static class HandsOnRuntime
                 FolderStateStore.Shared);
             lastProjectTimelineId = timeline.ID;
             Diagnostic($"controller_attached timeline={timeline.ID:D}");
+            ActiveControllerChanged?.Invoke(null, EventArgs.Empty);
 
             var dir = Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_DIAG_DIR");
             if (!string.IsNullOrWhiteSpace(dir))
@@ -435,5 +425,6 @@ internal static class HandsOnRuntime
             Diagnostic("controller_dispose_error=" + ex);
         }
         controller = null;
+        ActiveControllerChanged?.Invoke(null, EventArgs.Empty);
     }
 }
