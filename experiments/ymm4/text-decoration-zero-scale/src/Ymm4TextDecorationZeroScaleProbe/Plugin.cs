@@ -50,34 +50,31 @@ internal static class Probe
 
             using var baseline = new TextRenderer(context, "AB", []);
             using var visible = new TextRenderer(context, "A§B", []);
-            using var hidden = new TextRenderer(context, "A§B",
-            [
-                new YmmTextDecoration(
-                    Start: 1,
-                    Length: 1,
-                    IsBold: false,
-                    IsItalic: false,
-                    Scale: 0.0,
-                    Font: "",
-                    Foreground: null,
-                    IsLineBreak: false)
-            ]);
+            using var zeroScale = new TextRenderer(context, "A§B", [MarkerDecoration(0.0)]);
+            using var tinyScale = new TextRenderer(context, "A§B", [MarkerDecoration(0.01)]);
+            using var microScale = new TextRenderer(context, "A§B", [MarkerDecoration(0.001)]);
 
             var baselineBounds = baseline.Measure(desc);
             var visibleBounds = visible.Measure(desc);
-            var hiddenBounds = hidden.Measure(desc);
+            var zeroBounds = zeroScale.Measure(desc);
+            var tinyBounds = tinyScale.Measure(desc);
+            var microBounds = microScale.Measure(desc);
 
             Check("baseline_rendered", baselineBounds.Width > 0 && baselineBounds.Height > 0);
             Check("visible_marker_rendered", visibleBounds.Width > 0 && visibleBounds.Height > 0);
-            Check("zero_scale_marker_rendered", hiddenBounds.Width > 0 && hiddenBounds.Height > 0);
+            Check("zero_scale_marker_rendered", zeroBounds.Width > 0 && zeroBounds.Height > 0);
+            Check("tiny_scale_marker_rendered", tinyBounds.Width > 0 && tinyBounds.Height > 0);
+            Check("micro_scale_marker_rendered", microBounds.Width > 0 && microBounds.Height > 0);
 
             var visibleExtra = visibleBounds.Width - baselineBounds.Width;
-            var hiddenExtra = hiddenBounds.Width - baselineBounds.Width;
-            var collapseGain = visibleBounds.Width - hiddenBounds.Width;
+            var zeroExtra = zeroBounds.Width - baselineBounds.Width;
+            var tinyExtra = tinyBounds.Width - baselineBounds.Width;
+            var microExtra = microBounds.Width - baselineBounds.Width;
 
             Check("visible_marker_adds_width", visibleExtra > 1.0f);
-            Check("zero_scale_collapses_marker_width", collapseGain > 1.0f);
-            Check("zero_scale_approximately_matches_baseline", Math.Abs(hiddenExtra) <= 2.0f);
+            Check("zero_scale_does_not_collapse_width", zeroExtra > 5.0f);
+            Check("tiny_scale_collapses_marker_width", tinyBounds.Width < visibleBounds.Width - 5.0f);
+            Check("micro_scale_approximately_matches_baseline", Math.Abs(microExtra) <= 2.0f);
 
             File.WriteAllText(Path.Combine(output, "behavior.json"),
                 JsonSerializer.Serialize(new
@@ -85,25 +82,37 @@ internal static class Probe
                     host = "4.56.1.0 Lite",
                     baseline = baselineBounds,
                     visible = visibleBounds,
-                    hidden = hiddenBounds,
-                    visibleExtra,
-                    hiddenExtra,
-                    collapseGain,
-                    decoration = new
+                    zeroScale = zeroBounds,
+                    tinyScale = tinyBounds,
+                    microScale = microBounds,
+                    extras = new { visibleExtra, zeroExtra, tinyExtra, microExtra },
+                    marker = new
                     {
                         start = 1,
                         length = 1,
-                        scale = 0.0
+                        foreground = "transparent",
+                        testedScales = new[] { 0.0, 0.01, 0.001 }
                     }
                 }, new JsonSerializerOptions { WriteIndented = true }));
 
-            Write("PASS_TEXT_DECORATION_ZERO_SCALE", null);
+            Write("PASS_TEXT_DECORATION_TINY_SCALE", null);
         }
         catch (Exception ex)
         {
             Write("FAIL_TEXT_DECORATION_ZERO_SCALE", ex.ToString());
         }
     }
+
+    static YmmTextDecoration MarkerDecoration(double scale)
+        => new(
+            Start: 1,
+            Length: 1,
+            IsBold: false,
+            IsItalic: false,
+            Scale: scale,
+            Font: "Yu Gothic UI",
+            Foreground: System.Windows.Media.Colors.Transparent,
+            IsLineBreak: false);
 
     static TimelineItemSourceDescription CreateDescription()
     {
@@ -182,7 +191,7 @@ internal static class Probe
         File.WriteAllText(Path.Combine(output, "result.json"),
             JsonSerializer.Serialize(new
             {
-                schema = "cnwl.text-decoration-zero-scale.v1",
+                schema = "cnwl.text-decoration-tiny-scale.v2",
                 status,
                 host = "4.56.1.0 Lite",
                 sourceHead = Environment.GetEnvironmentVariable("GITHUB_SHA"),
