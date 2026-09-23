@@ -36,3 +36,22 @@ PASS proves only the host integration skeleton above on the pinned version.
 - save/reload or Undo/Redo persistence;
 - behavior when the effect UI is never materialized;
 - behavior on other YMM4 versions.
+
+## Scope refinement after native discovery
+
+The first native runs established that clean CI does not provide a usable voice provider for synthesis, and that merely selecting a VoiceItem does not materialize the nested effect property editor in the headless host.
+
+Therefore this experiment's PASS boundary is narrowed to the durable per-item-key question:
+
+- real `VoiceItem` can carry the custom effect in public `JimakuVideoEffects`;
+- the effect can be detected by plugin type;
+- `IsEnabled` can be respected as the opt-in switch;
+- the VoiceItem can exist in the real Timeline.
+
+The following remain **observations / NOT PROVEN** here, not PASS requirements:
+
+- whether an expanded effect editor receives `IEditorInfo` in interactive UI;
+- whether that UI-local context should be used as a long-lived pronunciation controller;
+- successful voice regeneration in CI without a configured voice provider.
+
+Those concerns are intentionally moved to separate host probes instead of making the key-storage experiment depend on UI materialization or a voice backend.
