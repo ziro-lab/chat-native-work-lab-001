@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using Ymm4NoHarmonyPanel;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
 using Ymm4NoHarmonyStructuralConvenience;
@@ -85,15 +86,43 @@ internal sealed class FolderCommands
     internal FolderCreationDecision CreateFromContext(
         int clickedLayer,
         Guid folderId,
+        string name) =>
+        CreateFromDecision(
+            EvaluateCreate(clickedLayer, folderId),
+            folderId,
+            name);
+
+    internal FolderCreationDecision CreateFromExplicitRange(
+        int start,
+        int end,
+        Guid folderId,
         string name)
     {
-        if (state.IsRecoveryBlocked)
-            throw new InvalidOperationException(
-                "Unreadable saved folder state is preserved; editing is blocked.");
+        if (start < 0 || end < start)
+            throw new ArgumentOutOfRangeException(nameof(start));
 
-        // Re-evaluate after the name prompt. The menu header is only a preview;
-        // the actual edit must use the current project/timeline state.
-        var decision = EvaluateCreate(clickedLayer, folderId);
+        var decision = FolderUxCommands.EvaluateCreateFromContext(
+            state.Document,
+            TimelineKey,
+            Enumerable.Range(
+                start,
+                checked(end - start + 1)),
+            start,
+            folderId);
+
+        return CreateFromDecision(
+            decision,
+            folderId,
+            name);
+    }
+
+    private FolderCreationDecision CreateFromDecision(
+        FolderCreationDecision decision,
+        Guid folderId,
+        string name)
+    {
+        EnsureEditable();
+
         if (!decision.Allowed
             || decision.Start is null
             || decision.End is null)
@@ -116,7 +145,9 @@ internal sealed class FolderCommands
             return decision;
         }
 
-        var insertionPosition = checked(decision.End.Value + 1);
+        var insertionPosition = checked(
+            decision.End.Value + 1);
+
         if (!HandsOnHostAccess.CanExecuteTimelineCommand(
                 host,
                 window,
@@ -127,7 +158,8 @@ internal sealed class FolderCommands
                 $"YMM4 cannot add the required empty layer at L{insertionPosition}.");
         }
 
-        var before = FolderDocumentRules.NormalizeAndValidate(state.Document);
+        var before = FolderDocumentRules.NormalizeAndValidate(
+            state.Document);
         var after = FolderUxCommands.CreateFolderWithInsertedLayer(
             before,
             TimelineKey,
@@ -136,7 +168,6 @@ internal sealed class FolderCommands
             name);
 
         var existingGroups = CurrentGroups();
-        var existingSpans = GroupSpans(existingGroups);
         var groupRanges =
             StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
                 before,
@@ -144,7 +175,7 @@ internal sealed class FolderCommands
                 new Ymm4NoHarmonyFolderRanges.InsertLayers(
                     insertionPosition,
                     1),
-                existingSpans);
+                GroupSpans(existingGroups));
 
         using var composite = structural.PrepareCompositeOverride(
             CommandType.AddLayer,
@@ -168,12 +199,12 @@ internal sealed class FolderCommands
         if (!composite.Applied)
         {
             throw new InvalidOperationException(
-                "YMM4 Add Layer executed without entering the S1 composite history boundary.");
+                "YMM4 Add Layer executed without entering the folder creation history boundary.");
         }
 
         timeline.LayerSelection.Clear();
         log(
-            $"folder_command create_with_insert start={decision.Start} " +
+            $"folder_command create start={decision.Start} " +
             $"end={decision.End} inserted={insertionPosition} id={folderId}");
         return decision;
     }
@@ -422,13 +453,53 @@ internal sealed class FolderCommands
             ?? throw new KeyNotFoundException(
                 $"Folder '{folderId}' was not found.");
 
+        SelectItemsInLayers(
+            folder.Start,
+            folder.End);
+    }
+
+    internal void SelectItemsInLayers(
+        int start,
+        int end)
+    {
+        if (start < 0 || end < start)
+            throw new ArgumentOutOfRangeException(nameof(start));
+
         timeline.SelectItems(
             timeline.Items.Where(
-                item => folder.Start <= item.Layer && item.Layer <= folder.End));
+                item => start <= item.Layer
+                    && item.Layer <= end));
 
         log(
-            $"folder_command select_items id={folderId} " +
-            $"range={folder.Start}-{folder.End}");
+            $"folder_command select_items range={start}-{end}");
+    }
+
+    internal bool CanMovePanelRows(
+        PanelDragBlock block,
+        PanelDropTarget drop) =>
+        PanelMoveRules.CanDrop(
+            state.Document,
+            TimelineKey,
+            block,
+            drop);
+
+    internal void MovePanelRows(
+        PanelDragBlock block,
+        PanelDropTarget drop)
+    {
+        EnsureEditable();
+
+        var groups = CurrentGroups();
+        var plan = PanelMoveRules.PlanMove(
+            state.Document,
+            TimelineKey,
+            block,
+            drop,
+            GroupSpans(groups));
+
+        ApplyPanelMovePlan(
+            plan,
+            groups);
     }
 
     private GroupItem[] CurrentGroups() =>
@@ -495,6 +566,46 @@ internal sealed class FolderCommands
         log(
             $"folder_command structural reason={reason} " +
             $"groups={groups.Count} new_group={newGroup is not null}");
+    }
+
+    private void ApplyPanelMovePlan(
+        PanelMovePlan plan,
+        IReadOnlyList<GroupItem> groups)
+    {
+        EnsureEditable();
+
+        var beforeProduct =
+            FolderProductStateRules.NormalizeAndValidate(
+                state.ProductState);
+
+        var afterProduct = FolderProductStateRules.ReplaceCore(
+            beforeProduct,
+            plan.Core);
+        afterProduct = FolderProductStateRules.RemapRestoreLayers(
+            afterProduct,
+            TimelineKey,
+            plan.MapLayer);
+
+        HandsOnHostAccess.ApplyPanelMovePlan(
+            timeline,
+            plan,
+            groups);
+
+        afterProduct = visibility.ApplyStructuralChange(
+            beforeProduct,
+            afterProduct,
+            plan.MapLayer);
+
+        state.ReplaceProductState(afterProduct);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceProductState(beforeProduct),
+            () => state.ReplaceProductState(afterProduct)));
+        undo.Record();
+
+        log(
+            $"folder_command panel_move start={plan.Start} " +
+            $"count={plan.Count} target={plan.OriginalInsertionBoundary} " +
+            $"final={plan.FinalInsertionPoint} into={plan.IntoFolderId}");
     }
 
     private void CommitProductState(
