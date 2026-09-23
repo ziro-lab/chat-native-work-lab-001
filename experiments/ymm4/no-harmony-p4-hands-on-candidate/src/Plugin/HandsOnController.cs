@@ -40,6 +40,7 @@ internal sealed partial class HandsOnController : IDisposable
     private readonly MouseButtonEventHandler mouseHandler;
 
     private FolderOverlayAdorner? adorner;
+    private bool overlayRefreshQueued;
     private bool disposed;
 
     internal HandsOnController(
@@ -57,6 +58,15 @@ internal sealed partial class HandsOnController : IDisposable
         timeline = host.Timeline;
 
         display = new DirectDisplay(host, HandsOnRuntime.Diagnostic);
+        foreach (var canvas in Host.Elements(window)
+            .Where(element =>
+                element.IsVisible
+                && HandsOnHostAccess.ItemsBindingPath(element)
+                    is "LayerLabels" or "LayerLines"))
+        {
+            display.RegisterRefreshTarget(canvas);
+        }
+        display.Applied += OnDisplayApplied;
         structural = new StructuralFolderBridge(
             window,
             timeline,
@@ -1470,6 +1480,137 @@ internal sealed partial class HandsOnController : IDisposable
             await Task.Delay(700);
             display.ThrowIfFailed();
 
+            void AssertFolderRowVisualSync(
+                bool collapsed,
+                string phase)
+            {
+                if (adorner is null)
+                    throw new InvalidOperationException(
+                        $"S5 folder overlay missing at {phase}.");
+
+                if (!adorner.TryGetRenderedRowRect(
+                        1,
+                        out var ownerRowRect))
+                {
+                    throw new InvalidOperationException(
+                        $"S5 owner layer row is not rendered at {phase}.");
+                }
+
+                if (!adorner.TryGetFolderRect(
+                        folderId,
+                        out var folderRect))
+                {
+                    throw new InvalidOperationException(
+                        $"S5 folder tag rect missing at {phase}.");
+                }
+
+                var ownerCenter =
+                    ownerRowRect.Top
+                    + ownerRowRect.Height / 2.0;
+                var folderCenter =
+                    folderRect.Top
+                    + folderRect.Height / 2.0;
+
+                if (Math.Abs(
+                        ownerCenter
+                        - folderCenter)
+                    > 0.75)
+                {
+                    throw new InvalidOperationException(
+                        $"S5 folder tag center is offset from the rendered owner row at {phase}: " +
+                        $"owner={ownerCenter:R}, folder={folderCenter:R}.");
+                }
+
+                var childLayers =
+                    new[] { 2, 3, 4 };
+
+                var realizedChildren =
+                    childLayers.Count(layer =>
+                        adorner.TryGetRenderedRowRect(
+                            layer,
+                            out _));
+
+                var viewPortProperty =
+                    labels.GetType().GetProperty(
+                        "ViewPort",
+                        System.Reflection.BindingFlags.Instance
+                        | System.Reflection.BindingFlags.Public);
+                var labelViewPort =
+                    viewPortProperty?.GetValue(labels)
+                        is Rect observed
+                    && !observed.IsEmpty
+                        ? observed
+                        : new Rect(
+                            0,
+                            0,
+                            Math.Max(1, labels.ActualWidth),
+                            Math.Max(1, labels.ActualHeight));
+
+                var labelRows =
+                    Host.Get(host.Vm, "LayerLabels")
+                        as System.Collections.IEnumerable
+                    ?? throw new InvalidOperationException(
+                        "S5 LayerLabels VM collection is unavailable.");
+
+                var expectedChildren =
+                    collapsed
+                        ? 0
+                        : childLayers.Count(layer =>
+                        {
+                            var row = labelRows
+                                .Cast<object>()
+                                .FirstOrDefault(candidate =>
+                                    HandsOnHostAccess.LayerId(
+                                        candidate)
+                                    == layer);
+
+                            if (row is null)
+                                return false;
+
+                            var top = Convert.ToDouble(
+                                Host.Get(row, "Top")
+                                ?? double.NaN);
+                            var height = Convert.ToDouble(
+                                Host.Get(row, "Height")
+                                ?? double.NaN);
+
+                            return double.IsFinite(top)
+                                && double.IsFinite(height)
+                                && height > 0
+                                && top < labelViewPort.Bottom
+                                && top + height > labelViewPort.Top;
+                        });
+
+                if (realizedChildren
+                    != expectedChildren)
+                {
+                    throw new InvalidOperationException(
+                        $"S5 LayerLabels did not refresh without scrolling at {phase}: " +
+                        $"realized_children={realizedChildren}, expected_viewport_children={expectedChildren}, " +
+                        $"viewport={labelViewPort}.");
+                }
+            }
+
+            AssertFolderRowVisualSync(
+                collapsed: true,
+                phase: "initial-collapse");
+
+            commands.ToggleCollapsed(folderId);
+            await Task.Delay(550);
+            display.ThrowIfFailed();
+
+            AssertFolderRowVisualSync(
+                collapsed: false,
+                phase: "expand-no-scroll");
+
+            commands.ToggleCollapsed(folderId);
+            await Task.Delay(550);
+            display.ThrowIfFailed();
+
+            AssertFolderRowVisualSync(
+                collapsed: true,
+                phase: "collapse-no-scroll");
+
             if (visualSummary is null)
                 throw new InvalidOperationException(
                     "S5 item-area visual summary overlay is not attached.");
@@ -1711,6 +1852,8 @@ internal sealed partial class HandsOnController : IDisposable
                         $"timing_bands={visualSummary.TimingBandCount}",
                         $"group_segments={visualSummary.GroupSegmentCount}",
                         "timing_x_width_y=true",
+                        "fold_expand_no_scroll_refresh=true",
+                        "folder_tag_rendered_row_alignment=true",
                         "zoom_follow=true",
                         "horizontal_scroll_content_alignment=true",
                         $"owner_native_visuals={nativeVisuals}"
@@ -3765,10 +3908,22 @@ internal sealed partial class HandsOnController : IDisposable
             .ToArray() ?? [];
 
         display.SetSpans(spans);
+    }
 
-        Application.Current.Dispatcher.BeginInvoke(
-            new Action(RebuildOverlay),
-            DispatcherPriority.ContextIdle);
+    private void OnDisplayApplied(object? sender, EventArgs e)
+    {
+        if (disposed || overlayRefreshQueued)
+            return;
+
+        overlayRefreshQueued = true;
+        labels.Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                overlayRefreshQueued = false;
+                if (!disposed)
+                    RebuildOverlay();
+            }),
+            DispatcherPriority.Render);
     }
 
     private void RebuildOverlay()
@@ -4293,6 +4448,7 @@ internal sealed partial class HandsOnController : IDisposable
             adorner = null;
         }
 
+        display.Applied -= OnDisplayApplied;
         visualSummary?.Dispose();
         fileDrop.Dispose();
         input.Dispose();
@@ -4315,6 +4471,7 @@ internal sealed partial class HandsOnController : IDisposable
         private readonly string timelineKey;
         private sealed record FolderHit(Rect Toggle, Rect Name);
         private readonly Dictionary<Guid, FolderHit> hitRects = [];
+        private readonly Dictionary<Guid, Rect> folderRects = [];
 
         internal FolderOverlayAdorner(
             UIElement adornedElement,
@@ -4363,10 +4520,79 @@ internal sealed partial class HandsOnController : IDisposable
             return false;
         }
 
+        internal bool TryGetFolderRect(Guid folderId, out Rect rect) =>
+            folderRects.TryGetValue(folderId, out rect);
+
+        internal bool TryGetRenderedRowRect(int logicalLayer, out Rect rect)
+        {
+            FrameworkElement? best = null;
+            double bestTop = 0;
+            var bestArea = -1.0;
+
+            foreach (var element in Host.Elements(AdornedElement))
+            {
+                if (ReferenceEquals(element, AdornedElement)
+                    || !element.IsVisible
+                    || element.ActualWidth <= 0
+                    || element.ActualHeight <= 0
+                    || HandsOnHostAccess.LayerId(element.DataContext)
+                        != logicalLayer)
+                {
+                    continue;
+                }
+
+                Point point;
+                try
+                {
+                    point = element.TranslatePoint(
+                        new Point(),
+                        AdornedElement);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!double.IsFinite(point.Y)
+                    || point.Y + element.ActualHeight < -0.5
+                    || point.Y > AdornedElement.RenderSize.Height + 0.5)
+                {
+                    continue;
+                }
+
+                var area =
+                    element.ActualWidth
+                    * element.ActualHeight;
+
+                if (area <= bestArea)
+                    continue;
+
+                best = element;
+                bestTop = point.Y;
+                bestArea = area;
+            }
+
+            if (best is null)
+            {
+                rect = Rect.Empty;
+                return false;
+            }
+
+            rect = new Rect(
+                0,
+                bestTop,
+                Math.Max(
+                    0,
+                    AdornedElement.RenderSize.Width),
+                best.ActualHeight);
+            return true;
+        }
+
         private void Rebuild()
         {
             canvas.Children.Clear();
             hitRects.Clear();
+            folderRects.Clear();
 
             foreach (var folder in folders
                 .OrderBy(x => x.Start)
@@ -4381,15 +4607,36 @@ internal sealed partial class HandsOnController : IDisposable
                     && folder.End <= parent.End);
 
                 var x = 2 + depth * 9;
-                var y = display.Layout.VisualRowOfLogical(folder.Start)
-                    * display.Height + 3;
+                var rowTop =
+                    display.Layout.VisualRowOfLogical(folder.Start)
+                    * (double)display.Height;
+                var rowHeight = (double)display.Height;
+
+                if (TryGetRenderedRowRect(
+                        folder.Start,
+                        out var renderedRow))
+                {
+                    rowTop = renderedRow.Y;
+                    rowHeight = renderedRow.Height;
+                }
+
                 var width = Math.Max(
                     48,
                     Math.Min(
                         120,
                         Math.Max(48, AdornedElement.RenderSize.Width - x - 4)));
-                var height = Math.Max(18, display.Height - 6);
+
+                var verticalInset = Math.Min(
+                    3.0,
+                    Math.Max(
+                        0,
+                        (rowHeight - 18.0) / 2.0));
+                var height = Math.Max(
+                    1,
+                    rowHeight - verticalInset * 2.0);
+                var y = rowTop + verticalInset;
                 var rect = new Rect(x, y, width, height);
+                folderRects[folder.Id] = rect;
                 var toggleWidth = Math.Min(18, width);
                 hitRects[folder.Id] = new FolderHit(
                     new Rect(x, y, toggleWidth, height),
