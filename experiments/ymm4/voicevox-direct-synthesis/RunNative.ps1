@@ -39,6 +39,7 @@ try {
       'engine_points_to_fake_backend',
       'builtin_speaker_constructed',
       'fake_engine_has_speaker_info',
+      'fake_engine_characters_contains_speaker',
       'supplied_pause_is_zero',
       'query_has_no_errors',
       'pronounce_has_no_errors',
