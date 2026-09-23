@@ -64,6 +64,11 @@ internal static class Probe
     static string output = "";
     static readonly List<object> requirements = [];
 
+    static void Log(string message) =>
+        File.AppendAllText(
+            Path.Combine(output, "progress.txt"),
+            DateTime.UtcNow.ToString("O") + " " + message + Environment.NewLine);
+
     internal static void Schedule()
     {
         var dir = Environment.GetEnvironmentVariable("CNWL_RELOAD_REAPPLY_OUTPUT");
@@ -129,6 +134,7 @@ internal static class Probe
 
     static async Task RunAsync(object main, string url)
     {
+        Log("run-start");
         var active = GetActive(main)
             ?? throw new InvalidOperationException("ActiveTimelineViewModel missing.");
         var timeline = FindTimeline(active)
@@ -181,6 +187,7 @@ internal static class Probe
             Check("fake_engine_registered",
                 registration.ResolvedEngine is not null
                 && ReferenceEquals(registration.ResolvedEngine, engine));
+            Log("engine-registered");
 
             var parameter = speaker.CreateVoiceParameter();
             parameter.GetType().GetProperty("StyleID", BindingFlags.Instance | BindingFlags.Public)
@@ -220,7 +227,9 @@ internal static class Probe
             Check("durable_source_present_before_save",
                 IsDurableSourceReady(voice));
 
+            Log("initial-generate-start");
             await voice.CreateVoiceFileAsync();
+            Log("initial-generate-done");
             Check("initial_voice_file_generated",
                 !string.IsNullOrWhiteSpace(voice.FilePath)
                 && File.Exists(voice.FilePath)
@@ -230,8 +239,10 @@ internal static class Probe
             var openProject = PublicMethod(main, "OpenProject", typeof(string));
 
             var pathA = Path.Combine(output, "reapply-a.ymmp");
+            Log("save-a-start");
             saveProject.Invoke(main, [pathA]);
             await WaitUntil("save A", () => File.Exists(pathA) && new FileInfo(pathA).Length > 0);
+            Log("save-a-done");
             Check("project_a_saved", true);
 
             voice.Serif = "壊したB";
@@ -241,10 +252,13 @@ internal static class Probe
             liveEffect.IsEnabled = false;
             liveEffect.ProbeTag = "CNWL-RELOAD-REAPPLY-B";
             var pathB = Path.Combine(output, "reapply-b.ymmp");
+            Log("save-b-start");
             saveProject.Invoke(main, [pathB]);
             await WaitUntil("save B", () => File.Exists(pathB) && new FileInfo(pathB).Length > 0);
+            Log("save-b-done");
             Check("project_b_saved", true);
 
+            Log("open-a-start");
             openProject.Invoke(main, [pathA]);
             await WaitUntil(
                 "open A",
@@ -252,17 +266,20 @@ internal static class Probe
                    && FindVoice(main, Remark) is not null,
                 12000);
 
+            Log("open-a-done");
             VoiceItem reloaded = FindVoice(main, Remark)
                 ?? throw new InvalidOperationException("Reloaded VoiceItem missing.");
             Check("reloaded_is_new_object", !ReferenceEquals(voice, reloaded));
             Check("durable_source_survives_reload", IsDurableSourceReady(reloaded));
             Check("pronounce_is_transient_after_reload", reloaded.Pronounce is null);
 
+            Log("reload-state-validated");
             var reloadedSpeaker = reloaded.Character?.Voice?.Speaker;
             Check("reloaded_character_speaker_resolved",
                 reloadedSpeaker is not null && reloadedSpeaker.ID == speaker.ID);
             if (reloadedSpeaker is null)
                 throw new InvalidOperationException("Reloaded speaker missing.");
+            Log("reloaded-speaker-resolved");
 
             var reloadedParameter = reloaded.VoiceParameter
                 ?? reloaded.Character?.VoiceParameter
@@ -283,12 +300,14 @@ internal static class Probe
             Check("controller_reapply_condition_true", IsDurableSourceReady(reloaded));
 
             var analysisPath = Path.Combine(output, "reload-analysis.wav");
+            Log("fresh-analysis-start");
             var freshPronounce = await reloadedSpeaker.CreateVoiceAsync(
                 reloaded.Hatsuon,
                 pronounce: null,
                 reloadedParameter,
                 analysisPath)
                 ?? throw new InvalidOperationException("Fresh Pronounce was null.");
+            Log("fresh-analysis-done");
             var freshQuery = GetAudioQuery(freshPronounce);
             var freshPause = GetPauseVowelLength(freshQuery);
             Check("fresh_pronounce_reanalyzed_after_reload", freshPause > 0.0);
@@ -297,6 +316,7 @@ internal static class Probe
             Check("persisted_correction_resolved_to_zero",
                 GetPauseVowelLength(freshQuery) == 0.0);
 
+            Log("corrected-synthesis-start");
             var regenerated = await reloadedSpeaker.CreateVoiceAsync(
                 reloaded.Hatsuon,
                 freshPronounce,
@@ -304,6 +324,7 @@ internal static class Probe
                 voicePath)
                 ?? throw new InvalidOperationException("Regenerated Pronounce was null.");
 
+            Log("corrected-synthesis-done");
             reloaded.ClearVoiceCache();
             reloaded.Pronounce = regenerated;
 
