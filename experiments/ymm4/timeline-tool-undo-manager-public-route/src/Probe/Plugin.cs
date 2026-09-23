@@ -27,9 +27,38 @@ public sealed class UndoRouteTool : IToolPlugin
     public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
 }
 
+public sealed class ControlTool : IToolPlugin
+{
+    public string Name => Probe.ControlToolName;
+    public Type ViewModelType => typeof(ControlViewModel);
+    public Type ViewType => typeof(UndoRouteView);
+    public bool AllowMultipleInstances => false;
+    public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
+}
+
 public sealed class UndoRouteView : UserControl
 {
     public UndoRouteView() => Content = new TextBlock { Text = Probe.ToolName };
+}
+
+public sealed class ControlViewModel : IToolViewModel
+{
+    public string Title => Probe.ControlToolName;
+    public bool CanSuspend => false;
+    public ToolState SaveState() => new() { Title = Title };
+    public void LoadState(ToolState stateData) { }
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged
+    {
+        add { }
+        remove { }
+    }
+
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested
+    {
+        add { }
+        remove { }
+    }
 }
 
 public sealed class UndoRouteViewModel : IToolViewModel, ITimelineToolViewModel
@@ -56,8 +85,10 @@ public sealed class UndoRouteViewModel : IToolViewModel, ITimelineToolViewModel
 internal static class Probe
 {
     internal const string ToolName = "CNWL Undo Manager Public Route";
+    internal const string ControlToolName = "CNWL Undo Public Control";
 
     static bool scheduled;
+    static bool controlLogged;
     static string output = "";
     static readonly List<object> requirements = [];
 
@@ -172,6 +203,16 @@ internal static class Probe
 
                     if (active is null)
                         continue;
+
+                    if (!controlLogged)
+                    {
+                        var control = FindMenuItem(main, ControlToolName);
+                        if (control is not null)
+                        {
+                            controlLogged = true;
+                            Log("control tool menu item observed type=" + control.GetType().FullName);
+                        }
+                    }
 
                     if (!attemptedOpen)
                     {
