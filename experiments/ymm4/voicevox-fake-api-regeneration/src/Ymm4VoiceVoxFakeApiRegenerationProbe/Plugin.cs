@@ -52,6 +52,7 @@ internal static class Probe
                 Timeout = 10
             };
             engine.EngineConfig.IsExecuteEngineEnabled = false;
+            ForceResolvedUrlForLab(engine, server.BaseUrl);
 
             Check("engine_points_to_fake_api", engine.URL == server.BaseUrl);
             Check("engine_execution_disabled", !engine.EngineConfig.IsExecuteEngineEnabled);
@@ -79,8 +80,13 @@ internal static class Probe
             Check("voice_parameter_uses_style_1", styleId == 1);
 
             var firstPath = Path.Combine(output, "baseline.wav");
-            var first = await speaker.CreateVoiceAsync("テストです", null, parameter, firstPath)
-                ?? throw new InvalidOperationException("First CreateVoiceAsync returned null");
+            var first = await speaker.CreateVoiceAsync("テストです", null, parameter, firstPath);
+            if (first is null)
+            {
+                WriteHttpDiagnostics(server, "first-create-returned-null");
+                throw new InvalidOperationException(
+                    $"First CreateVoiceAsync returned null; activeUrl={Safe(() => engine.GetActiveURL())}; requests={server.Requests.Count}");
+            }
             Check("first_create_voice_returns_pronounce", true);
             Check("first_wave_written", File.Exists(firstPath) && new FileInfo(firstPath).Length > 44);
 
@@ -170,6 +176,8 @@ internal static class Probe
         }
         catch (Exception ex)
         {
+            if (server is not null)
+                WriteHttpDiagnostics(server, "exception");
             Write("FAIL_VOICEVOX_FAKE_API_REGENERATION", ex.ToString());
         }
         finally
@@ -177,6 +185,32 @@ internal static class Probe
             if (server is not null)
                 await server.DisposeAsync();
         }
+    }
+
+    static void ForceResolvedUrlForLab(VOICEVOXEngine engine, string url)
+    {
+        // Lab-only: bypass engine discovery/identity validation so this experiment can focus
+        // specifically on built-in speaker pronunciation reuse against a localhost fake API.
+        foreach (var name in new[] { "resolvedUrl", "resolvedUrlBase" })
+        {
+            var field = typeof(VOICEVOXEngine).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            field?.SetValue(engine, url);
+        }
+    }
+
+    static void WriteHttpDiagnostics(FakeVoiceVoxServer server, string stage)
+    {
+        try
+        {
+            File.WriteAllText(Path.Combine(output, "http-diagnostics.json"),
+                JsonSerializer.Serialize(new
+                {
+                    stage,
+                    server.BaseUrl,
+                    requests = server.Requests.Select(x => new { x.Method, x.Path, x.Query, x.Body }).ToArray()
+                }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch { }
     }
 
     static double? ReadPauseFromAudioQuery(object? aq)
