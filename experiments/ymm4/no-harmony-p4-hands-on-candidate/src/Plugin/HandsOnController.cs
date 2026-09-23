@@ -34,6 +34,7 @@ internal sealed class HandsOnController : IDisposable
     private readonly FolderCommands commands;
     private readonly InputMapAdapter input;
     private readonly FileDropMapAdapter fileDrop;
+    private readonly TimelineVisualSummaryOverlay? visualSummary;
     private readonly AdornerLayer adornerLayer;
     private readonly MouseButtonEventHandler mouseHandler;
 
@@ -75,6 +76,10 @@ internal sealed class HandsOnController : IDisposable
             HandsOnRuntime.Diagnostic);
         input = new InputMapAdapter(host, display, HandsOnRuntime.Diagnostic);
         fileDrop = new FileDropMapAdapter(host, display, HandsOnRuntime.Diagnostic);
+        visualSummary = TimelineVisualSummaryOverlay.TryCreate(
+            host,
+            display,
+            HandsOnRuntime.Diagnostic);
         adornerLayer = AdornerLayer.GetAdornerLayer(labels)
             ?? throw new InvalidOperationException("LayerLabels has no AdornerLayer.");
 
@@ -2028,6 +2033,12 @@ internal sealed class HandsOnController : IDisposable
 
     internal Timeline PanelTimeline => timeline;
     internal FolderCommands PanelCommands => commands;
+    internal bool VisualSummaryAttached =>
+        visualSummary is not null;
+    internal int VisualTimingBandCount =>
+        visualSummary?.TimingBandCount ?? 0;
+    internal int VisualGroupSegmentCount =>
+        visualSummary?.GroupSegmentCount ?? 0;
 
     internal void ScrollPanelToLayer(int layer)
     {
@@ -2603,6 +2614,7 @@ internal sealed class HandsOnController : IDisposable
             adorner = null;
         }
 
+        visualSummary?.Dispose();
         fileDrop.Dispose();
         input.Dispose();
         visibility.Dispose();
