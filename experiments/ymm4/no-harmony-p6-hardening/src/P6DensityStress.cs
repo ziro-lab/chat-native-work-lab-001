@@ -6,8 +6,11 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 
 internal sealed partial class HandsOnController
 {
-    partial void ScheduleP6Probes() =>
+    partial void ScheduleP6Probes()
+    {
         ScheduleP6DensityStressSmoke();
+        ScheduleP6HistoryStressSmoke();
+    }
 
     private void ScheduleP6DensityStressSmoke()
     {
