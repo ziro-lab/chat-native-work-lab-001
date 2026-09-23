@@ -47,3 +47,37 @@ This slice does not prove:
 Those are the next slice if this surface probe passes.
 
 Initial native surface probe is executed from branch `lab/voicevox-pronounce-mutation` before any product prototype is created.
+
+
+## Initial native result — PASS
+
+Validated on real YMM4 Lite 4.56.1.0.
+
+- Source HEAD: `4dc937cfd97ffd805aaa6c80bcad49c39f541bbb`
+- Workflow run: `35827921050`
+- Job: `107073846730`
+- Artifact: `10735179941`
+- Artifact SHA256: `f45dc4a4ae092450bc5057e8c8b8ff2b6f325c45c3c25d5e388d3be3b4bf3f9c`
+- Native marker: `PASS_VOICEVOX_PRONOUNCE_MUTATION_SURFACE`
+- Required assertions: **10/10 PASS**
+
+Observed public host surface:
+
+- `VoiceItem.Pronounce`: public get/set;
+- built-in `YukkuriMovieMaker.Voice.VOICEVOXVoicePronounce`: available;
+- `VOICEVOXVoicePronounce.AudioQuery`: public get/set;
+- `IVOICEVOXAudioQuery.AccentPhrases`: public readable collection;
+- `VOICEVOXAccentPhrase.PauseMora`: public get/set;
+- `VOICEVOXMora.VowelLength`: public get/set;
+- a pause mora duration was changed from **0.25 to exactly 0** and read back successfully through a nested Pronounce/AudioQuery/AccentPhrase object graph;
+- `IVoiceItemEditService` exposes public `Hatsuon`, `IsHatsuonChanged`, and `CreateVoiceFileAsync(bool force)`.
+
+This proves the core data-mutation feasibility for a plugin that turns selected punctuation-derived pauses into zero-length pauses.
+
+Still not proven by this slice:
+
+- mutation of a real already-generated VOICEVOX VoiceItem followed by YMM4 standard regeneration;
+- audible equivalence / whether the resulting phrase boundary is perceptually gapless and natural;
+- persistence/reload and Undo behavior.
+
+Those are the next product-relevant native checks.
