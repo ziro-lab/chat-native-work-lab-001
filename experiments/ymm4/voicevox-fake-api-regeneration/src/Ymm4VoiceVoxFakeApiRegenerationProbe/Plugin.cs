@@ -71,15 +71,17 @@ internal static class Probe
             var speaker = (IVoiceSpeaker)speakerObject;
             Check("builtin_speaker_constructed", speaker is not null);
 
-            var parameter = speaker.CreateVoiceParameter();
-            Check("voice_parameter_constructed", parameter is not null);
+            var parameter = speaker.CreateVoiceParameter()
+                ?? throw new InvalidOperationException("CreateVoiceParameter returned null");
+            Check("voice_parameter_constructed", true);
             var styleProp = parameter.GetType().GetProperty("StyleID", BindingFlags.Instance | BindingFlags.Public);
             var styleId = styleProp is null ? -1 : Convert.ToInt32(styleProp.GetValue(parameter));
             Check("voice_parameter_uses_style_1", styleId == 1);
 
             var firstPath = Path.Combine(output, "baseline.wav");
-            var first = await speaker.CreateVoiceAsync("テストです", null, parameter, firstPath);
-            Check("first_create_voice_returns_pronounce", first is not null);
+            var first = await speaker.CreateVoiceAsync("テストです", null, parameter, firstPath)
+                ?? throw new InvalidOperationException("First CreateVoiceAsync returned null");
+            Check("first_create_voice_returns_pronounce", true);
             Check("first_wave_written", File.Exists(firstPath) && new FileInfo(firstPath).Length > 44);
 
             var firstAudioQueryCount = server.Requests.Count(x => x.Path.Contains("audio_query", StringComparison.OrdinalIgnoreCase));
@@ -113,8 +115,9 @@ internal static class Probe
             var synthesisCountBeforeSecond = server.Requests.Count(x => x.Path.Contains("synthesis", StringComparison.OrdinalIgnoreCase));
 
             var secondPath = Path.Combine(output, "modified.wav");
-            var second = await speaker.CreateVoiceAsync("テストです", first, parameter, secondPath);
-            Check("second_create_voice_returns_pronounce", second is not null);
+            var second = await speaker.CreateVoiceAsync("テストです", first, parameter, secondPath)
+                ?? throw new InvalidOperationException("Second CreateVoiceAsync returned null");
+            Check("second_create_voice_returns_pronounce", true);
             Check("second_wave_written", File.Exists(secondPath) && new FileInfo(secondPath).Length > 44);
 
             var secondNewRequests = server.Requests.Skip(requestCountBeforeSecond).ToArray();
