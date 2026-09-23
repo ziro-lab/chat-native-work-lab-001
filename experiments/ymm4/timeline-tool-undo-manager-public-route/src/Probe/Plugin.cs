@@ -25,6 +25,7 @@ public sealed class UndoRouteTool : IToolPlugin
     public Type ViewType => typeof(UndoRouteView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
+    public int DefaultOrder => 990;
 }
 
 public sealed class ControlTool : IToolPlugin
@@ -34,6 +35,7 @@ public sealed class ControlTool : IToolPlugin
     public Type ViewType => typeof(UndoRouteView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
+    public int DefaultOrder => 991;
 }
 
 public sealed class UndoRouteView : UserControl
