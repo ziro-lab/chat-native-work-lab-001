@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
+      - 'experiments/ymm4/no-harmony-p6-hardening/**'
       - '.github/workflows/ymm4-no-harmony-p6-density-stress.yml'
 
 permissions:
@@ -52,7 +53,7 @@ jobs:
       - name: Build candidate
         shell: pwsh
         run: |
-          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/plugin --nologo -warnaserror
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -p:EnableP6Hardening=true -o out/plugin --nologo -warnaserror
           if($LASTEXITCODE -ne 0){throw 'Candidate build failed'}
           $harmony=Get-ChildItem out/plugin -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }
           if($harmony){throw ('Unexpected Harmony dependency: ' + ($harmony.Name -join ','))}
@@ -91,6 +92,7 @@ jobs:
           New-Item -ItemType Directory -Force $diag|Out-Null
           $env:CNWL_P4_HANDS_ON_DIAG_DIR=$diag
           $env:CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT='1'
+          $env:CNWL_P6_HARDENING_SMOKE='1'
           $env:CNWL_P6_DENSITY_STRESS_SMOKE='1'
 
           $p=Start-Process (Join-Path $env:YMM4_DIR 'YukkuriMovieMaker.exe') -WorkingDirectory $env:YMM4_DIR -PassThru
@@ -143,6 +145,7 @@ jobs:
             foreach($name in @(
               'CNWL_P4_HANDS_ON_DIAG_DIR',
               'CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT',
+              'CNWL_P6_HARDENING_SMOKE',
               'CNWL_P6_DENSITY_STRESS_SMOKE'
             )){
               Remove-Item ("Env:"+$name) -ErrorAction SilentlyContinue
