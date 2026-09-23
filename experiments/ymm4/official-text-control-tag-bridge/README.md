@@ -28,3 +28,17 @@ The required PASS boundary is the official rendering transport:
 The pronunciation conversion observation is recorded separately because a clean CI YMM4 may not have a configured voice provider.
 
 No Harmony is used.
+
+
+## Phase 2 — direct official parser surface
+
+The next native acceptance slice calls YMM4's own `YukkuriMovieMaker.Commons.ControlTagParser.GetPlainText(string)` directly.
+
+Required behavior:
+
+- the parser type is public;
+- `GetPlainText` is public;
+- `A<w0>B` becomes `AB`;
+- an invalid tag remains unchanged.
+
+If these assertions pass, the pronunciation controller can obtain the clean text from YMM4 itself rather than maintaining a duplicate tag-removal parser.
