@@ -314,7 +314,7 @@ internal static class Probe
         {
             var obj = Newtonsoft.Json.Linq.JObject.Parse(json);
             var token = obj["Guid"];
-            return token?.Type == Newtonsoft.Json.Linq.JTokenType.String ? token.Value<string>() : token?.ToString();
+            return token?.Type == Newtonsoft.Json.Linq.JTokenType.String ? token.ToObject<string>() : token?.ToString();
         }
         catch { return null; }
     }
