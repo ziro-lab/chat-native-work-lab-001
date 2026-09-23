@@ -71,7 +71,6 @@ try {
       'baseline_snapshot_attached',
       'correction_committed_as_single_record',
       'corrected_state_after_apply',
-      'timeline_view_found_for_history_input',
       'manager_public_undo_available',
       'manager_public_redo_available',
       'one_user_undo_event',
@@ -82,7 +81,11 @@ try {
       'one_plugin_redo_callback',
       'redo_restores_corrected_pronounce',
       'redo_restores_corrected_wav',
-      'second_undo_restores_baseline'
+      'second_undo_restores_baseline',
+      'standard_redo_command_executed',
+      'standard_redo_restores_corrected',
+      'standard_undo_command_executed',
+      'standard_undo_restores_baseline'
     )
 
     if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count)"}
@@ -97,10 +100,12 @@ try {
     if([double]$obs.baseline.pauseVowelLength-le0){throw 'Baseline pause was not non-zero'}
     if([double]$obs.corrected.pauseVowelLength-ne0){throw 'Corrected pause was not zero'}
     if($obs.history.recorded-ne1){throw "Expected one correction record, got $($obs.history.recorded)"}
-    if($obs.history.undoed-ne2){throw "Expected two undo events, got $($obs.history.undoed)"}
-    if($obs.history.redoed-ne1){throw "Expected one redo event, got $($obs.history.redoed)"}
-    if($obs.history.undoCallbacks-ne2){throw "Expected two undo callbacks, got $($obs.history.undoCallbacks)"}
-    if($obs.history.redoCallbacks-ne1){throw "Expected one redo callback, got $($obs.history.redoCallbacks)"}
+    if($obs.history.undoed-ne3){throw "Expected three undo events, got $($obs.history.undoed)"}
+    if($obs.history.redoed-ne2){throw "Expected two redo events, got $($obs.history.redoed)"}
+    if($obs.history.undoCallbacks-ne3){throw "Expected three undo callbacks, got $($obs.history.undoCallbacks)"}
+    if($obs.history.redoCallbacks-ne2){throw "Expected two redo callbacks, got $($obs.history.redoCallbacks)"}
+    if($obs.history.standardRedoRoute.Executed-cne$true){throw 'Standard Redo command route did not execute'}
+    if($obs.history.standardUndoRoute.Executed-cne$true){throw 'Standard Undo command route did not execute'}
     if($obs.history.finalWavSha256-ne$obs.baseline.wavSha256){throw 'Final WAV did not return to baseline'}
     if([double]$obs.history.finalPause-ne[double]$obs.baseline.pauseVowelLength){throw 'Final Pronounce did not return to baseline'}
 
