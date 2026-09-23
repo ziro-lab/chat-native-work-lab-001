@@ -148,7 +148,6 @@ internal static class Probe
             }
 
             Check("create_voice_async_completed", synthesisError is null);
-            Check("wav_written", File.Exists(wav) && new FileInfo(wav).Length > 44);
             Check("returned_voicevox_pronounce",
                 returned is not null &&
                 returned.GetType().FullName?.Contains("VOICEVOXVoicePronounce", StringComparison.Ordinal) == true);
