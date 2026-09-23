@@ -239,7 +239,7 @@ internal static class HandsOnRuntime
                     "1",
                     StringComparison.Ordinal)
                 || string.Equals(
-                    Environment.GetEnvironmentVariable("CNWL_P6_DENSITY_STRESS_SMOKE"),
+                    Environment.GetEnvironmentVariable("CNWL_P6_HARDENING_SMOKE"),
                     "1",
                     StringComparison.Ordinal);
 
