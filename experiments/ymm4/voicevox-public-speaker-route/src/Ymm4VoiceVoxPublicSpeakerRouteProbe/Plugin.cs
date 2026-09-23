@@ -68,6 +68,24 @@ internal static class Probe
             var createIl = Decode(create);
             var moveNextIl = Decode(moveNext);
 
+            var speakerIdGetter = speakerType.GetProperty("ID",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetMethod;
+            var settingsType = asm.GetType("YukkuriMovieMaker.Settings.VOICEVOXSettings");
+            var findEngine = settingsType?.GetMethod("FindEngine",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: [typeof(string)],
+                modifiers: null);
+
+            var speakerIdIl = speakerIdGetter is null ? [] : Decode(speakerIdGetter);
+            var findEngineIl = findEngine is null ? [] : Decode(findEngine);
+
+            var engineType = asm.GetType("YukkuriMovieMaker.Voice.VOICEVOXEngine");
+            var speakerInfosProperty = engineType?.GetProperty("SpeakerInfos",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var speakersCacheProperty = engineType?.GetProperty("SpeakersJsonCache",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
             var engineCreateRefs = moveNextIl
                 .Where(x => x.Resolved?.Contains("VOICEVOXEngine.CreateVoiceFileAsync", StringComparison.Ordinal) == true)
                 .ToArray();
@@ -108,6 +126,27 @@ internal static class Probe
                     stateMachineType = asyncAttr.StateMachineType.FullName,
                     speakerFields = instanceFields,
                     stateMachineFields = stateFields,
+                    speakerIdGetter = speakerIdGetter?.ToString(),
+                    speakerIdIL = speakerIdIl,
+                    settingsType = settingsType?.FullName,
+                    findEngine = findEngine?.ToString(),
+                    findEngineIL = findEngineIl,
+                    engineSpeakerInfoSurface = new
+                    {
+                        engineType = engineType?.FullName,
+                        speakerInfos = speakerInfosProperty is null ? null : new
+                        {
+                            type = speakerInfosProperty.PropertyType.FullName,
+                            publicGet = speakerInfosProperty.GetMethod?.IsPublic == true,
+                            publicSet = speakerInfosProperty.SetMethod?.IsPublic == true
+                        },
+                        speakersJsonCache = speakersCacheProperty is null ? null : new
+                        {
+                            type = speakersCacheProperty.PropertyType.FullName,
+                            publicGet = speakersCacheProperty.GetMethod?.IsPublic == true,
+                            publicSet = speakersCacheProperty.SetMethod?.IsPublic == true
+                        }
+                    },
                     engineCreateRefs,
                     fileRefs,
                     pronounceRefs,
