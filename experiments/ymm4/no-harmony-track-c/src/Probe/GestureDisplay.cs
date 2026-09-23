@@ -29,6 +29,7 @@ internal sealed class DirectDisplay : IDisposable
     private readonly HashSet<INotifyPropertyChanged> permanentWatched = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<INotifyCollectionChanged> collections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IItem> gestureItems = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<FrameworkElement> refreshTargets = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FrameworkElement, object> gestureTransforms = [];
     private readonly object oldMaxHeight;
     private Rect? gestureViewportOriginal;
@@ -70,6 +71,18 @@ internal sealed class DirectDisplay : IDisposable
         WatchCollection(vm.LayerLabels);
         WatchCollection(vm.LayerLines);
         RefreshSlots();
+    }
+
+    internal void RegisterRefreshTarget(FrameworkElement target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (target.GetType().Name != "FastCanvasItemsControl")
+            throw new ArgumentException(
+                "Refresh target must be a FastCanvasItemsControl.",
+                nameof(target));
+
+        refreshTargets.Add(target);
     }
 
     private void WatchPermanent(object value)
@@ -560,12 +573,21 @@ internal sealed class DirectDisplay : IDisposable
 
     private void RefreshCanvases()
     {
-        foreach (var canvas in Host.Elements(host.View).Where(x => x.GetType().Name == "FastCanvasItemsControl").ToArray())
+        var canvases = Host.Elements(host.View)
+            .Where(x => x.GetType().Name == "FastCanvasItemsControl")
+            .Concat(refreshTargets)
+            .Distinct(ReferenceEqualityComparer.Instance)
+            .ToArray();
+
+        foreach (var canvas in canvases)
         {
             var update = canvas.GetType().GetMethod("UpdateAll", Host.Flags, null, Type.EmptyTypes, null)
                 ?? throw new MissingMethodException("FastCanvasItemsControl.UpdateAll");
-            log("canvas_before phase=" + Phase);
+            log("canvas_before phase=" + Phase + " target=" + canvas.GetType().Name);
             update.Invoke(canvas, null);
+            canvas.InvalidateMeasure();
+            canvas.InvalidateArrange();
+            canvas.InvalidateVisual();
             CanvasRefreshes++;
             log("canvas_after");
         }
@@ -622,6 +644,7 @@ internal sealed class DirectDisplay : IDisposable
 
         RefreshCanvases();
         slots.Clear();
+        refreshTargets.Clear();
 
         log($"display_detached applications={Applications} writes={Mutations} canvas_refreshes={CanvasRefreshes} subscriptions={SubscriptionCount} gesture_samples={GestureSamples} render_audits={RenderAudits} pending_render_audits={PendingRenderAudits} missing_gesture_views={MissingGestureViews} deferred={DeferredApplies}");
     }
