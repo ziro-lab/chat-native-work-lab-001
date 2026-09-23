@@ -101,6 +101,7 @@ internal static class Probe
         scheduled = true;
         output = Path.GetFullPath(dir);
         Directory.CreateDirectory(output);
+        DumpPluginSurface();
         Application.Current.Dispatcher.BeginInvoke(new Action(Start), DispatcherPriority.ApplicationIdle);
     }
 
@@ -160,6 +161,60 @@ internal static class Probe
         {
             Write("FAIL_TIMELINE_TOOL_UNDO_MANAGER_PUBLIC_ROUTE", ex.ToString());
         }
+    }
+
+    static void DumpPluginSurface()
+    {
+        var assembly = typeof(UndoRouteTool).Assembly;
+        var toolTypes = assembly.GetTypes()
+            .Where(t => !t.IsAbstract && typeof(IToolPlugin).IsAssignableFrom(t))
+            .OrderBy(t => t.FullName)
+            .Select(t =>
+            {
+                object? instance = null;
+                string? error = null;
+                try { instance = Activator.CreateInstance(t); }
+                catch (Exception ex) { error = ex.GetBaseException().ToString(); }
+
+                string? Read(string name)
+                {
+                    try { return t.GetProperty(name)?.GetValue(instance)?.ToString(); }
+                    catch (Exception ex) { return "<error:" + ex.GetBaseException().Message + ">"; }
+                }
+
+                return new
+                {
+                    type = t.FullName,
+                    isPublic = t.IsPublic || t.IsNestedPublic,
+                    constructed = instance is not null,
+                    constructionError = error,
+                    name = Read("Name"),
+                    viewModelType = Read("ViewModelType"),
+                    viewType = Read("ViewType"),
+                    allowMultipleInstances = Read("AllowMultipleInstances"),
+                    defaultGroupName = Read("DefaultGroupName")
+                };
+            }).ToArray();
+
+        File.WriteAllText(
+            Path.Combine(output, "plugin-surface.json"),
+            JsonSerializer.Serialize(new
+            {
+                host = "4.56.1.0 Lite",
+                iToolPlugin = typeof(IToolPlugin).GetMembers()
+                    .OrderBy(m => m.Name)
+                    .Select(m => new { m.MemberType, m.Name, text = m.ToString() })
+                    .ToArray(),
+                iToolViewModel = typeof(IToolViewModel).GetMembers()
+                    .OrderBy(m => m.Name)
+                    .Select(m => new { m.MemberType, m.Name, text = m.ToString() })
+                    .ToArray(),
+                iTimelineToolViewModel = typeof(ITimelineToolViewModel).GetMembers()
+                    .OrderBy(m => m.Name)
+                    .Select(m => new { m.MemberType, m.Name, text = m.ToString() })
+                    .ToArray(),
+                toolTypes
+            }, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     static void Start()
