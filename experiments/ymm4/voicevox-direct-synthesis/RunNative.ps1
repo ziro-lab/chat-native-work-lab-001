@@ -42,11 +42,10 @@ try {
       'query_has_no_errors',
       'pronounce_has_no_errors',
       'parameter_has_no_errors',
+      'fake_engine_registered_for_speaker',
       'create_voice_async_completed',
-      'returned_voicevox_pronounce',
-      'engine_direct_invoked',
-      'engine_direct_completed',
-      'engine_direct_wav_written'
+      'public_speaker_wav_written',
+      'returned_voicevox_pronounce'
     )
     $requestsPath=Join-Path $OutputDir 'fake-server-requests.jsonl'
     if(Test-Path $requestsPath){
@@ -75,19 +74,19 @@ try {
     $pause=$body.accent_phrases[0].pause_mora.vowel_length
     if([double]$pause-ne0.0){throw "Pause vowel_length was not zero: $pause"}
 
-    $engineWav=Join-Path $OutputDir 'engine-direct.wav'
-    if(-not(Test-Path $engineWav)){throw 'Engine-direct WAV missing'}
+    $publicWav=Join-Path $OutputDir 'direct.wav'
+    if(-not(Test-Path $publicWav)){throw 'Public speaker WAV missing'}
+    if($synth.Count-ne1){throw "Unexpected /synthesis count: $($synth.Count)"}
 
     @{
-      schema='cnwl.voicevox-direct-synthesis-e2e.v2'
+      schema='cnwl.voicevox-public-synthesis-e2e.v1'
       synthesis_count=$synth.Count
       audio_query_count=$audioQuery.Count
       received_pause_vowel_length=[double]$pause
-      engine_direct_wav_length=(Get-Item $engineWav).Length
-      public_speaker_wav_exists=(Test-Path (Join-Path $OutputDir 'direct.wav'))
+      public_speaker_wav_length=(Get-Item $publicWav).Length
     }|ConvertTo-Json|Set-Content (Join-Path $OutputDir 'e2e.json')
 
-    Write-Output "PASS_VOICEVOX_DIRECT_SYNTHESIS_E2E"
+    Write-Output "PASS_VOICEVOX_PUBLIC_SYNTHESIS_E2E"
   }
   finally {
     if(-not$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
