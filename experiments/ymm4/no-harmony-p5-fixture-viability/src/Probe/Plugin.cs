@@ -198,6 +198,8 @@ internal static class FixtureViabilityProbe
                 .ToArray();
 
             var outcomes = new List<Outcome>();
+            var itemsByType = new Dictionary<string, IItem>(
+                StringComparer.Ordinal);
 
             for (var index = 0;
                 index < itemTypes.Length;
@@ -223,6 +225,9 @@ internal static class FixtureViabilityProbe
                     if (raw is not IItem item)
                         throw new InvalidCastException(
                             "Constructed object is not IItem.");
+
+                    itemsByType[
+                        type.FullName ?? type.Name] = item;
 
                     var frame = 40 + index * 70;
                     var layer = index + 1;
@@ -256,41 +261,6 @@ internal static class FixtureViabilityProbe
                         candidate =>
                             ReferenceEquals(candidate, item));
 
-                    var vm = VmItems(active)
-                        .FirstOrDefault(candidate =>
-                            ReferenceEquals(
-                                ItemOf(candidate),
-                                item));
-
-                    vmFound = vm is not null;
-
-                    if (vm is not null)
-                    {
-                        var leftProperty = vm.GetType()
-                            .GetProperty(
-                                "Left",
-                                BindingFlags.Instance
-                                | BindingFlags.Public);
-                        var widthProperty = vm.GetType()
-                            .GetProperty(
-                                "Width",
-                                BindingFlags.Instance
-                                | BindingFlags.Public);
-
-                        if (leftProperty?.GetMethod?.IsPublic == true
-                            && widthProperty?.GetMethod?.IsPublic == true)
-                        {
-                            left = Convert.ToDouble(
-                                leftProperty.GetValue(vm));
-                            width = Convert.ToDouble(
-                                widthProperty.GetValue(vm));
-                            geometryFound =
-                                double.IsFinite(left.Value)
-                                && double.IsFinite(width.Value)
-                                && width.Value >= 0;
-                        }
-                    }
-
                     if (!added
                         && string.IsNullOrEmpty(error))
                     {
@@ -312,6 +282,70 @@ internal static class FixtureViabilityProbe
                     left,
                     width,
                     error.ReplaceLineEndings(" ")));
+            }
+
+            // TimelineViewModel item VMs are refreshed asynchronously.
+            // Classify geometry only after all fixtures have been inserted and
+            // one UI-idle settle has had time to materialize the common VM list.
+            await Task.Delay(1200);
+
+            var settledVms = VmItems(active).ToArray();
+
+            for (var i = 0; i < outcomes.Count; i++)
+            {
+                var outcome = outcomes[i];
+
+                if (!itemsByType.TryGetValue(
+                        outcome.Type,
+                        out var item))
+                {
+                    continue;
+                }
+
+                var vm = settledVms.FirstOrDefault(
+                    candidate =>
+                        ReferenceEquals(
+                            ItemOf(candidate),
+                            item));
+
+                if (vm is null)
+                    continue;
+
+                double? settledLeft = null;
+                double? settledWidth = null;
+                var settledGeometry = false;
+
+                var leftProperty = vm.GetType()
+                    .GetProperty(
+                        "Left",
+                        BindingFlags.Instance
+                        | BindingFlags.Public);
+                var widthProperty = vm.GetType()
+                    .GetProperty(
+                        "Width",
+                        BindingFlags.Instance
+                        | BindingFlags.Public);
+
+                if (leftProperty?.GetMethod?.IsPublic == true
+                    && widthProperty?.GetMethod?.IsPublic == true)
+                {
+                    settledLeft = Convert.ToDouble(
+                        leftProperty.GetValue(vm));
+                    settledWidth = Convert.ToDouble(
+                        widthProperty.GetValue(vm));
+                    settledGeometry =
+                        double.IsFinite(settledLeft.Value)
+                        && double.IsFinite(settledWidth.Value)
+                        && settledWidth.Value >= 0;
+                }
+
+                outcomes[i] = outcome with
+                {
+                    VmFound = true,
+                    GeometryFound = settledGeometry,
+                    Left = settledLeft,
+                    Width = settledWidth
+                };
             }
 
             var lines = new List<string>
