@@ -78,6 +78,7 @@ internal static class Probe
             var parserMethods = DiscoverControlTagParserMethods();
             var plainText = ObserveOfficialGetPlainText();
             var parse = ObserveOfficialParse();
+            var boundaries = ObserveBoundarySelection();
 
             Check("official_control_tag_parser_public", plainText.ParserTypePublic);
             Check("official_get_plain_text_public", plainText.GetPlainTextPublic);
@@ -86,6 +87,13 @@ internal static class Probe
             Check("official_parse_public", parse.ParsePublic);
             Check("official_parse_clean_text_strips_w0", parse.CleanText == BaselineText);
             Check("official_parse_returns_timing_tag", parse.TimingTagCount > 0);
+            Check("multiple_w0_clean_text_preserved", boundaries.MultiCleanText == "ABC");
+            Check("multiple_w0_positions_are_clean_text_positions",
+                boundaries.ZeroWaitPositions.SequenceEqual(new[] { 1, 2 }));
+            Check("nonzero_wait_is_not_boundary_marker",
+                boundaries.NonzeroWaitValues.Count == 1 &&
+                Math.Abs(boundaries.NonzeroWaitValues[0] - 100.0) < 0.001 &&
+                boundaries.NonzeroSelectedBoundaryCount == 0);
 
             File.WriteAllText(Path.Combine(output, "behavior.json"),
                 JsonSerializer.Serialize(new
@@ -101,6 +109,7 @@ internal static class Probe
                     pronunciationObservation = audio,
                     officialPlainText = plainText,
                     officialParse = parse,
+                    boundarySelection = boundaries,
                     controlTagParserMethods = parserMethods,
                     tagRelatedTypes = tagTypes
                 }, new JsonSerializerOptions { WriteIndented = true }));
@@ -377,6 +386,53 @@ internal static class Probe
             else args[i] = null;
         }
         return args;
+    }
+
+    sealed record BoundarySelectionObservation(
+        string MultiCleanText,
+        int[] ZeroWaitPositions,
+        double[] NonzeroWaitValues,
+        int NonzeroSelectedBoundaryCount,
+        string? Error);
+
+    static BoundarySelectionObservation ObserveBoundarySelection()
+    {
+        try
+        {
+            static (string Clean, ImmutableList<TimingTag> Tags) ParseOne(string text)
+            {
+                var parsed = ControlTagParser.Parse(
+                    text,
+                    ImmutableList<YmmTextDecoration>.Empty,
+                    32.0,
+                    "Yu Gothic UI",
+                    false,
+                    false);
+                return (parsed.Item1, parsed.Item3);
+            }
+
+            static bool IsBoundary(TimingTag tag)
+                => tag.Type.ToString() == "Wait"
+                   && Math.Abs(Convert.ToDouble(tag.Value)) < 0.000001
+                   && tag.Operator.ToString() == "Set";
+
+            var multi = ParseOne("A<w0>B<w0>C");
+            var nonzero = ParseOne("A<w100>B");
+
+            return new(
+                multi.Clean,
+                multi.Tags.Where(IsBoundary).Select(x => x.Position).ToArray(),
+                nonzero.Tags
+                    .Where(x => x.Type.ToString() == "Wait")
+                    .Select(x => Convert.ToDouble(x.Value))
+                    .ToArray(),
+                nonzero.Tags.Count(IsBoundary),
+                null);
+        }
+        catch (Exception ex)
+        {
+            return new("", [], [], -1, ex.ToString());
+        }
     }
 
     sealed record ParseObservation(
