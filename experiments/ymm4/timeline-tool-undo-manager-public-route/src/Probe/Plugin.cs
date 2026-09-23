@@ -18,7 +18,7 @@ public sealed class BootstrapEntry : ILocalizePlugin
     public void SetCulture(CultureInfo cultureInfo) => Probe.Schedule();
 }
 
-public sealed class UndoRouteTool : IToolPlugin
+public sealed class UndoRouteTool
 {
     public string Name => Probe.ToolName;
     public Type ViewModelType => typeof(UndoRouteViewModel);
