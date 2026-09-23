@@ -45,3 +45,5 @@ This slice does not prove:
 - behavior on other YMM4 versions.
 
 Those are the next slice if this surface probe passes.
+
+Initial native surface probe is executed from branch `lab/voicevox-pronounce-mutation` before any product prototype is created.
