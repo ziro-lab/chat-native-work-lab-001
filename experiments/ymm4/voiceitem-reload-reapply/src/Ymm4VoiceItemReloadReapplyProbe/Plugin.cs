@@ -187,9 +187,6 @@ internal static class Probe
         engine.SpeakersJsonCache = new JArray(speakerJson).ToString(Newtonsoft.Json.Formatting.None);
         Check("fake_engine_character_resolved",
             engine.Characters.Any(x => x.SpeakerUuid == fakeSpeakerUuid));
-        MarkSyntheticMetadataLoaded(engine);
-        Log("synthetic-engine-metadata-ready");
-
         var vvCharacter = new VOICEVOXCharacter(
             speakerJson,
             Array.Empty<VOICEVOXSpeakerInfo>(),
@@ -256,6 +253,18 @@ internal static class Probe
                 && File.Exists(voice.FilePath)
                 && new FileInfo(voice.FilePath).Length > 44);
 
+            // Persistence fixture boundary:
+            // the fake VOICEVOX provider is not an installed persistent engine.
+            // Save/reload should exercise only the durable correction source.
+            var persistenceCharacter = new Character { Name = character.Name };
+            voice.Character = persistenceCharacter;
+            voice.CharacterName = persistenceCharacter.Name;
+            voice.Serif = SerifA;
+            voice.Hatsuon = HatsuonA;
+            Check("synthetic_speaker_detached_before_save",
+                voice.Character?.Voice?.Speaker is null);
+            Log("synthetic-speaker-detached-before-save");
+
             var saveProject = PublicMethod(main, "SaveProject", typeof(string));
             var openProject = PublicMethod(main, "OpenProject", typeof(string));
 
@@ -295,12 +304,23 @@ internal static class Probe
             Check("pronounce_is_transient_after_reload", reloaded.Pronounce is null);
 
             Log("reload-state-validated");
+            Check("reloaded_project_has_no_synthetic_speaker",
+                reloaded.Character?.Voice?.Speaker is null);
+
+            // Rebind only the synthetic test provider after native project reload.
+            // Real installed YMM4 voice providers own their own persistence/resolution.
+            reloaded.Character = character;
+            reloaded.CharacterName = character.Name;
+            reloaded.VoiceParameter = parameter;
+            reloaded.Hatsuon = HatsuonA;
+            reloaded.Serif = SerifA;
+
             var reloadedSpeaker = reloaded.Character?.Voice?.Speaker;
-            Check("reloaded_character_speaker_resolved",
+            Check("fixture_speaker_rebound_for_reapply",
                 reloadedSpeaker is not null && reloadedSpeaker.ID == speaker.ID);
             if (reloadedSpeaker is null)
-                throw new InvalidOperationException("Reloaded speaker missing.");
-            Log("reloaded-speaker-resolved");
+                throw new InvalidOperationException("Fixture speaker rebind failed.");
+            Log("fixture-speaker-rebound");
 
             var reloadedParameter = reloaded.VoiceParameter
                 ?? reloaded.Character?.VoiceParameter
@@ -518,15 +538,6 @@ internal static class Probe
         if (valueProperty.SetMethod?.IsPublic != true)
             throw new InvalidOperationException("VowelLength not writable.");
         valueProperty.SetValue(pause, value);
-    }
-
-    static void MarkSyntheticMetadataLoaded(VOICEVOXEngine engine)
-    {
-        var field = typeof(VOICEVOXEngine).GetField(
-            "isCharactersReloaded",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new MissingFieldException(typeof(VOICEVOXEngine).FullName, "isCharactersReloaded");
-        field.SetValue(engine, true);
     }
 
     sealed record SettingsRegistration(string SettingsType, object? ResolvedEngine, Action Restore);
