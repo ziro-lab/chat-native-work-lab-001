@@ -1435,8 +1435,7 @@ internal static class FolderPanelUi
             SelectionMode = SelectionMode.Extended,
             AllowDrop = true,
             HorizontalContentAlignment =
-                HorizontalAlignment.Stretch,
-            ScrollViewer = { }
+                HorizontalAlignment.Stretch
         };
 
         VirtualizingPanel.SetIsVirtualizing(
