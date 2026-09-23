@@ -96,6 +96,280 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS5IntegrationSmoke();
         ScheduleP5CompatibilitySmoke();
         ScheduleP5MediaCompatibilitySmoke();
+        ScheduleP5ThirdPartyCompatibilitySmoke();
+    }
+
+    private void ScheduleP5ThirdPartyCompatibilitySmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_THIRD_PARTY_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5ThirdPartyCompatibilitySmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5ThirdPartyCompatibilitySmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(700);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 third-party smoke must start from an empty Timeline.");
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            const string typeName = "YMM43D.Project.Items.LightItem";
+
+            var type = AppDomain.CurrentDomain
+                .GetAssemblies()
+                .SelectMany(assembly =>
+                {
+                    try { return assembly.GetTypes(); }
+                    catch { return Type.EmptyTypes; }
+                })
+                .SingleOrDefault(candidate =>
+                    string.Equals(
+                        candidate.FullName,
+                        typeName,
+                        StringComparison.Ordinal))
+                ?? throw new TypeLoadException(
+                    $"P5 third-party type not loaded: {typeName}.");
+
+            var raw = Activator.CreateInstance(type)
+                ?? throw new InvalidOperationException(
+                    "P5 third-party Activator returned null.");
+
+            if (raw is not IItem item)
+                throw new InvalidCastException(
+                    "P5 third-party LightItem is not IItem.");
+
+            SetP5Int(raw, "Frame", 80);
+            SetP5Int(raw, "Layer", 2);
+            SetP5Int(raw, "Length", 40);
+            SetP5StringIfPossible(
+                raw,
+                "Remark",
+                "CNWL_P5_THIRD_PARTY_LIGHT");
+
+            if (!timeline.TryAddItems(
+                    [item],
+                    item.Frame,
+                    item.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party TryAddItems returned false.");
+            }
+
+            await Task.Delay(900);
+
+            if (!timeline.Items.Any(current =>
+                    ReferenceEquals(current, item)))
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party item did not remain live.");
+            }
+
+            var beforeGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm)
+                    .SingleOrDefault(current =>
+                        ReferenceEquals(current.Item, item));
+
+            if (beforeGeometry.Item is null
+                || !double.IsFinite(beforeGeometry.Left)
+                || !double.IsFinite(beforeGeometry.Width)
+                || beforeGeometry.Width <= 0)
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party public geometry missing.");
+            }
+
+            var folderId = Guid.Parse(
+                "cccccccc-dddd-eeee-ffff-000000000001");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 Third Party",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(750);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party fold owner mapping failed.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 third-party visual summary unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 1)
+                throw new InvalidOperationException(
+                    $"P5 expected 1 third-party timing band, got {visualSummary.TimingBandCount}.");
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            if (!timeline.SelectedItems.Any(selected =>
+                    ReferenceEquals(selected, item)))
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party folder selection failed.");
+            }
+
+            undo.Record();
+            await Task.Delay(250);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(
+                        timeline.MaxLayer,
+                        timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(current => current.Layer)
+                        .ToDictionary(
+                            group => group.Key,
+                            group => group.Count()),
+                    [])
+                .Single(row =>
+                    row.FolderId == folderId);
+
+            var dragBlock = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 third-party folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(dragBlock, drop))
+                throw new InvalidOperationException(
+                    "P5 third-party block move was rejected.");
+
+            commands.MovePanelRows(dragBlock, drop);
+            await Task.Delay(500);
+
+            if (item.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 third-party moved layer={item.Layer}, expected 4.");
+
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(450);
+
+            if (item.Layer != 2)
+                throw new InvalidOperationException(
+                    $"P5 third-party Undo layer={item.Layer}, expected 2.");
+
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(450);
+
+            if (item.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 third-party Redo layer={item.Layer}, expected 4.");
+
+            AssertP5Folder(folderId, 3, 4);
+
+            var afterGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm)
+                    .SingleOrDefault(current =>
+                        ReferenceEquals(current.Item, item));
+
+            if (afterGeometry.Item is null
+                || !double.IsFinite(afterGeometry.Left)
+                || !double.IsFinite(afterGeometry.Width)
+                || afterGeometry.Width <= 0)
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party geometry missing after move.");
+            }
+
+            WriteP5ThirdPartyResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_THIRD_PARTY",
+                        $"timeline={key}",
+                        "source_repo=Dolphin-kun/YMM43D",
+                        "source_commit=a5fe44443d9b62912dec6861edf68cbdff9e7810",
+                        "source_license=MIT",
+                        "item_type=YMM43D.Project.Items.LightItem",
+                        "construct_add_live=1",
+                        "common_geometry=1",
+                        "fold_owner_mapping=1",
+                        "timing_summary=1",
+                        "folder_selection=1",
+                        "block_move_undo_redo=1",
+                        "no_type_specific_folder_adapter=true"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_third_party_smoke_error=" + ex);
+
+            WriteP5ThirdPartyResult(
+                "FAIL_P5_THIRD_PARTY\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteP5ThirdPartyResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-third-party-result.txt"),
+            text);
     }
 
     private void ScheduleP5MediaCompatibilitySmoke()
