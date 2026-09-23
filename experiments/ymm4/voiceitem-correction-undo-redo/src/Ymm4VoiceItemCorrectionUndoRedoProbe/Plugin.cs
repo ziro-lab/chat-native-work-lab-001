@@ -7,6 +7,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Newtonsoft.Json.Linq;
 using YukkuriMovieMaker.Plugin;
@@ -105,9 +107,13 @@ internal static class Probe
     static async Task RunAsync(Window window, object main, object active, string url)
     {
         window.WindowState = WindowState.Normal;
+        window.Left = 0;
+        window.Top = 0;
+        window.Width = 1000;
+        window.Height = 700;
         window.Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
-        await Task.Delay(300);
+        await Task.Delay(1000);
 
         var timeline = FindTimeline(active)
             ?? throw new InvalidOperationException("Timeline could not be resolved.");
@@ -271,9 +277,21 @@ internal static class Probe
             int undoCallbacks = 0;
             int redoCallbacks = 0;
 
-            recordedHandler = (_, _) => recorded++;
-            undoHandler = (_, _) => undoed++;
-            redoHandler = (_, _) => redoed++;
+            recordedHandler = (_, _) =>
+            {
+                recorded++;
+                Log($"manager_recorded={recorded}");
+            };
+            undoHandler = (_, _) =>
+            {
+                undoed++;
+                Log($"manager_undoed={undoed}");
+            };
+            redoHandler = (_, _) =>
+            {
+                redoed++;
+                Log($"manager_redoed={redoed}");
+            };
             manager.Recorded += recordedHandler;
             manager.Undoed += undoHandler;
             manager.Redoed += redoHandler;
@@ -284,11 +302,13 @@ internal static class Probe
                 {
                     undoCallbacks++;
                     ApplySnapshot(voice, voicePath, baseline);
+                    Log($"undo_callback={undoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
                 },
                 () =>
                 {
                     redoCallbacks++;
                     ApplySnapshot(voice, voicePath, corrected);
+                    Log($"redo_callback={redoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
                 }));
             manager.Record();
 
@@ -297,11 +317,22 @@ internal static class Probe
                 GetPauseVowelLength(GetAudioQuery(voice.Pronounce!)) == 0.0
                 && HashFile(voicePath) == correctedHash);
 
+            var timelineView = FindVisualByTypeName(window, "TimelineView");
+            Check("timeline_view_found_for_history_input", timelineView is not null);
+            if (timelineView is not null)
+            {
+                timelineView.Focus();
+                Keyboard.Focus(timelineView);
+            }
             window.Activate();
             Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
+            Native.Release();
+            await Task.Delay(250);
 
+            Log($"before_undo recorded={recorded} undoed={undoed} redoed={redoed} callbacks={undoCallbacks}/{redoCallbacks}");
             var undoEventBefore = undoed;
             await Native.Key(0x5A, ctrl: true);
+            Log($"after_undo_key undoed={undoed} callbacks={undoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
             await WaitUntil(
                 "correction undo stabilization",
                 () => undoed > undoEventBefore
@@ -320,6 +351,7 @@ internal static class Probe
 
             var redoEventBefore = redoed;
             await Native.Key(0x59, ctrl: true);
+            Log($"after_redo_key redoed={redoed} callbacks={redoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
             await WaitUntil(
                 "correction redo stabilization",
                 () => redoed > redoEventBefore
@@ -631,9 +663,32 @@ internal static class Probe
         return null;
     }
 
+    static FrameworkElement? FindVisualByTypeName(DependencyObject root, string typeName)
+    {
+        if (root is FrameworkElement fe && fe.GetType().Name == typeName && fe.IsVisible)
+            return fe;
+
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var found = FindVisualByTypeName(VisualTreeHelper.GetChild(root, i), typeName);
+            if (found is not null)
+                return found;
+        }
+        return null;
+    }
+
+    static void Log(string text)
+    {
+        File.AppendAllText(
+            Path.Combine(output, "progress.txt"),
+            DateTime.UtcNow.ToString("O") + " " + text + Environment.NewLine);
+    }
+
     static class Native
     {
         const byte VK_CONTROL = 0x11;
+        const byte VK_SHIFT = 0x10;
         const uint KEYEVENTF_KEYUP = 0x0002;
 
         [DllImport("user32.dll")]
@@ -642,13 +697,27 @@ internal static class Probe
         [DllImport("user32.dll")]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+        internal static void Release()
+        {
+            keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
         internal static async Task Key(byte key, bool ctrl)
         {
             if (ctrl) keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
-            keybd_event(key, 0, 0, UIntPtr.Zero);
-            keybd_event(key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-            if (ctrl) keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-            await Task.Delay(180);
+            try
+            {
+                await Task.Delay(60);
+                keybd_event(key, 0, 0, UIntPtr.Zero);
+                await Task.Delay(60);
+            }
+            finally
+            {
+                keybd_event(key, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                if (ctrl) keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
+            await Task.Delay(450);
         }
     }
 
