@@ -39,17 +39,27 @@ try {
       'engine_points_to_fake_backend',
       'builtin_speaker_constructed',
       'supplied_pause_is_zero',
+      'query_has_no_errors',
+      'pronounce_has_no_errors',
+      'parameter_has_no_errors',
       'create_voice_async_completed',
       'wav_written',
       'returned_voicevox_pronounce'
     )
+    $requestsPath=Join-Path $OutputDir 'fake-server-requests.jsonl'
+    if(Test-Path $requestsPath){
+      Write-Output '--- fake server requests ---'
+      Get-Content $requestsPath
+    } else {
+      Write-Output '--- fake server requests: NONE ---'
+    }
+
     if($r.requirements.Count-ne$req.Count){throw "Wrong plugin requirement count: $($r.requirements.Count)"}
     foreach($id in $req){
       $f=@($r.requirements|Where-Object {$_.id-eq$id})
       if($f.Count-ne1-or$f[0].passed-cne$true){throw "Missing/failed $id"}
     }
 
-    $requestsPath=Join-Path $OutputDir 'fake-server-requests.jsonl'
     if(-not(Test-Path $requestsPath)){throw 'Fake server received no requests'}
     $requests=@(Get-Content $requestsPath|ForEach-Object { $_|ConvertFrom-Json })
     $synth=@($requests|Where-Object {$_.method-eq'POST' -and $_.path-eq'/synthesis'})
