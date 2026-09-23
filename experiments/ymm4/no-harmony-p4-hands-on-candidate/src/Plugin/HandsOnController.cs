@@ -1238,6 +1238,40 @@ internal sealed class HandsOnController : IDisposable
     internal bool Matches(Guid timelineId) =>
         !disposed && timeline.ID == timelineId;
 
+    internal Timeline PanelTimeline => timeline;
+    internal FolderCommands PanelCommands => commands;
+
+    internal void ScrollPanelToLayer(int layer)
+    {
+        if (disposed || layer < 0)
+            return;
+
+        display.ThrowIfFailed();
+
+        var logical = Math.Min(layer, display.Layout.MaxLayer);
+        if (display.Layout.IsHidden(logical))
+            return;
+
+        var viewportHeight = host.Scroll.ViewportHeight;
+        if (!double.IsFinite(viewportHeight) || viewportHeight <= 0)
+            return;
+
+        var top = display.Layout.VisualRowOfLogical(logical)
+            * (double)display.Height;
+        var bottom = top + display.Height;
+        var offset = host.Scroll.VerticalOffset;
+
+        if (top < offset)
+            host.Scroll.ScrollToVerticalOffset(top);
+        else if (bottom > offset + viewportHeight)
+            host.Scroll.ScrollToVerticalOffset(
+                bottom - viewportHeight);
+
+        HandsOnRuntime.Diagnostic(
+            $"panel_follow layer={layer} logical={logical} " +
+            $"row={display.Layout.VisualRowOfLogical(logical)}");
+    }
+
     internal void RefreshFromDocument()
     {
         if (disposed)
