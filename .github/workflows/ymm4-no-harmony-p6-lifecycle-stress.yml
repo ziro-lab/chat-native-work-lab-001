@@ -1,0 +1,166 @@
+name: YMM4 no-Harmony P6 lifecycle stress
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p6-hardening/**'
+      - '.github/workflows/ymm4-no-harmony-p6-lifecycle-stress.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p6-lifecycle-stress-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      HOST_VERSION: '4.56.1.0'
+      HOST_HASH: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Acquire pinned host
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build conditional P6 candidate
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -p:EnableP6Hardening=true -o out/plugin --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Candidate build failed'}
+          $harmony=Get-ChildItem out/plugin -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }
+          if($harmony){throw ('Unexpected Harmony dependency: ' + ($harmony.Name -join ','))}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4NoHarmonyFolderHandsOn'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/plugin/Ymm4NoHarmonyFolderHandsOn.dll $d
+
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @(
+            "source_head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "host_version=$env:HOST_VERSION",
+            "host_zip_sha256=$env:HOST_HASH",
+            "candidate_sha256=$((Get-FileHash out/plugin/Ymm4NoHarmonyFolderHandsOn.dll -Algorithm SHA256).Hash)",
+            "run=$env:GITHUB_RUN_ID",
+            "level=P6.4-lifecycle-stress"
+          )|Set-Content out/evidence/manifest.txt
+
+      - name: Run P6.4 project/session lifecycle stress
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class P6LifecycleWindow {
+            public delegate bool Callback(IntPtr w, IntPtr p);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(Callback cb,IntPtr p);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr w);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr w,out uint pid);
+            [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr w,StringBuilder s,int n);
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr w,uint m,IntPtr wp,IntPtr lp);
+          }
+          '@
+
+          $diag=Join-Path $PWD 'out/evidence/smoke'
+          New-Item -ItemType Directory -Force $diag|Out-Null
+          $env:CNWL_P4_HANDS_ON_DIAG_DIR=$diag
+          $env:CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT='1'
+          $env:CNWL_P6_HARDENING_SMOKE='1'
+          $env:CNWL_P6_LIFECYCLE_STRESS_SMOKE='1'
+
+          $p=Start-Process (Join-Path $env:YMM4_DIR 'YukkuriMovieMaker.exe') -WorkingDirectory $env:YMM4_DIR -PassThru
+          try {
+            $script:hostPid=$p.Id
+            $cb=[P6LifecycleWindow+Callback]{
+              param([IntPtr]$w,[IntPtr]$unused)
+              [uint32]$owner=0
+              [void][P6LifecycleWindow]::GetWindowThreadProcessId($w,[ref]$owner)
+              if($owner -eq $script:hostPid -and [P6LifecycleWindow]::IsWindowVisible($w)){
+                $s=New-Object System.Text.StringBuilder 1024
+                [void][P6LifecycleWindow]::GetWindowText($w,$s,1024)
+                $title=$s.ToString()
+                if($title -like '*Check for updates*' -or $title -like '*About YukkuriMovieMaker*'){
+                  [void][P6LifecycleWindow]::PostMessage($w,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
+                }elseif($title -eq 'Confirm' -or $title -eq 'Profile'){
+                  [void][P6LifecycleWindow]::PostMessage($w,0x0100,[IntPtr]0x0D,[IntPtr]::Zero)
+                  [void][P6LifecycleWindow]::PostMessage($w,0x0101,[IntPtr]0x0D,[IntPtr]::Zero)
+                }
+              }
+              return $true
+            }
+
+            $result=Join-Path $diag 'p6-lifecycle-result.txt'
+            $deadline=[DateTime]::UtcNow.AddSeconds(240)
+            while([DateTime]::UtcNow -lt $deadline -and -not $p.HasExited -and -not(Test-Path $result)){
+              [void][P6LifecycleWindow]::EnumWindows($cb,[IntPtr]::Zero)
+              Start-Sleep -Milliseconds 400
+            }
+
+            if(-not(Test-Path $result)){
+              if(Test-Path (Join-Path $diag 'runtime.log')){Get-Content (Join-Path $diag 'runtime.log') -Tail 850|Write-Host}
+              throw 'P6.4 lifecycle stress did not produce a result'
+            }
+
+            $content=Get-Content $result
+            $content|Write-Host
+
+            if($content[0] -ne 'PASS_P6_LIFECYCLE_STRESS'){
+              if(Test-Path (Join-Path $diag 'runtime.log')){Get-Content (Join-Path $diag 'runtime.log') -Tail 850|Write-Host}
+              throw 'P6.4 lifecycle stress failed'
+            }
+
+            foreach($required in @(
+              'transitions=4',
+              'unique_timeline_ids=5',
+              'disposed_controllers=4',
+              'zero_subscription_controllers=4',
+              'empty_new_states=4',
+              'stale_visibility_ignored=4',
+              'old_controller_lookup_cleared=true',
+              'no_harmony=true'
+            )){
+              if(-not($content -contains $required)){throw "P6.4 missing marker: $required"}
+            }
+          } finally {
+            if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+            foreach($name in @(
+              'CNWL_P4_HANDS_ON_DIAG_DIR',
+              'CNWL_P4_HANDS_ON_SMOKE_CREATE_PROJECT',
+              'CNWL_P6_HARDENING_SMOKE',
+              'CNWL_P6_LIFECYCLE_STRESS_SMOKE'
+            )){
+              Remove-Item ("Env:"+$name) -ErrorAction SilentlyContinue
+            }
+          }
+
+      - if: always()
+        name: Show evidence
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence/manifest.txt){Get-Content out/evidence/manifest.txt}
+          if(Test-Path out/evidence/smoke/p6-lifecycle-result.txt){Get-Content out/evidence/smoke/p6-lifecycle-result.txt}
+          if(Test-Path out/evidence/smoke/runtime.log){Get-Content out/evidence/smoke/runtime.log -Tail 850}
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-p6-lifecycle-stress-4.56.1.0
+          path: out/evidence/
+          retention-days: 30
