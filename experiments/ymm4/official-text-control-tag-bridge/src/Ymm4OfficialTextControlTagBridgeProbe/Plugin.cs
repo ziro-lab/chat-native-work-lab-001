@@ -12,6 +12,7 @@ using YukkuriMovieMaker.Player.Video;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YmmTextDecoration = YukkuriMovieMaker.Commons.TextDecoration;
 
 namespace Ymm4OfficialTextControlTagBridgeProbe;
 
@@ -400,7 +401,7 @@ internal static class Probe
 
             var result = ControlTagParser.Parse(
                 ValidTagText,
-                ImmutableList<TextDecoration>.Empty,
+                ImmutableList<YmmTextDecoration>.Empty,
                 32.0,
                 "Yu Gothic UI",
                 false,
