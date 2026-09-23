@@ -347,13 +347,13 @@ internal static class Probe
             Log($"before_undo recorded={recorded} undoed={undoed} redoed={redoed} callbacks={undoCallbacks}/{redoCallbacks}");
 
             var undoMethod = manager.GetType().GetMethod(
-                "Undo",
+                "UndoAsync",
                 BindingFlags.Instance | BindingFlags.Public,
                 binder: null,
                 types: Type.EmptyTypes,
                 modifiers: null);
             var redoMethod = manager.GetType().GetMethod(
-                "Redo",
+                "RedoAsync",
                 BindingFlags.Instance | BindingFlags.Public,
                 binder: null,
                 types: Type.EmptyTypes,
@@ -363,8 +363,10 @@ internal static class Probe
 
             var undoEventBefore = undoed;
             if (undoMethod is null)
-                throw new MissingMethodException(manager.GetType().FullName, "Undo()");
-            undoMethod.Invoke(manager, null);
+                throw new MissingMethodException(manager.GetType().FullName, "UndoAsync()");
+            if (undoMethod.Invoke(manager, null) is not Task undoTask)
+                throw new InvalidOperationException("UndoAsync() did not return Task.");
+            await undoTask;
             await Task.Delay(250);
             Log($"after_manager_undo undoed={undoed} callbacks={undoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
             await WaitUntil(
@@ -385,8 +387,10 @@ internal static class Probe
 
             var redoEventBefore = redoed;
             if (redoMethod is null)
-                throw new MissingMethodException(manager.GetType().FullName, "Redo()");
-            redoMethod.Invoke(manager, null);
+                throw new MissingMethodException(manager.GetType().FullName, "RedoAsync()");
+            if (redoMethod.Invoke(manager, null) is not Task redoTask)
+                throw new InvalidOperationException("RedoAsync() did not return Task.");
+            await redoTask;
             await Task.Delay(250);
             Log($"after_manager_redo redoed={redoed} callbacks={redoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
             await WaitUntil(
@@ -406,7 +410,9 @@ internal static class Probe
                 HashFile(voicePath) == correctedHash);
 
             undoEventBefore = undoed;
-            undoMethod.Invoke(manager, null);
+            if (undoMethod.Invoke(manager, null) is not Task finalUndoTask)
+                throw new InvalidOperationException("Final UndoAsync() did not return Task.");
+            await finalUndoTask;
             await Task.Delay(250);
             await WaitUntil(
                 "final manager undo stabilization",
