@@ -9,11 +9,13 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPanel;
+using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
 using Ymm4NoHarmonyStructuralConvenience;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YmmGroupItem = YukkuriMovieMaker.Project.Items.GroupItem;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
@@ -213,7 +215,7 @@ public sealed partial class FolderToolViewModel
                     pair => pair.Value.Length);
 
             var groupItems = timeline.Items
-                .OfType<GroupItem>()
+                .OfType<YmmGroupItem>()
                 .OrderBy(group => group.Layer)
                 .ThenBy(group => group.Frame)
                 .ToArray();
@@ -1453,7 +1455,7 @@ internal static class FolderPanelUi
             new Binding(nameof(FolderToolViewModel.Rows)));
 
         var containerStyle =
-            new Style(typeof(ListBoxItem));
+            new System.Windows.Style(typeof(ListBoxItem));
         containerStyle.Setters.Add(
             new Setter(
                 ListBoxItem.IsSelectedProperty,
