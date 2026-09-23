@@ -85,6 +85,8 @@ class Handler(BaseHTTPRequestHandler):
                 "version": "0.0.0",
                 "supported_features": {"permitted_synthesis_morphing": "SELF_ONLY"}
             }])
+        elif parsed.path == "/is_initialized_speaker":
+            self._json(True)
         elif parsed.path == "/engine_manifest":
             self._json({
                 "manifest_version": "0.13.1",
@@ -114,6 +116,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/audio_query":
             self._json(default_query())
+            return
+
+        if parsed.path == "/accent_phrases":
+            self._json(default_query()["accent_phrases"])
+            return
+
+        if parsed.path == "/initialize_speaker":
+            self._json({})
             return
 
         if parsed.path == "/synthesis":
