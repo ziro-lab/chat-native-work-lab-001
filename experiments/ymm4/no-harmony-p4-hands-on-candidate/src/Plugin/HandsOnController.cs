@@ -6,6 +6,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Ymm4NoHarmonyPanel;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
 using Ymm4NoHarmonyStructuralConvenience;
@@ -84,6 +85,441 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS1IntegrationSmoke();
         ScheduleS2IntegrationSmoke();
         ScheduleS3IntegrationSmoke();
+        ScheduleS4IntegrationSmoke();
+    }
+
+    private void ScheduleS4IntegrationSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P4_S4_INTEGRATION_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunS4IntegrationSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunS4IntegrationSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "S4 integration smoke must start from a resource-free Timeline.");
+
+            for (var layer = 0; layer <= 10; layer++)
+            {
+                ExecuteHostCommand(
+                    CommandType.AddLayer,
+                    layer);
+                await Task.Delay(90);
+            }
+
+            var key = timeline.ID.ToString("D");
+            var outerId = Guid.Parse(
+                "66666666-6666-6666-6666-666666666666");
+            var innerId = Guid.Parse(
+                "77777777-7777-7777-7777-777777777777");
+            var laterId = Guid.Parse(
+                "88888888-8888-8888-8888-888888888888");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = outerId,
+                                            Start = 1,
+                                            End = 5,
+                                            Name = "Outer"
+                                        },
+                                        new PersistedFolder
+                                        {
+                                            Id = innerId,
+                                            Start = 2,
+                                            End = 3,
+                                            Name = "Inner"
+                                        },
+                                        new PersistedFolder
+                                        {
+                                            Id = laterId,
+                                            Start = 7,
+                                            End = 9,
+                                            Name = "Later"
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            var movingMarker = new YmmGroupItem
+            {
+                Frame = 0,
+                Length = Math.Max(1, timeline.Length),
+                Layer = 2,
+                GroupRange = 1
+            };
+            var stationaryMarker = new YmmGroupItem
+            {
+                Frame = 0,
+                Length = Math.Max(1, timeline.Length),
+                Layer = 4,
+                GroupRange = 1
+            };
+            var laterMarker = new YmmGroupItem
+            {
+                Frame = 0,
+                Length = Math.Max(1, timeline.Length),
+                Layer = 7,
+                GroupRange = 1
+            };
+
+            foreach (var marker in new[]
+            {
+                movingMarker,
+                stationaryMarker,
+                laterMarker
+            })
+            {
+                if (!timeline.TryAddItems(
+                        [marker],
+                        marker.Frame,
+                        marker.Layer,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"S4 marker GroupItem could not be added at L{marker.Layer}.");
+                }
+            }
+
+            if (movingMarker.Layer != 2
+                || stationaryMarker.Layer != 4
+                || laterMarker.Layer != 7)
+            {
+                throw new InvalidOperationException(
+                    "S4 marker fixture changed layer placement: "
+                    + $"moving={movingMarker.Layer}, "
+                    + $"stationary={stationaryMarker.Layer}, "
+                    + $"later={laterMarker.Layer}.");
+            }
+
+            var color2 = Color.FromRgb(0x31, 0x42, 0x53);
+            var color3 = Color.FromRgb(0x64, 0x75, 0x86);
+            var color4 = Color.FromRgb(0x97, 0xA8, 0xB9);
+            timeline.LayerSettings.Colors[2] = color2;
+            timeline.LayerSettings.Colors[3] = color3;
+            timeline.LayerSettings.Colors[4] = color4;
+            undo.Record();
+            await Task.Delay(200);
+
+            commands.SetHidden(innerId, true);
+            await Task.Delay(250);
+
+            var beforeRestore = FolderProductStateRules.RestoreMap(
+                state.ProductState,
+                key);
+            if (!beforeRestore.ContainsKey(2)
+                || !beforeRestore.ContainsKey(3))
+            {
+                throw new InvalidOperationException(
+                    "S4 hidden fixture did not establish restore ownership.");
+            }
+
+            var itemCounts = timeline.Items
+                .GroupBy(item => item.Layer)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Count());
+            var spans = timeline.Items
+                .OfType<YmmGroupItem>()
+                .OrderBy(item => item.Layer)
+                .ThenBy(item => item.Frame)
+                .Select(item => new GroupSpan(
+                    item.Layer,
+                    item.GroupRange))
+                .ToArray();
+            var rows = PanelProjection.Build(
+                state.ProductState,
+                key,
+                Math.Max(
+                    timeline.MaxLayer,
+                    timeline.LayerSettings.MaxLayer),
+                itemCounts,
+                spans);
+
+            var innerRow = rows.Single(
+                row => row.FolderId == innerId);
+            var laterRow = rows.Single(
+                row => row.FolderId == laterId);
+
+            var block = PanelMoveRules.TryGetDragBlock(
+                [innerRow])
+                ?? throw new InvalidOperationException(
+                    "S4 inner folder did not resolve to a drag block.");
+            var drop = PanelMoveRules.ResolveDrop(
+                laterRow,
+                PanelDropZone.Before);
+
+            if (!commands.CanMovePanelRows(
+                    block,
+                    drop))
+            {
+                throw new InvalidOperationException(
+                    "S4 representative panel move was rejected.");
+            }
+
+            var beforeSettingsMax =
+                timeline.LayerSettings.MaxLayer;
+
+            commands.MovePanelRows(
+                block,
+                drop);
+            await Task.Delay(400);
+
+            AssertS4MoveState(
+                outerId,
+                innerId,
+                laterId,
+                expectedOuter: (1, 3),
+                expectedInner: (5, 6),
+                expectedLater: (7, 9),
+                movingMarker,
+                expectedMovingLayer: 5,
+                stationaryMarker,
+                expectedStationaryLayer: 2,
+                laterMarker,
+                expectedLaterLayer: 7,
+                colorAtMovedStart: color2,
+                colorAtMovedEnd: color3,
+                expectedRestoreLayers: [5, 6]);
+
+            if (timeline.LayerSettings.MaxLayer
+                != beforeSettingsMax)
+            {
+                throw new InvalidOperationException(
+                    "Panel block move changed the explicit layer count.");
+            }
+
+            var movedParents = PanelProjection.ParentMap(
+                FolderDocumentRules.FindTimeline(
+                    state.Document,
+                    key)!.Folders);
+            if (movedParents[innerId] is not null)
+            {
+                throw new InvalidOperationException(
+                    "Moved inner folder still belongs to Outer.");
+            }
+
+            ExecuteHostCommand(
+                CommandType.Undo,
+                null);
+            await Task.Delay(450);
+
+            AssertS4MoveState(
+                outerId,
+                innerId,
+                laterId,
+                expectedOuter: (1, 5),
+                expectedInner: (2, 3),
+                expectedLater: (7, 9),
+                movingMarker,
+                expectedMovingLayer: 2,
+                stationaryMarker,
+                expectedStationaryLayer: 4,
+                laterMarker,
+                expectedLaterLayer: 7,
+                colorAtMovedStart: color2,
+                colorAtMovedEnd: color3,
+                expectedRestoreLayers: [2, 3]);
+
+            var undoParents = PanelProjection.ParentMap(
+                FolderDocumentRules.FindTimeline(
+                    state.Document,
+                    key)!.Folders);
+            if (undoParents[innerId] != outerId)
+            {
+                throw new InvalidOperationException(
+                    "Panel move Undo did not restore folder parentage.");
+            }
+
+            ExecuteHostCommand(
+                CommandType.Redo,
+                null);
+            await Task.Delay(450);
+
+            AssertS4MoveState(
+                outerId,
+                innerId,
+                laterId,
+                expectedOuter: (1, 3),
+                expectedInner: (5, 6),
+                expectedLater: (7, 9),
+                movingMarker,
+                expectedMovingLayer: 5,
+                stationaryMarker,
+                expectedStationaryLayer: 2,
+                laterMarker,
+                expectedLaterLayer: 7,
+                colorAtMovedStart: color2,
+                colorAtMovedEnd: color3,
+                expectedRestoreLayers: [5, 6]);
+
+            // The management panel itself must be constructible on the exact
+            // host without optional XAML/resources or another state service.
+            var panel = new FolderToolView();
+            if (panel.Content is not Grid panelRoot
+                || !panelRoot.Children
+                    .OfType<ListBox>()
+                    .Any())
+            {
+                throw new InvalidOperationException(
+                    "S4 management panel did not build its ListBox surface.");
+            }
+
+            ScrollPanelToLayer(7);
+            display.ThrowIfFailed();
+
+            WriteS4Result(
+                "PASS_S4_INTEGRATION\n" +
+                $"timeline={key}\n" +
+                "flat_panel_surface=true\n" +
+                "block_move=true\n" +
+                "folder_parentage=true\n" +
+                "item_layer_map=true\n" +
+                "layer_settings_map=true\n" +
+                "visibility_restore_map=true\n" +
+                "move_undo_redo=true\n" +
+                "fold_aware_follow=true\n");
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "s4_integration_smoke_error=" + ex);
+            WriteS4Result(
+                "FAIL_S4_INTEGRATION\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private void AssertS4MoveState(
+        Guid outerId,
+        Guid innerId,
+        Guid laterId,
+        (int Start, int End) expectedOuter,
+        (int Start, int End) expectedInner,
+        (int Start, int End) expectedLater,
+        YmmGroupItem movingMarker,
+        int expectedMovingLayer,
+        YmmGroupItem stationaryMarker,
+        int expectedStationaryLayer,
+        YmmGroupItem laterMarker,
+        int expectedLaterLayer,
+        Color colorAtMovedStart,
+        Color colorAtMovedEnd,
+        IReadOnlyCollection<int> expectedRestoreLayers)
+    {
+        var key = timeline.ID.ToString("D");
+        var folders = FolderDocumentRules.FindTimeline(
+                state.Document,
+                key)
+            ?.Folders
+            ?? throw new InvalidOperationException(
+                "S4 folder state is missing.");
+
+        void Folder(
+            Guid id,
+            (int Start, int End) expected)
+        {
+            var folder = folders.Single(
+                candidate => candidate.Id == id);
+
+            if (folder.Start != expected.Start
+                || folder.End != expected.End)
+            {
+                throw new InvalidOperationException(
+                    $"S4 folder {id} range " +
+                    $"{folder.Start}-{folder.End}, expected " +
+                    $"{expected.Start}-{expected.End}.");
+            }
+        }
+
+        Folder(outerId, expectedOuter);
+        Folder(innerId, expectedInner);
+        Folder(laterId, expectedLater);
+
+        if (movingMarker.Layer != expectedMovingLayer
+            || stationaryMarker.Layer
+                != expectedStationaryLayer
+            || laterMarker.Layer != expectedLaterLayer)
+        {
+            throw new InvalidOperationException(
+                "S4 marker item layer mapping is wrong.");
+        }
+
+        if (timeline.LayerSettings.Colors[
+                expectedMovingLayer]
+            != colorAtMovedStart
+            || timeline.LayerSettings.Colors[
+                expectedMovingLayer + 1]
+            != colorAtMovedEnd)
+        {
+            throw new InvalidOperationException(
+                "S4 LayerSettings color mapping is wrong.");
+        }
+
+        var restore = FolderProductStateRules.RestoreMap(
+            state.ProductState,
+            key);
+
+        if (!restore.Keys
+            .OrderBy(x => x)
+            .SequenceEqual(
+                expectedRestoreLayers.OrderBy(x => x)))
+        {
+            throw new InvalidOperationException(
+                "S4 visibility restore keys are wrong: "
+                + string.Join(",", restore.Keys.OrderBy(x => x)));
+        }
+
+        foreach (var layer in expectedRestoreLayers)
+        {
+            if (timeline.LayerSettings.IsVisibles[layer])
+            {
+                throw new InvalidOperationException(
+                    $"S4 moved hidden layer L{layer} became visible.");
+            }
+        }
+
+        display.ThrowIfFailed();
+    }
+
+    private static void WriteS4Result(
+        string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "s4-result.txt"),
+            text);
     }
 
     private void ScheduleS3IntegrationSmoke()
@@ -1237,6 +1673,40 @@ internal sealed class HandsOnController : IDisposable
 
     internal bool Matches(Guid timelineId) =>
         !disposed && timeline.ID == timelineId;
+
+    internal Timeline PanelTimeline => timeline;
+    internal FolderCommands PanelCommands => commands;
+
+    internal void ScrollPanelToLayer(int layer)
+    {
+        if (disposed || layer < 0)
+            return;
+
+        display.ThrowIfFailed();
+
+        var logical = Math.Min(layer, display.Layout.MaxLayer);
+        if (display.Layout.IsHidden(logical))
+            return;
+
+        var viewportHeight = host.Scroll.ViewportHeight;
+        if (!double.IsFinite(viewportHeight) || viewportHeight <= 0)
+            return;
+
+        var top = display.Layout.VisualRowOfLogical(logical)
+            * (double)display.Height;
+        var bottom = top + display.Height;
+        var offset = host.Scroll.VerticalOffset;
+
+        if (top < offset)
+            host.Scroll.ScrollToVerticalOffset(top);
+        else if (bottom > offset + viewportHeight)
+            host.Scroll.ScrollToVerticalOffset(
+                bottom - viewportHeight);
+
+        HandsOnRuntime.Diagnostic(
+            $"panel_follow layer={layer} logical={logical} " +
+            $"row={display.Layout.VisualRowOfLogical(logical)}");
+    }
 
     internal void RefreshFromDocument()
     {

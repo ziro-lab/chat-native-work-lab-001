@@ -30,6 +30,8 @@
     <Compile Include="../../../no-harmony-s2-extended-state/src/FolderProductState.cs" Link="FolderProductState.cs" />
     <Compile Include="../../../no-harmony-s2-extended-state/src/FolderProductStateCodec.cs" Link="FolderProductStateCodec.cs" />
     <Compile Include="../../../no-harmony-s3-structural-convenience/src/StructuralConvenienceRules.cs" Link="StructuralConvenienceRules.cs" />
+    <Compile Include="../../../no-harmony-s4-panel/src/PanelProjection.cs" Link="PanelProjection.cs" />
+    <Compile Include="../../../no-harmony-s4-panel/src/PanelMoveRules.cs" Link="PanelMoveRules.cs" />
   </ItemGroup>
 
   <Target Name="MakeYmme" AfterTargets="Build" Condition="'$(PackYmme)' == 'true'">

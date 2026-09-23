@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Data;
 using System.Windows.Media;
+using Ymm4NoHarmonyPanel;
 using Ymm4NoHarmonyStructuralConvenience;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -366,6 +367,55 @@ internal static class HandsOnHostAccess
                     "YMM4 rejected the planned Group Control item.");
             }
         }
+
+        timeline.LayerSelection.Clear();
+        timeline.RefreshTimelineLengthAndMaxLayer();
+    }
+
+    internal static void ApplyPanelMovePlan(
+        Timeline timeline,
+        PanelMovePlan plan,
+        IReadOnlyList<YmmGroupItem> groups)
+    {
+        ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(groups);
+
+        if (groups.Count != plan.GroupRanges.Count)
+            throw new ArgumentException(
+                "Group item count does not match the panel move plan.",
+                nameof(groups));
+
+        // S4 candidate host boundary: block move is a pure permutation.
+        // No rows are created/deleted here; every host-owned layer-bearing
+        // object follows the same MapLayer that already moved FolderProductState.
+        for (var i = 0; i < groups.Count; i++)
+        {
+            if (groups[i].GroupRange != plan.GroupRanges[i])
+                groups[i].GroupRange = plan.GroupRanges[i];
+        }
+
+        foreach (var item in timeline.Items.ToArray())
+        {
+            var mapped = plan.MapLayer(item.Layer);
+            if (mapped < 0)
+                throw new InvalidOperationException(
+                    "Panel move unexpectedly mapped an item outside the timeline.");
+
+            if (item.Layer != mapped)
+                item.Layer = mapped;
+        }
+
+        var settings = timeline.LayerSettings.Items
+            .Select(setting => setting with
+            {
+                Layer = plan.MapLayer(setting.Layer)
+            })
+            .OrderBy(setting => setting.Layer)
+            .ToImmutableList();
+
+        if (!settings.SequenceEqual(timeline.LayerSettings.Items))
+            timeline.LayerSettings.Items = settings;
 
         timeline.LayerSelection.Clear();
         timeline.RefreshTimelineLengthAndMaxLayer();
