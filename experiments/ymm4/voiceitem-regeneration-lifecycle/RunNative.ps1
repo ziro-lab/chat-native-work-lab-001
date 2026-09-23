@@ -37,6 +37,12 @@ try {
       Get-Content $observation
     }
 
+    $requestsPath=Join-Path $OutputDir 'fake-server-requests.jsonl'
+    if(Test-Path $requestsPath){
+      Write-Output '--- fake server requests ---'
+      Get-Content $requestsPath
+    }
+
     if($r.schema-ne'cnwl.voiceitem-regeneration-lifecycle.v2' -or
        $r.status-ne'PASS_VOICEITEM_REGENERATION_LIFECYCLE' -or
        $r.host-ne'4.56.1.0 Lite' -or
@@ -52,12 +58,13 @@ try {
       'voice_added_to_real_timeline',
       'voice_present_in_real_timeline',
       'voice_uses_fake_character',
-      'initial_voiceitem_generation_completed',
+      'serif_to_hatsuon_completed',
       'initial_voicevox_pronounce_created',
       'initial_pause_from_audio_query_nonzero',
+      'initial_voiceitem_generation_completed',
       'patched_pause_is_zero',
-      'public_voiceitem_regeneration_completed',
-      'patched_pause_survives_regeneration'
+      'public_voice_edit_lifecycle_completed',
+      'patched_pause_survives_edit_lifecycle'
     )
 
     if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count)"}
@@ -66,11 +73,7 @@ try {
       if($found.Count-ne1-or$found[0].passed-cne$true){throw "Missing/failed $id"}
     }
 
-    $requestsPath=Join-Path $OutputDir 'fake-server-requests.jsonl'
     if(-not(Test-Path $requestsPath)){throw 'Fake server received no requests'}
-    Write-Output '--- fake server requests ---'
-    Get-Content $requestsPath
-
     $requests=@(Get-Content $requestsPath|ForEach-Object { $_|ConvertFrom-Json })
     $synth=@($requests|Where-Object {$_.method-eq'POST' -and $_.path-eq'/synthesis'})
     $audioQuery=@($requests|Where-Object {$_.method-eq'POST' -and $_.path-eq'/audio_query'})
