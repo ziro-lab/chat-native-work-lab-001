@@ -58,13 +58,16 @@ try {
       'voice_added_to_real_timeline',
       'voice_present_in_real_timeline',
       'voice_uses_fake_character',
-      'serif_to_hatsuon_completed',
-      'initial_voicevox_pronounce_created',
-      'initial_pause_from_audio_query_nonzero',
       'initial_voiceitem_generation_completed',
+      'real_voiceitem_file_path_available',
+      'public_speaker_analysis_completed',
+      'pronounce_assigned_to_real_voiceitem',
+      'initial_pause_from_audio_query_nonzero',
       'patched_pause_is_zero',
-      'public_voice_edit_lifecycle_completed',
-      'patched_pause_survives_edit_lifecycle'
+      'public_speaker_regeneration_completed',
+      'regenerated_pronounce_assigned_to_real_voiceitem',
+      'patched_pause_survives_regeneration',
+      'regenerated_real_voiceitem_file_exists'
     )
 
     if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count)"}
@@ -79,7 +82,21 @@ try {
     $audioQuery=@($requests|Where-Object {$_.method-eq'POST' -and $_.path-eq'/audio_query'})
 
     if($synth.Count-lt2){throw "Expected at least two /synthesis requests, observed $($synth.Count)"}
-    if($audioQuery.Count-ne1){throw "Expected exactly one /audio_query, observed $($audioQuery.Count)"}
+    if($audioQuery.Count-lt1){throw "Expected at least one /audio_query, observed $($audioQuery.Count)"}
+
+    $synthIndexes=@()
+    $audioIndexes=@()
+    for($i=0;$i-lt$requests.Count;$i++){
+      if($requests[$i].method-eq'POST' -and $requests[$i].path-eq'/synthesis'){$synthIndexes+=$i}
+      if($requests[$i].method-eq'POST' -and $requests[$i].path-eq'/audio_query'){$audioIndexes+=$i}
+    }
+    $penultimateSynthIndex=$synthIndexes[$synthIndexes.Count-2]
+    $lastSynthIndex=$synthIndexes[-1]
+    $lastAudioIndex=$audioIndexes[-1]
+    if($lastAudioIndex-ge$lastSynthIndex){throw 'Unexpected /audio_query at or after final synthesis'}
+    if($lastAudioIndex-gt$penultimateSynthIndex){
+      throw 'Final patched synthesis was preceded by a new /audio_query re-analysis'
+    }
 
     $firstBody=$synth[0].body|ConvertFrom-Json
     $lastBody=$synth[-1].body|ConvertFrom-Json
