@@ -72,6 +72,8 @@ try {
       'correction_committed_as_single_record',
       'corrected_state_after_apply',
       'timeline_view_found_for_history_input',
+      'manager_public_undo_available',
+      'manager_public_redo_available',
       'one_user_undo_event',
       'one_plugin_undo_callback',
       'undo_restores_baseline_pronounce',
