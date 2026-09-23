@@ -87,6 +87,17 @@ internal static class Probe
             styleProperty?.SetValue(parameter, 1);
 
             var query = new VOICEVOXAudioQuery();
+            SetIfPresent(query, "SpeedScale", 1.0);
+            SetIfPresent(query, "PitchScale", 0.0);
+            SetIfPresent(query, "IntonationScale", 1.0);
+            SetIfPresent(query, "VolumeScale", 1.0);
+            SetIfPresent(query, "PrePhonemeLength", 0.1);
+            SetIfPresent(query, "PostPhonemeLength", 0.1);
+            SetIfPresent(query, "PauseLengthScale", 1.0);
+            SetIfPresent(query, "OutputSamplingRate", 24000);
+            SetIfPresent(query, "OutputStereo", false);
+            SetIfPresent(query, "Kana", "ア'、");
+
             var phrase = new VOICEVOXAccentPhrase { Accent = 1 };
             phrase.Moras.Add(new VOICEVOXMora
             {
@@ -112,6 +123,13 @@ internal static class Probe
                 ?? throw new InvalidOperationException("VOICEVOXVoicePronounce construction failed.");
             if (pronounceObject is not IVoicePronounce pronounce)
                 throw new InvalidOperationException("Pronounce object does not implement IVoicePronounce.");
+
+            var queryHasErrors = ReadBoolProperty(query, "HasErrors");
+            var pronounceHasErrors = ReadBoolProperty(pronounceObject, "HasErrors");
+            var parameterHasErrors = ReadBoolProperty(parameter, "HasErrors");
+            Check("query_has_no_errors", queryHasErrors != true);
+            Check("pronounce_has_no_errors", pronounceHasErrors != true);
+            Check("parameter_has_no_errors", parameterHasErrors != true);
 
             var wav = Path.Combine(output, "direct.wav");
             IVoicePronounce? returned = null;
@@ -145,6 +163,18 @@ internal static class Probe
                 pronounceType = pronounceObject.GetType().FullName,
                 returnedPronounceType = returned?.GetType().FullName,
                 suppliedPauseVowelLength = phrase.PauseMora?.VowelLength,
+                queryHasErrors,
+                pronounceHasErrors,
+                parameterHasErrors,
+                queryProperties = query.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(x => x.GetIndexParameters().Length == 0)
+                    .ToDictionary(
+                        x => x.Name,
+                        x =>
+                        {
+                            try { return x.GetValue(query)?.ToString(); }
+                            catch { return "<error>"; }
+                        }),
                 wavExists = File.Exists(wav),
                 wavLength = File.Exists(wav) ? new FileInfo(wav).Length : 0,
                 synthesisError = synthesisError?.ToString()
@@ -159,6 +189,29 @@ internal static class Probe
         {
             Write("FAIL_VOICEVOX_DIRECT_SYNTHESIS_PLUGIN", ex.ToString());
         }
+    }
+
+    static void SetIfPresent(object target, string name, object? value)
+    {
+        var property = target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+        if (property?.SetMethod?.IsPublic != true)
+            return;
+
+        var targetType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+        object? converted = value;
+        if (value is not null && !targetType.IsInstanceOfType(value))
+            converted = Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+        property.SetValue(target, converted);
+    }
+
+    static bool? ReadBoolProperty(object target, string name)
+    {
+        try
+        {
+            var p = target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+            return p?.GetValue(target) is bool value ? value : null;
+        }
+        catch { return null; }
     }
 
     static void Check(string id, bool passed) => requirements.Add(new { id, passed });
