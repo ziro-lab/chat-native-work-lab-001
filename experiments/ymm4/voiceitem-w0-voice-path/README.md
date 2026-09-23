@@ -16,9 +16,11 @@ The fake backend records the exact HTTP request sequence between explicit test-o
 
 PASS means:
 
-- all three real VoiceItems complete normal `CreateVoiceFileAsync()`;
+- baseline and Serif-tagged real VoiceItems complete normal `CreateVoiceFileAsync()`;
 - the official parser sees the expected zero-wait marker in the Serif-tagged case;
-- each case has an isolated backend request trace and at least one synthesis request;
+- the Hatsuon-tagged case is attempted and records either success or the real host error;
+- each case has an isolated backend request trace;
+- baseline and Serif-tagged cases each reach synthesis;
 - VoiceItem/Hatsuon/Pronounce state is recorded.
 
 PASS does **not** mean the marker already solves boundary mapping. The recorded differences determine the next product design.
