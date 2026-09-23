@@ -71,6 +71,15 @@ internal static class Probe
             Check("voicevox_audioquery_public", IsPublicReadable(audioQueryMember) && IsPublicWritable(audioQueryMember));
 
             var audioQueryType = MemberType(audioQueryMember);
+            var concreteAudioQueryType = audioQueryType.IsInterface || audioQueryType.IsAbstract
+                ? assemblies.SelectMany(SafeTypes)
+                    .Where(t => audioQueryType.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+                    .OrderBy(t => t.FullName)
+                    .FirstOrDefault()
+                : audioQueryType;
+            Check("voicevox_audioquery_concrete_found", concreteAudioQueryType is not null);
+            concreteAudioQueryType ??= throw new InvalidOperationException($"No concrete implementation for {audioQueryType.FullName}");
+
             var accentPhrasesMember = FindMember(audioQueryType, "AccentPhrases")
                 ?? FindMember(audioQueryType, "accent_phrases")
                 ?? throw new MissingMemberException(audioQueryType.FullName, "AccentPhrases");
@@ -99,7 +108,7 @@ internal static class Probe
             bool nestedRoundTrip = TryBuildNested(
                 voiceVoxPronounceType,
                 audioQueryMember,
-                audioQueryType,
+                concreteAudioQueryType,
                 accentPhrasesMember,
                 phraseType,
                 pauseMoraMember,
@@ -145,6 +154,7 @@ internal static class Probe
                 audioQuery = new
                 {
                     type = audioQueryType.FullName,
+                    concreteType = concreteAudioQueryType.FullName,
                     properties = audioQueryType.GetProperties(BindingFlags.Instance | BindingFlags.Public)
                         .Select(DescribeProperty).ToArray()
                 },
