@@ -72,6 +72,10 @@ internal static class Probe
             }
             """);
 
+            engine.SpeakersJsonCache = new JArray(speakerJson).ToString(Newtonsoft.Json.Formatting.None);
+            Check("fake_engine_characters_contains_speaker",
+                engine.Characters.Any(x => x.SpeakerUuid == fakeSpeakerUuid));
+
             var character = new VOICEVOXCharacter(
                 speakerJson,
                 Array.Empty<VOICEVOXSpeakerInfo>(),
