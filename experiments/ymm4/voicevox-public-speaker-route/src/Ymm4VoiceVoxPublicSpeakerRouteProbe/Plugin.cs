@@ -88,8 +88,14 @@ internal static class Probe
                 BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             var predicate0Il = predicate0 is null ? [] : Decode(predicate0);
             var predicate1Il = predicate1 is null ? [] : Decode(predicate1);
+            var predicate2 = displayClass?.GetMethod("<FindEngine>b__2",
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            var predicate2Il = predicate2 is null ? [] : Decode(predicate2);
 
             var engineType = asm.GetType("YukkuriMovieMaker.Voice.VOICEVOXEngine");
+            var charactersGetter = engineType?.GetProperty("Characters",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetMethod;
+            var charactersGetterIl = charactersGetter is null ? [] : Decode(charactersGetter);
             var speakerInfosProperty = engineType?.GetProperty("SpeakerInfos",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             var speakersCacheProperty = engineType?.GetProperty("SpeakersJsonCache",
@@ -144,6 +150,10 @@ internal static class Probe
                     findEnginePredicate0IL = predicate0Il,
                     findEnginePredicate1 = predicate1?.ToString(),
                     findEnginePredicate1IL = predicate1Il,
+                    findEnginePredicate2 = predicate2?.ToString(),
+                    findEnginePredicate2IL = predicate2Il,
+                    charactersGetter = charactersGetter?.ToString(),
+                    charactersGetterIL = charactersGetterIl,
                     engineSpeakerInfoSurface = new
                     {
                         engineType = engineType?.FullName,
