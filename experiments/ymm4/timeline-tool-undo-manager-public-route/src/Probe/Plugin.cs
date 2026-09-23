@@ -12,75 +12,50 @@ using YukkuriMovieMaker.UndoRedo;
 
 namespace Ymm4TimelineToolUndoManagerPublicRouteProbe;
 
-public sealed class BootstrapEntry : ILocalizePlugin
+public sealed class PluginEntry : ILocalizePlugin
 {
-    public string Name => "CNWL Timeline Undo Public Route Bootstrap";
+    public string Name => "CNWL Timeline Undo Public Route";
     public void SetCulture(CultureInfo cultureInfo) => Probe.Schedule();
-}
-
-public sealed class UndoRouteTool
-{
-    public string Name => Probe.ToolName;
-    public Type ViewModelType => typeof(UndoRouteViewModel);
-    public Type ViewType => typeof(UndoRouteView);
-    public bool AllowMultipleInstances => false;
-    public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
-    public int DefaultOrder => 990;
 }
 
 public sealed class ControlTool : IToolPlugin
 {
     public string Name => Probe.ControlToolName;
-    public Type ViewModelType => typeof(ControlViewModel);
-    public Type ViewType => typeof(UndoRouteView);
+    public Type ViewModelType => typeof(ControlVm);
+    public Type ViewType => typeof(ProbeView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
 }
 
-public sealed class UndoRouteView : UserControl
+public sealed class TimelineUndoTool : IToolPlugin
 {
-    public UndoRouteView() => Content = new TextBlock { Text = Probe.ToolName };
+    public string Name => Probe.ToolName;
+    public Type ViewModelType => typeof(TimelineUndoVm);
+    public Type ViewType => typeof(ProbeView);
+    public bool AllowMultipleInstances => false;
+    public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
 }
 
-public sealed class ControlViewModel : IToolViewModel
+public sealed class ProbeView : UserControl
+{
+    public ProbeView() => Content = new TextBlock { Text = "CNWL timeline undo route" };
+}
+
+public sealed class ControlVm : IToolViewModel
 {
     public string Title => Probe.ControlToolName;
     public bool CanSuspend => false;
     public ToolState SaveState() => new() { Title = Title };
     public void LoadState(ToolState stateData) { }
-
-    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged
-    {
-        add { }
-        remove { }
-    }
-
-    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested
-    {
-        add { }
-        remove { }
-    }
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested { add { } remove { } }
 }
 
-public sealed class UndoRouteViewModel : IToolViewModel, ITimelineToolViewModel
+// Public reference implementations use ITimelineToolViewModel directly;
+// do not add IToolViewModel unless the host requires it.
+public sealed class TimelineUndoVm : ITimelineToolViewModel
 {
-    public string Title => Probe.ToolName;
-    public bool CanSuspend => false;
-    public ToolState SaveState() => new() { Title = Title };
-    public void LoadState(ToolState stateData) { }
     public void SetTimelineToolInfo(TimelineToolInfo info) => Probe.Accept(info);
-
-    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged
-    {
-        add { }
-        remove { }
-    }
-
-    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested
-    {
-        add { }
-        remove { }
-    }
 }
 
 internal static class Probe
@@ -89,7 +64,6 @@ internal static class Probe
     internal const string ControlToolName = "CNWL Undo Public Control";
 
     static bool scheduled;
-    static bool controlLogged;
     static string output = "";
     static readonly List<object> requirements = [];
 
@@ -102,7 +76,7 @@ internal static class Probe
         scheduled = true;
         output = Path.GetFullPath(dir);
         Directory.CreateDirectory(output);
-        Application.Current.Dispatcher.BeginInvoke(new Action(Start), DispatcherPriority.ApplicationIdle);
+        Application.Current.Dispatcher.BeginInvoke(new Action(Start));
     }
 
     internal static void Accept(TimelineToolInfo info)
@@ -136,22 +110,7 @@ internal static class Probe
                     undoRedoManagerType = manager?.GetType().FullName,
                     infoProperties = info.GetType()
                         .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                        .Select(p => new
-                        {
-                            p.Name,
-                            type = p.PropertyType.FullName,
-                            publicGet = p.GetMethod?.IsPublic == true
-                        }).ToArray(),
-                    managerPublicMethods = managerType
-                        .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                        .Where(m => !m.IsSpecialName)
-                        .Select(m => new
-                        {
-                            m.Name,
-                            returnType = m.ReturnType.FullName,
-                            parameters = m.GetParameters().Select(p => p.ParameterType.FullName).ToArray()
-                        })
-                        .OrderBy(x => x.Name)
+                        .Select(p => new { p.Name, type = p.PropertyType.FullName, publicGet = p.GetMethod?.IsPublic == true })
                         .ToArray()
                 }, new JsonSerializerOptions { WriteIndented = true }));
 
@@ -163,70 +122,15 @@ internal static class Probe
         }
     }
 
-    static void DumpPluginSurface()
-    {
-        var assembly = typeof(UndoRouteTool).Assembly;
-        var toolTypes = assembly.GetTypes()
-            .Where(t => !t.IsAbstract && typeof(IToolPlugin).IsAssignableFrom(t))
-            .OrderBy(t => t.FullName)
-            .Select(t =>
-            {
-                object? instance = null;
-                string? error = null;
-                try { instance = Activator.CreateInstance(t); }
-                catch (Exception ex) { error = ex.GetBaseException().ToString(); }
-
-                string? Read(string name)
-                {
-                    try { return t.GetProperty(name)?.GetValue(instance)?.ToString(); }
-                    catch (Exception ex) { return "<error:" + ex.GetBaseException().Message + ">"; }
-                }
-
-                return new
-                {
-                    type = t.FullName,
-                    isPublic = t.IsPublic || t.IsNestedPublic,
-                    constructed = instance is not null,
-                    constructionError = error,
-                    name = Read("Name"),
-                    viewModelType = Read("ViewModelType"),
-                    viewType = Read("ViewType"),
-                    allowMultipleInstances = Read("AllowMultipleInstances"),
-                    defaultGroupName = Read("DefaultGroupName")
-                };
-            }).ToArray();
-
-        File.WriteAllText(
-            Path.Combine(output, "plugin-surface.json"),
-            JsonSerializer.Serialize(new
-            {
-                host = "4.56.1.0 Lite",
-                iToolPlugin = typeof(IToolPlugin).GetMembers()
-                    .OrderBy(m => m.Name)
-                    .Select(m => new { m.MemberType, m.Name, text = m.ToString() })
-                    .ToArray(),
-                iToolViewModel = typeof(IToolViewModel).GetMembers()
-                    .OrderBy(m => m.Name)
-                    .Select(m => new { m.MemberType, m.Name, text = m.ToString() })
-                    .ToArray(),
-                iTimelineToolViewModel = typeof(ITimelineToolViewModel).GetMembers()
-                    .OrderBy(m => m.Name)
-                    .Select(m => new { m.MemberType, m.Name, text = m.ToString() })
-                    .ToArray(),
-                toolTypes
-            }, new JsonSerializerOptions { WriteIndented = true }));
-    }
-
     static void Start()
     {
-        int ticks = 0;
-        bool created = false;
-        bool attemptedOpen = false;
-
         var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle)
         {
-            Interval = TimeSpan.FromMilliseconds(300)
+            Interval = TimeSpan.FromMilliseconds(400)
         };
+        int ticks = 0;
+        bool created = false;
+        bool openAttempted = false;
 
         timer.Tick += (_, _) =>
         {
@@ -253,45 +157,49 @@ internal static class Probe
                     {
                         created = true;
                         main.GetType().GetMethod("CreateProject", Type.EmptyTypes)?.Invoke(main, null);
-                        return;
+                        continue;
                     }
-
                     if (active is null)
                         continue;
 
-                    if (!controlLogged)
-                    {
-                        var control = FindMenuItem(main, ControlToolName);
-                        if (control is not null)
-                        {
-                            controlLogged = true;
-                            Log("control tool menu item observed type=" + control.GetType().FullName);
-                        }
-                    }
+                    var prop = main.GetType().GetProperty(
+                        "ToolMenuItems",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (prop?.GetValue(main) is not IEnumerable items)
+                        continue;
 
-                    if (!attemptedOpen)
-                    {
-                        var item = FindMenuItem(main, ToolName);
-                        if (item is null)
-                        {
-                            Log("tool menu item not available yet");
-                            continue;
-                        }
+                    var found = new Dictionary<string, object>();
+                    foreach (var item in items.Cast<object>())
+                        Visit(item, found, 0);
 
-                        DumpMenuItem(item);
-                        Check("tool_menu_item_found", true);
-                        var invoked = TryInvokeMenuItem(item);
+                    if (found.ContainsKey(ControlToolName))
+                        Log("control tool observed");
+
+                    if (!found.TryGetValue(ToolName, out var target))
+                        continue;
+
+                    Check("tool_menu_item_found", true);
+
+                    if (!openAttempted)
+                    {
+                        openAttempted = true;
+                        var invoked = TryInvoke(target);
                         Check("tool_menu_open_invoked", invoked);
-                        attemptedOpen = invoked;
-                        Log("menu open attempted invoked=" + invoked);
+                        Log("target invoke=" + invoked);
+                        if (!invoked)
+                        {
+                            timer.Stop();
+                            Write("FAIL_TIMELINE_TOOL_UNDO_MANAGER_PUBLIC_ROUTE", "Target tool menu item could not be invoked.");
+                            return;
+                        }
                     }
                 }
 
-                if (ticks > 100)
+                if (ticks >= 100)
                 {
                     timer.Stop();
                     Write("FAIL_TIMELINE_TOOL_UNDO_MANAGER_PUBLIC_ROUTE",
-                        "Host did not call SetTimelineToolInfo before timeout.");
+                        "Host did not deliver TimelineToolInfo before timeout.");
                 }
             }
             catch (Exception ex)
@@ -304,83 +212,55 @@ internal static class Probe
         timer.Start();
     }
 
-    static object? FindMenuItem(object main, string name)
-    {
-        var prop = main.GetType().GetProperty(
-            "ToolMenuItems",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (prop?.GetValue(main) is not IEnumerable roots)
-            return null;
-
-        foreach (var root in roots.Cast<object>())
-        {
-            var found = Visit(root, name, 0);
-            if (found is not null)
-                return found;
-        }
-        return null;
-    }
-
-    static object? Visit(object item, string name, int depth)
+    static void Visit(object item, Dictionary<string, object> found, int depth)
     {
         if (depth > 8)
-            return null;
+            return;
 
-        var label = GetLabel(item);
-        if (label == name)
-            return item;
-
-        foreach (var propertyName in new[] { "Children", "Items" })
+        var type = item.GetType();
+        string? label = null;
+        foreach (var name in new[] { "Header", "Title", "Name" })
         {
             try
             {
-                if (item.GetType().GetProperty(propertyName)?.GetValue(item) is IEnumerable children)
+                var value = type.GetProperty(name)?.GetValue(item)?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
                 {
-                    foreach (var child in children.Cast<object>())
-                    {
-                        var found = Visit(child, name, depth + 1);
-                        if (found is not null)
-                            return found;
-                    }
+                    label = value;
+                    break;
                 }
             }
             catch { }
         }
 
-        return null;
-    }
+        if (label == ToolName || label == ControlToolName)
+            found[label] = item;
 
-    static string? GetLabel(object item)
-    {
-        foreach (var name in new[] { "Header", "Title", "Name" })
+        foreach (var childName in new[] { "Children", "Items" })
         {
             try
             {
-                var value = item.GetType().GetProperty(name)?.GetValue(item)?.ToString();
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value;
+                if (type.GetProperty(childName)?.GetValue(item) is IEnumerable children)
+                    foreach (var child in children.Cast<object>())
+                        Visit(child, found, depth + 1);
             }
             catch { }
         }
-        return null;
     }
 
-    static bool TryInvokeMenuItem(object item)
+    static bool TryInvoke(object item)
     {
-        if (item is ICommand direct)
+        if (item is ICommand direct && direct.CanExecute(null))
         {
-            if (direct.CanExecute(null))
-            {
-                direct.Execute(null);
-                return true;
-            }
+            direct.Execute(null);
+            return true;
         }
 
-        foreach (var p in item.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        foreach (var property in item.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
         {
             try
             {
-                if (p.GetIndexParameters().Length == 0 && p.GetValue(item) is ICommand command)
+                if (property.GetIndexParameters().Length == 0 && property.GetValue(item) is ICommand command)
                 {
                     foreach (var parameter in new object?[] { null, item })
                     {
@@ -394,56 +274,7 @@ internal static class Probe
             }
             catch { }
         }
-
-        foreach (var m in item.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-        {
-            if (m.GetParameters().Length != 0)
-                continue;
-            if (!(m.Name.Contains("Open", StringComparison.OrdinalIgnoreCase)
-               || m.Name.Contains("Execute", StringComparison.OrdinalIgnoreCase)
-               || m.Name.Contains("Activate", StringComparison.OrdinalIgnoreCase)
-               || m.Name.Contains("Show", StringComparison.OrdinalIgnoreCase)))
-                continue;
-            try
-            {
-                m.Invoke(item, null);
-                return true;
-            }
-            catch { }
-        }
-
         return false;
-    }
-
-    static void DumpMenuItem(object? item)
-    {
-        if (item is null)
-            return;
-
-        var type = item.GetType();
-        File.WriteAllText(
-            Path.Combine(output, "menu-item-surface.json"),
-            JsonSerializer.Serialize(new
-            {
-                type = type.FullName,
-                label = GetLabel(item),
-                properties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .Where(p => p.GetIndexParameters().Length == 0)
-                    .Select(p => new
-                    {
-                        p.Name,
-                        type = p.PropertyType.FullName,
-                        publicGet = p.GetMethod?.IsPublic == true
-                    }).ToArray(),
-                methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .Where(m => !m.IsSpecialName)
-                    .Select(m => new
-                    {
-                        m.Name,
-                        visibility = m.IsPublic ? "public" : "nonpublic",
-                        parameters = m.GetParameters().Select(p => p.ParameterType.FullName).ToArray()
-                    }).ToArray()
-            }, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     static void Log(string text) =>
