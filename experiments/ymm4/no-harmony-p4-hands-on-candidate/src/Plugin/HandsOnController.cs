@@ -188,14 +188,33 @@ internal sealed class HandsOnController : IDisposable
                 GroupRange = 1
             };
 
-            if (!timeline.TryAddItems(
-                    [movingMarker, stationaryMarker, laterMarker],
-                    0,
-                    0,
-                    isItemSelectionEnabled: false))
+            foreach (var marker in new[]
+            {
+                movingMarker,
+                stationaryMarker,
+                laterMarker
+            })
+            {
+                if (!timeline.TryAddItems(
+                        [marker],
+                        marker.Frame,
+                        marker.Layer,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"S4 marker GroupItem could not be added at L{marker.Layer}.");
+                }
+            }
+
+            if (movingMarker.Layer != 2
+                || stationaryMarker.Layer != 4
+                || laterMarker.Layer != 7)
             {
                 throw new InvalidOperationException(
-                    "S4 marker GroupItems could not be added.");
+                    "S4 marker fixture changed layer placement: "
+                    + $"moving={movingMarker.Layer}, "
+                    + $"stationary={stationaryMarker.Layer}, "
+                    + $"later={laterMarker.Layer}.");
             }
 
             var color2 = Color.FromRgb(0x31, 0x42, 0x53);
