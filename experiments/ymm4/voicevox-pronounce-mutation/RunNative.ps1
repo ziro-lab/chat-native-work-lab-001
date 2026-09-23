@@ -26,6 +26,7 @@ try {
     'voiceitem_pronounce_public_readwrite',
     'voicevox_pronounce_type_found',
     'voicevox_audioquery_public',
+    'voicevox_audioquery_concrete_found',
     'audioquery_accentphrases_public',
     'accentphrase_pausemora_public',
     'mora_vowellength_public_writable',
