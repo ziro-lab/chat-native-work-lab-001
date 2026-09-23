@@ -445,14 +445,14 @@ internal static class HandsOnHostAccess
             var item = Host.Item(entry)
                 ?? throw new InvalidOperationException(
                     "Timeline item VM has no IItem.");
-            var leftRaw = Host.Get(entry, "Left")
+            var leftRaw = PublicProperty(entry, "Left")
                 ?? throw new MissingMemberException(
                     entry.GetType().FullName,
-                    "Left");
-            var widthRaw = Host.Get(entry, "Width")
+                    "public Left");
+            var widthRaw = PublicProperty(entry, "Width")
                 ?? throw new MissingMemberException(
                     entry.GetType().FullName,
-                    "Width");
+                    "public Width");
 
             var left = Convert.ToDouble(leftRaw);
             var width = Convert.ToDouble(widthRaw);
