@@ -344,9 +344,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          package_sha="$(grep '^ymme_sha256=' canonical/manifest.txt | cut -d= -f2-)"
-          dll_sha="$(grep '^dll_sha256=' canonical/manifest.txt | cut -d= -f2-)"
-          version="$(grep '^release_version=' canonical/manifest.txt | cut -d= -f2-)"
+          package_sha="$(grep '^ymme_sha256=' canonical/manifest.txt | cut -d= -f2- | tr -d '\r')"
+          dll_sha="$(grep '^dll_sha256=' canonical/manifest.txt | cut -d= -f2- | tr -d '\r')"
+          version="$(grep '^release_version=' canonical/manifest.txt | cut -d= -f2- | tr -d '\r')"
 
           test "$version" = "0.1.0"
           test -n "$package_sha"
