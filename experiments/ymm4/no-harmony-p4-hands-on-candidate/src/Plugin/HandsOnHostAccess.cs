@@ -18,6 +18,11 @@ using YukkuriMovieMaker.ViewModels;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
+internal readonly record struct TimelineItemGeometry(
+    IItem Item,
+    double Left,
+    double Width);
+
 internal static class HandsOnHostAccess
 {
     internal static object? PublicProperty(object target, string name) =>
@@ -419,6 +424,54 @@ internal static class HandsOnHostAccess
 
         timeline.LayerSelection.Clear();
         timeline.RefreshTimelineLengthAndMaxLayer();
+    }
+
+    internal static IReadOnlyList<TimelineItemGeometry>
+        ReadTimelineItemGeometry(object timelineViewModel)
+    {
+        ArgumentNullException.ThrowIfNull(timelineViewModel);
+
+        if (PublicProperty(timelineViewModel, "Items")
+            is not IEnumerable items)
+        {
+            throw new InvalidOperationException(
+                "TimelineViewModel.Items is not enumerable.");
+        }
+
+        var result = new List<TimelineItemGeometry>();
+
+        foreach (var entry in items.Cast<object>())
+        {
+            var item = Host.Item(entry)
+                ?? throw new InvalidOperationException(
+                    "Timeline item VM has no IItem.");
+            var leftRaw = Host.Get(entry, "Left")
+                ?? throw new MissingMemberException(
+                    entry.GetType().FullName,
+                    "Left");
+            var widthRaw = Host.Get(entry, "Width")
+                ?? throw new MissingMemberException(
+                    entry.GetType().FullName,
+                    "Width");
+
+            var left = Convert.ToDouble(leftRaw);
+            var width = Convert.ToDouble(widthRaw);
+
+            if (!double.IsFinite(left)
+                || !double.IsFinite(width)
+                || width < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid item geometry for F{item.Frame}/L{item.Layer}: left={left}, width={width}.");
+            }
+
+            result.Add(new TimelineItemGeometry(
+                item,
+                left,
+                width));
+        }
+
+        return Array.AsReadOnly(result.ToArray());
     }
 
     internal static FrameworkElement FindLayerElement(FrameworkElement labels, int layer)
