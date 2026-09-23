@@ -12,6 +12,7 @@ using YukkuriMovieMaker.Commons;
 using YukkuriMovieMaker.Player.Video;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project.Items;
+using YmmTextDecoration = YukkuriMovieMaker.Commons.TextDecoration;
 
 namespace Ymm4TextDecorationZeroScaleProbe;
 
@@ -52,7 +53,7 @@ internal static class Probe
             using var visible = new TextRenderer(context, "A§B", []);
             using var hidden = new TextRenderer(context, "A§B",
             [
-                new TextDecoration(
+                new YmmTextDecoration(
                     Start: 1,
                     Length: 1,
                     IsBold: false,
@@ -130,7 +131,7 @@ internal static class Probe
         readonly MethodInfo update;
         readonly PropertyInfo outputs;
 
-        internal TextRenderer(IGraphicsDevicesAndContext context, string text, ImmutableList<TextDecoration> decorations)
+        internal TextRenderer(IGraphicsDevicesAndContext context, string text, ImmutableList<YmmTextDecoration> decorations)
         {
             this.context = context;
             item = new TextItem
