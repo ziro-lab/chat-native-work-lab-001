@@ -98,6 +98,17 @@ class Handler(BaseHTTPRequestHandler):
                 "version": "0.0.0",
                 "supported_features": {"permitted_synthesis_morphing": "SELF_ONLY"}
             }])
+        elif parsed.path == "/speaker_info":
+            self._json({
+                "policy": "",
+                "portrait": "",
+                "style_infos": [{
+                    "id": 1,
+                    "icon": "",
+                    "portrait": None,
+                    "voice_samples": ["", "", ""]
+                }]
+            })
         elif parsed.path == "/is_initialized_speaker":
             self._json(True)
         elif parsed.path == "/engine_manifest":
