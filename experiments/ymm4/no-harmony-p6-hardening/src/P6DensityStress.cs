@@ -10,6 +10,7 @@ internal sealed partial class HandsOnController
     {
         ScheduleP6DensityStressSmoke();
         ScheduleP6HistoryStressSmoke();
+        ScheduleP6LifecycleStressSmoke();
     }
 
     private void ScheduleP6DensityStressSmoke()
