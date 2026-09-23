@@ -221,6 +221,22 @@ internal static class HandsOnRuntime
                 || string.Equals(
                     Environment.GetEnvironmentVariable("CNWL_P4_S5_INTEGRATION_SMOKE"),
                     "1",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P5_COMPATIBILITY_SMOKE"),
+                    "1",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P5_MEDIA_COMPATIBILITY_SMOKE"),
+                    "1",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P5_THIRD_PARTY_SMOKE"),
+                    "1",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P5_CONFIGURED_VOICE_SMOKE"),
+                    "1",
                     StringComparison.Ordinal);
 
             // The ordinary startup smoke keeps its VoiceItem fixture. Structural

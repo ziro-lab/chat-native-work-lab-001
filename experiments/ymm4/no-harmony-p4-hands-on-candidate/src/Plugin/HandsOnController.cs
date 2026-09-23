@@ -94,6 +94,1264 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS4IntegrationSmoke();
         ScheduleS5CoordinateSmoke();
         ScheduleS5IntegrationSmoke();
+        ScheduleP5CompatibilitySmoke();
+        ScheduleP5MediaCompatibilitySmoke();
+        ScheduleP5ThirdPartyCompatibilitySmoke();
+        ScheduleP5ConfiguredVoiceSmoke();
+    }
+
+    private void ScheduleP5ConfiguredVoiceSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_CONFIGURED_VOICE_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5ConfiguredVoiceSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5ConfiguredVoiceSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(700);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 configured Voice smoke must start from an empty Timeline.");
+
+            var wav = Environment.GetEnvironmentVariable(
+                "CNWL_P5_VOICE_WAV");
+            if (string.IsNullOrWhiteSpace(wav))
+                throw new InvalidOperationException(
+                    "CNWL_P5_VOICE_WAV is missing.");
+
+            wav = Path.GetFullPath(wav);
+            if (!File.Exists(wav))
+                throw new FileNotFoundException(
+                    "Configured Voice WAV fixture missing.",
+                    wav);
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            static Type LoadedType(string fullName) =>
+                AppDomain.CurrentDomain
+                    .GetAssemblies()
+                    .SelectMany(assembly =>
+                    {
+                        try { return assembly.GetTypes(); }
+                        catch { return Type.EmptyTypes; }
+                    })
+                    .SingleOrDefault(type =>
+                        string.Equals(
+                            type.FullName,
+                            fullName,
+                            StringComparison.Ordinal))
+                ?? throw new TypeLoadException(fullName);
+
+            var speakerType = LoadedType(
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoiceSpeaker");
+            var parameterType = LoadedType(
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoiceParameter");
+            var descriptionType = LoadedType(
+                "YukkuriMovieMaker.Plugin.Voice.VoiceDescription");
+
+            var speaker =
+                speakerType.GetProperty(
+                    "Instance",
+                    System.Reflection.BindingFlags.Static
+                    | System.Reflection.BindingFlags.Public)
+                ?.GetValue(null)
+                ?? Activator.CreateInstance(speakerType)
+                ?? throw new InvalidOperationException(
+                    "RecordedVoiceSpeaker instance unavailable.");
+
+            var parameter = Activator.CreateInstance(parameterType)
+                ?? throw new InvalidOperationException(
+                    "RecordedVoiceParameter instance unavailable.");
+
+            parameterType.GetProperty("AudioFilePath")
+                ?.SetValue(parameter, wav);
+            parameterType.GetProperty("RecordsDirectory")
+                ?.SetValue(parameter, Path.GetDirectoryName(wav) ?? "");
+            parameterType.GetProperty("Text")
+                ?.SetValue(parameter, "CNWL configured voice");
+
+            var description = Activator.CreateInstance(
+                    descriptionType,
+                    [speaker])
+                ?? throw new InvalidOperationException(
+                    "VoiceDescription could not be created.");
+
+            var character = new Character
+            {
+                Name = "CNWL_P5_CONFIGURED_VOICE"
+            };
+
+            character.GetType()
+                .GetProperty("Voice")
+                ?.SetValue(character, description);
+            character.GetType()
+                .GetProperty("VoiceParameter")
+                ?.SetValue(character, parameter);
+
+            var voice = new VoiceItem(character)
+            {
+                Frame = 100,
+                Layer = 2,
+                Length = 30,
+                Serif = "CNWL configured voice",
+                Remark = "CNWL_P5_CONFIGURED_VOICE"
+            };
+
+            voice.GetType()
+                .GetProperty("VoiceParameter")
+                ?.SetValue(voice, parameter);
+
+            if (!timeline.TryAddItems(
+                    [voice],
+                    voice.Frame,
+                    voice.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice TryAddItems returned false.");
+            }
+
+            await Task.Delay(1000);
+
+            if (!timeline.Items.Any(item =>
+                    ReferenceEquals(item, voice)))
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice did not remain live.");
+            }
+
+            var geometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm)
+                    .SingleOrDefault(current =>
+                        ReferenceEquals(current.Item, voice));
+
+            if (geometry.Item is null
+                || !double.IsFinite(geometry.Left)
+                || !double.IsFinite(geometry.Width)
+                || geometry.Width <= 0)
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice public geometry missing.");
+            }
+
+            var folderId = Guid.Parse(
+                "dddddddd-eeee-ffff-0000-000000000001");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 Voice",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(700);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice fold owner mapping failed.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 configured Voice visual summary unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 1)
+                throw new InvalidOperationException(
+                    $"P5 expected 1 configured Voice timing band, got {visualSummary.TimingBandCount}.");
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            if (!timeline.SelectedItems.Any(item =>
+                    ReferenceEquals(item, voice)))
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice selection failed.");
+            }
+
+            // This is the history boundary that the synthetic unconfigured
+            // Voice fixture could not cross.
+            undo.Record();
+            await Task.Delay(1000);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(
+                        timeline.MaxLayer,
+                        timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(item => item.Layer)
+                        .ToDictionary(
+                            group => group.Key,
+                            group => group.Count()),
+                    [])
+                .Single(row =>
+                    row.FolderId == folderId);
+
+            var dragBlock = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 configured Voice folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(dragBlock, drop))
+                throw new InvalidOperationException(
+                    "P5 configured Voice block move was rejected.");
+
+            commands.MovePanelRows(dragBlock, drop);
+            await Task.Delay(550);
+
+            if (voice.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 configured Voice moved layer={voice.Layer}, expected 4.");
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            if (voice.Layer != 2)
+                throw new InvalidOperationException(
+                    $"P5 configured Voice Undo layer={voice.Layer}, expected 2.");
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            if (voice.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 configured Voice Redo layer={voice.Layer}, expected 4.");
+            AssertP5Folder(folderId, 3, 4);
+
+            WriteP5ConfiguredVoiceResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_CONFIGURED_VOICE",
+                        $"timeline={key}",
+                        "voice_backend=RecordedVoice",
+                        "voice_fixture=local_wav",
+                        "construct_add_live=1",
+                        "common_geometry=1",
+                        "fold_owner_mapping=1",
+                        "timing_summary=1",
+                        "folder_selection=1",
+                        "history_record=1",
+                        "block_move_undo_redo=1",
+                        "no_voice_specific_folder_adapter=true"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_configured_voice_smoke_error=" + ex);
+
+            WriteP5ConfiguredVoiceResult(
+                "FAIL_P5_CONFIGURED_VOICE\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteP5ConfiguredVoiceResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-configured-voice-result.txt"),
+            text);
+    }
+
+    private void ScheduleP5ThirdPartyCompatibilitySmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_THIRD_PARTY_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5ThirdPartyCompatibilitySmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5ThirdPartyCompatibilitySmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(700);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 third-party smoke must start from an empty Timeline.");
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            const string typeName = "YMM43D.Project.Items.LightItem";
+
+            var type = AppDomain.CurrentDomain
+                .GetAssemblies()
+                .SelectMany(assembly =>
+                {
+                    try { return assembly.GetTypes(); }
+                    catch { return Type.EmptyTypes; }
+                })
+                .SingleOrDefault(candidate =>
+                    string.Equals(
+                        candidate.FullName,
+                        typeName,
+                        StringComparison.Ordinal))
+                ?? throw new TypeLoadException(
+                    $"P5 third-party type not loaded: {typeName}.");
+
+            var raw = Activator.CreateInstance(type)
+                ?? throw new InvalidOperationException(
+                    "P5 third-party Activator returned null.");
+
+            if (raw is not IItem item)
+                throw new InvalidCastException(
+                    "P5 third-party LightItem is not IItem.");
+
+            SetP5Int(raw, "Frame", 80);
+            SetP5Int(raw, "Layer", 2);
+            SetP5Int(raw, "Length", 40);
+            SetP5StringIfPossible(
+                raw,
+                "Remark",
+                "CNWL_P5_THIRD_PARTY_LIGHT");
+
+            if (!timeline.TryAddItems(
+                    [item],
+                    item.Frame,
+                    item.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party TryAddItems returned false.");
+            }
+
+            await Task.Delay(900);
+
+            if (!timeline.Items.Any(current =>
+                    ReferenceEquals(current, item)))
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party item did not remain live.");
+            }
+
+            var beforeGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm)
+                    .SingleOrDefault(current =>
+                        ReferenceEquals(current.Item, item));
+
+            if (beforeGeometry.Item is null
+                || !double.IsFinite(beforeGeometry.Left)
+                || !double.IsFinite(beforeGeometry.Width)
+                || beforeGeometry.Width <= 0)
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party public geometry missing.");
+            }
+
+            var folderId = Guid.Parse(
+                "cccccccc-dddd-eeee-ffff-000000000001");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 Third Party",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(750);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party fold owner mapping failed.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 third-party visual summary unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 1)
+                throw new InvalidOperationException(
+                    $"P5 expected 1 third-party timing band, got {visualSummary.TimingBandCount}.");
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            if (!timeline.SelectedItems.Any(selected =>
+                    ReferenceEquals(selected, item)))
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party folder selection failed.");
+            }
+
+            undo.Record();
+            await Task.Delay(250);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(
+                        timeline.MaxLayer,
+                        timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(current => current.Layer)
+                        .ToDictionary(
+                            group => group.Key,
+                            group => group.Count()),
+                    [])
+                .Single(row =>
+                    row.FolderId == folderId);
+
+            var dragBlock = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 third-party folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(dragBlock, drop))
+                throw new InvalidOperationException(
+                    "P5 third-party block move was rejected.");
+
+            commands.MovePanelRows(dragBlock, drop);
+            await Task.Delay(500);
+
+            if (item.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 third-party moved layer={item.Layer}, expected 4.");
+
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(450);
+
+            if (item.Layer != 2)
+                throw new InvalidOperationException(
+                    $"P5 third-party Undo layer={item.Layer}, expected 2.");
+
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(450);
+
+            if (item.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 third-party Redo layer={item.Layer}, expected 4.");
+
+            AssertP5Folder(folderId, 3, 4);
+
+            var afterGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm)
+                    .SingleOrDefault(current =>
+                        ReferenceEquals(current.Item, item));
+
+            if (afterGeometry.Item is null
+                || !double.IsFinite(afterGeometry.Left)
+                || !double.IsFinite(afterGeometry.Width)
+                || afterGeometry.Width <= 0)
+            {
+                throw new InvalidOperationException(
+                    "P5 third-party geometry missing after move.");
+            }
+
+            WriteP5ThirdPartyResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_THIRD_PARTY",
+                        $"timeline={key}",
+                        "source_repo=Dolphin-kun/YMM43D",
+                        "source_commit=a5fe44443d9b62912dec6861edf68cbdff9e7810",
+                        "source_license=MIT",
+                        "item_type=YMM43D.Project.Items.LightItem",
+                        "construct_add_live=1",
+                        "common_geometry=1",
+                        "fold_owner_mapping=1",
+                        "timing_summary=1",
+                        "folder_selection=1",
+                        "block_move_undo_redo=1",
+                        "no_type_specific_folder_adapter=true"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_third_party_smoke_error=" + ex);
+
+            WriteP5ThirdPartyResult(
+                "FAIL_P5_THIRD_PARTY\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteP5ThirdPartyResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-third-party-result.txt"),
+            text);
+    }
+
+    private void ScheduleP5MediaCompatibilitySmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_MEDIA_COMPATIBILITY_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5MediaCompatibilitySmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5MediaCompatibilitySmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 media compatibility smoke must start from an empty Timeline.");
+
+            string RequiredPath(string variable)
+            {
+                var value = Environment.GetEnvironmentVariable(variable);
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new InvalidOperationException(
+                        $"P5 media fixture variable missing: {variable}.");
+
+                var full = Path.GetFullPath(value);
+                if (!File.Exists(full))
+                    throw new FileNotFoundException(
+                        $"P5 media fixture does not exist: {full}.",
+                        full);
+                return full;
+            }
+
+            var imagePath = RequiredPath("CNWL_P5_IMAGE_FILE");
+            var audioPath = RequiredPath("CNWL_P5_AUDIO_FILE");
+            var videoPath = RequiredPath("CNWL_P5_VIDEO_FILE");
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            var image = new ImageItem(imagePath)
+            {
+                Frame = 40,
+                Layer = 2,
+                Remark = "CNWL_P5_REAL_IMAGE"
+            };
+            var audio = new AudioItem(audioPath)
+            {
+                Frame = 140,
+                Layer = 2,
+                Remark = "CNWL_P5_REAL_AUDIO"
+            };
+            var video = new VideoItem(videoPath)
+            {
+                Frame = 260,
+                Layer = 2,
+                Remark = "CNWL_P5_REAL_VIDEO"
+            };
+
+            IItem[] fixtures = [image, audio, video];
+
+            foreach (var item in fixtures)
+            {
+                if (item.Length <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"P5 {item.GetType().Name} did not derive a positive media length.");
+                }
+
+                if (!timeline.TryAddItems(
+                        [item],
+                        item.Frame,
+                        item.Layer,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 TryAddItems returned false for media-backed {item.GetType().Name}.");
+                }
+            }
+
+            await Task.Delay(1000);
+
+            foreach (var item in fixtures)
+            {
+                if (!timeline.Items.Any(current =>
+                        ReferenceEquals(current, item)))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 media-backed {item.GetType().Name} did not remain live.");
+                }
+            }
+
+            var geometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm);
+
+            foreach (var item in fixtures)
+            {
+                var current = geometry.SingleOrDefault(candidate =>
+                    ReferenceEquals(candidate.Item, item));
+
+                if (current.Item is null
+                    || !double.IsFinite(current.Left)
+                    || !double.IsFinite(current.Width)
+                    || current.Width <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"P5 media-backed public geometry missing for {item.GetType().Name}.");
+                }
+            }
+
+            var folderId = Guid.Parse(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 Media",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(750);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 media fold mapping did not map L2 to owner L1.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 media visual summary overlay is unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 3)
+            {
+                throw new InvalidOperationException(
+                    $"P5 expected 3 media timing bands, got {visualSummary.TimingBandCount}.");
+            }
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            if (timeline.SelectedItems.Count(selected =>
+                    fixtures.Any(fixture =>
+                        ReferenceEquals(selected, fixture)))
+                != 3)
+            {
+                throw new InvalidOperationException(
+                    "P5 media folder selection did not select all three fixtures.");
+            }
+
+            undo.Record();
+            await Task.Delay(300);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(
+                        timeline.MaxLayer,
+                        timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(item => item.Layer)
+                        .ToDictionary(
+                            group => group.Key,
+                            group => group.Count()),
+                    [])
+                .Single(row =>
+                    row.FolderId == folderId);
+
+            var block = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 media folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(block, drop))
+                throw new InvalidOperationException(
+                    "P5 media block move was rejected.");
+
+            commands.MovePanelRows(block, drop);
+            await Task.Delay(550);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 4);
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 2);
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 4);
+            AssertP5Folder(folderId, 3, 4);
+
+            var afterGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm);
+
+            foreach (var item in fixtures)
+            {
+                if (!afterGeometry.Any(current =>
+                        ReferenceEquals(current.Item, item)
+                        && double.IsFinite(current.Left)
+                        && double.IsFinite(current.Width)
+                        && current.Width > 0))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 media geometry missing after move for {item.GetType().Name}.");
+                }
+            }
+
+            WriteP5MediaResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_MEDIA_REALISM",
+                        $"timeline={key}",
+                        "media_types=ImageItem,AudioItem,VideoItem",
+                        $"image_length={image.Length}",
+                        $"audio_length={audio.Length}",
+                        $"video_length={video.Length}",
+                        "construct_from_real_file=3",
+                        "add_live_geometry=3",
+                        "fold_owner_mapping=3",
+                        "timing_summary=3",
+                        "folder_selection=3",
+                        "block_move_undo_redo=3",
+                        "no_type_specific_folder_adapter=true"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_media_compatibility_smoke_error=" + ex);
+
+            WriteP5MediaResult(
+                "FAIL_P5_MEDIA_REALISM\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteP5MediaResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-media-result.txt"),
+            text);
+    }
+
+    private void ScheduleP5CompatibilitySmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_COMPATIBILITY_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5CompatibilitySmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5CompatibilitySmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 compatibility smoke must start from a resource-free Timeline.");
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            var concreteTypes = typeof(IItem).Assembly
+                .GetTypes()
+                .Where(type =>
+                    type != typeof(IItem)
+                    && typeof(IItem).IsAssignableFrom(type)
+                    && !type.IsAbstract
+                    && type.GetConstructor(Type.EmptyTypes) is not null)
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .ToArray();
+
+            if (concreteTypes.Length != 13)
+                throw new InvalidOperationException(
+                    $"P5 expected 13 concrete parameterless IItem types, got {concreteTypes.Length}.");
+
+            var fixtures = new List<IItem>();
+
+            for (var index = 0; index < concreteTypes.Length; index++)
+            {
+                var type = concreteTypes[index];
+                var raw = Activator.CreateInstance(type)
+                    ?? throw new InvalidOperationException(
+                        $"P5 Activator returned null for {type.FullName}.");
+
+                if (raw is not IItem item)
+                    throw new InvalidCastException(
+                        $"P5 {type.FullName} is not IItem.");
+
+                var frame = 20 + index * 34;
+
+                SetP5Int(raw, "Frame", frame);
+                SetP5Int(raw, "Layer", 2);
+                SetP5Int(raw, "Length", 20);
+                SetP5StringIfPossible(
+                    raw,
+                    "Remark",
+                    "CNWL_P5_" + type.Name);
+
+                if (raw is YmmGroupItem group)
+                    group.GroupRange = 1;
+
+                if (!timeline.TryAddItems(
+                        [item],
+                        frame,
+                        2,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 TryAddItems returned false for {type.FullName}.");
+                }
+
+                fixtures.Add(item);
+            }
+
+            await Task.Delay(900);
+
+            if (timeline.Items.Count(item =>
+                    fixtures.Any(fixture =>
+                        ReferenceEquals(item, fixture)))
+                != 13)
+            {
+                throw new InvalidOperationException(
+                    "P5 not all 13 built-in fixtures remained live.");
+            }
+
+            var initialGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm);
+
+            foreach (var fixture in fixtures)
+            {
+                var geometry = initialGeometry.SingleOrDefault(
+                    current => ReferenceEquals(current.Item, fixture));
+
+                if (geometry.Item is null
+                    || !double.IsFinite(geometry.Left)
+                    || !double.IsFinite(geometry.Width)
+                    || geometry.Width < 0)
+                {
+                    throw new InvalidOperationException(
+                        $"P5 common public geometry missing for {fixture.GetType().FullName}.");
+                }
+            }
+
+            var folderId = Guid.Parse(
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 All Built-ins",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(750);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 fold mapping did not map fixture layer L2 to owner L1.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 visual summary overlay is unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 13)
+            {
+                throw new InvalidOperationException(
+                    $"P5 expected 13 hidden timing bands, got {visualSummary.TimingBandCount}.");
+            }
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            var selectedFixtureCount = timeline.SelectedItems.Count(
+                selected => fixtures.Any(fixture =>
+                    ReferenceEquals(selected, fixture)));
+
+            if (selectedFixtureCount != 13)
+            {
+                throw new InvalidOperationException(
+                    $"P5 folder selection selected {selectedFixtureCount}/13 fixture items.");
+            }
+
+            // VoiceItem without a configured speaker is intentionally treated
+            // as setup-required for native history recording. P4 already
+            // documented that YMM4 resource refresh can reject such a synthetic
+            // Voice fixture at Record(). Verify common fold/geometry/selection
+            // above, then remove only that zero-resource fixture before the
+            // history-bearing block-move check.
+            var voice = fixtures.Single(item =>
+                item.GetType() == typeof(VoiceItem));
+
+            timeline.DeleteItems([voice]);
+            fixtures.Remove(voice);
+            await Task.Delay(250);
+
+            undo.Record();
+            await Task.Delay(250);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(timeline.MaxLayer, timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(item => item.Layer)
+                        .ToDictionary(group => group.Key, group => group.Count()),
+                    timeline.Items
+                        .OfType<YmmGroupItem>()
+                        .OrderBy(group => group.Layer)
+                        .ThenBy(group => group.Frame)
+                        .Select(group => new GroupSpan(
+                            group.Layer,
+                            group.GroupRange))
+                        .ToArray())
+                .Single(row => row.FolderId == folderId);
+
+            var block = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(block, drop))
+                throw new InvalidOperationException(
+                    "P5 representative block move was rejected.");
+
+            commands.MovePanelRows(block, drop);
+            await Task.Delay(500);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 4);
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(450);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 2);
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(450);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 4);
+            AssertP5Folder(folderId, 3, 4);
+
+            var afterGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm);
+
+            foreach (var fixture in fixtures)
+            {
+                if (!afterGeometry.Any(current =>
+                        ReferenceEquals(current.Item, fixture)
+                        && double.IsFinite(current.Left)
+                        && double.IsFinite(current.Width)
+                        && current.Width >= 0))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 geometry missing after move for {fixture.GetType().FullName}.");
+                }
+            }
+
+            WriteP5CompatibilityResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_COMMON_BUILTINS",
+                        $"timeline={key}",
+                        "concrete_types=13",
+                        "construct_add_live=13",
+                        "common_geometry=13",
+                        "fold_owner_mapping=13",
+                        "timing_summary=13",
+                        "folder_selection=13",
+                        "history_move_types=12",
+                        "voice_history=SETUP_REQUIRED_CONFIGURED_SPEAKER",
+                        "block_move_undo_redo=12",
+                        "no_type_specific_folder_adapter=true",
+                        "types=" + string.Join(
+                            ",",
+                            concreteTypes.Select(type => type.Name))
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_compatibility_smoke_error=" + ex);
+
+            WriteP5CompatibilityResult(
+                "FAIL_P5_COMMON_BUILTINS\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void SetP5Int(
+        object target,
+        string propertyName,
+        int value)
+    {
+        var property = target.GetType()
+            .GetProperty(
+                propertyName,
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Public)
+            ?? throw new MissingMemberException(
+                target.GetType().FullName,
+                propertyName);
+
+        if (property.SetMethod?.IsPublic != true)
+            throw new MissingMemberException(
+                target.GetType().FullName,
+                "public " + propertyName + " setter");
+
+        property.SetValue(target, value);
+    }
+
+    private static void SetP5StringIfPossible(
+        object target,
+        string propertyName,
+        string value)
+    {
+        var property = target.GetType()
+            .GetProperty(
+                propertyName,
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Public);
+
+        if (property?.SetMethod?.IsPublic == true
+            && property.PropertyType == typeof(string))
+        {
+            property.SetValue(target, value);
+        }
+    }
+
+    private void AssertP5FixtureLayers(
+        IEnumerable<IItem> fixtures,
+        int expectedLayer)
+    {
+        foreach (var fixture in fixtures)
+        {
+            if (fixture.Layer != expectedLayer)
+            {
+                throw new InvalidOperationException(
+                    $"P5 {fixture.GetType().Name} layer={fixture.Layer}, expected {expectedLayer}.");
+            }
+        }
+    }
+
+    private void AssertP5Folder(
+        Guid folderId,
+        int expectedStart,
+        int expectedEnd)
+    {
+        var folder = commands.FindFolder(folderId)
+            ?? throw new InvalidOperationException(
+                "P5 fixture folder is missing.");
+
+        if (folder.Start != expectedStart
+            || folder.End != expectedEnd)
+        {
+            throw new InvalidOperationException(
+                $"P5 folder range {folder.Start}-{folder.End}, expected {expectedStart}-{expectedEnd}.");
+        }
+
+        display.ThrowIfFailed();
+    }
+
+    private static void WriteP5CompatibilityResult(
+        string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-result.txt"),
+            text);
     }
 
     private void ScheduleS5IntegrationSmoke()
