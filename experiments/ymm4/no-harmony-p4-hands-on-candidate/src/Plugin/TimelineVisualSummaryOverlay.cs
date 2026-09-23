@@ -73,6 +73,17 @@ internal sealed class TimelineVisualSummaryOverlay : IDisposable
         {
             display.ThrowIfFailed();
 
+            if (display.Layout.VisibleLayers.Count
+                == display.Layout.MaxLayer + 1)
+            {
+                TimingBandCount = 0;
+                GroupSegmentCount = 0;
+                TimingRects = [];
+                GroupRects = [];
+                adorner.SetSnapshot([], []);
+                return;
+            }
+
             var geometry =
                 HandsOnHostAccess.ReadTimelineItemGeometry(
                     host.Vm);
