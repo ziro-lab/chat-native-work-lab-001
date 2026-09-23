@@ -149,6 +149,39 @@ internal sealed class HandsOnController : IDisposable
             undo.Record();
             await Task.Delay(700);
 
+            var timelineVm = host.Vm;
+
+            var vmItems = Host.Get(
+                    timelineVm,
+                    "Items")
+                as System.Collections.IEnumerable
+                ?? throw new InvalidOperationException(
+                    "TimelineViewModel.Items is not enumerable.");
+
+            object FindItemVm(IItem target) =>
+                vmItems.Cast<object>()
+                    .FirstOrDefault(candidate =>
+                        ReferenceEquals(
+                            Host.Item(candidate),
+                            target))
+                ?? throw new InvalidOperationException(
+                    $"Timeline item VM missing for F{target.Frame}/L{target.Layer}.");
+
+            var itemVmA = FindItemVm(a);
+            var itemVmB = FindItemVm(b);
+
+            var leftProperty = itemVmA.GetType()
+                .GetProperty("Left", Host.Flags)
+                ?? throw new MissingMemberException(
+                    itemVmA.GetType().FullName,
+                    "Left");
+            var widthProperty = itemVmA.GetType()
+                .GetProperty("Width", Host.Flags)
+                ?? throw new MissingMemberException(
+                    itemVmA.GetType().FullName,
+                    "Width");
+
+
             string DescribeItem(
                 string key,
                 YmmGroupItem item)
@@ -222,38 +255,6 @@ internal sealed class HandsOnController : IDisposable
                         $"{key}_vm_candidates={string.Join("|", candidates)}"
                     });
             }
-
-            var timelineVm = host.Vm;
-
-            var vmItems = Host.Get(
-                    timelineVm,
-                    "Items")
-                as System.Collections.IEnumerable
-                ?? throw new InvalidOperationException(
-                    "TimelineViewModel.Items is not enumerable.");
-
-            object FindItemVm(IItem target) =>
-                vmItems.Cast<object>()
-                    .FirstOrDefault(candidate =>
-                        ReferenceEquals(
-                            Host.Item(candidate),
-                            target))
-                ?? throw new InvalidOperationException(
-                    $"Timeline item VM missing for F{target.Frame}/L{target.Layer}.");
-
-            var itemVmA = FindItemVm(a);
-            var itemVmB = FindItemVm(b);
-
-            var leftProperty = itemVmA.GetType()
-                .GetProperty("Left", Host.Flags)
-                ?? throw new MissingMemberException(
-                    itemVmA.GetType().FullName,
-                    "Left");
-            var widthProperty = itemVmA.GetType()
-                .GetProperty("Width", Host.Flags)
-                ?? throw new MissingMemberException(
-                    itemVmA.GetType().FullName,
-                    "Width");
 
             var zoomHolder = Host.Get(
                 timelineVm,
