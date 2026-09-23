@@ -573,11 +573,17 @@ internal sealed class DirectDisplay : IDisposable
 
     private void RefreshCanvases()
     {
-        var canvases = Host.Elements(host.View)
-            .Where(x => x.GetType().Name == "FastCanvasItemsControl")
-            .Concat(refreshTargets)
-            .Distinct(ReferenceEqualityComparer.Instance)
-            .ToArray();
+        var canvases = new HashSet<FrameworkElement>(
+            ReferenceEqualityComparer.Instance);
+
+        foreach (var canvas in Host.Elements(host.View)
+            .Where(x => x.GetType().Name == "FastCanvasItemsControl"))
+        {
+            canvases.Add(canvas);
+        }
+
+        foreach (var target in refreshTargets)
+            canvases.Add(target);
 
         foreach (var canvas in canvases)
         {
