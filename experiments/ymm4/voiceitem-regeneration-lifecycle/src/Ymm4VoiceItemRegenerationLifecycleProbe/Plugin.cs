@@ -165,6 +165,20 @@ internal static class Probe
         Check("reachable_host_objects_inventoried", true);
         Check("voice_present_in_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
 
+        var characterType = typeof(YukkuriMovieMaker.Project.Character);
+        var characterSurface = new
+        {
+            type = characterType.FullName,
+            constructors = characterType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Select(x => new { visibility = Visibility(x), signature = x.ToString() }).ToArray(),
+            properties = characterType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Select(DescribeProperty).OrderBy(x => x.ToString()).ToArray(),
+            methods = characterType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(m => Relevant(m.Name) || m.Name.Contains("Name", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(m => m.Name)
+                .Select(DescribeMethod).ToArray()
+        };
+
         var observation = new
         {
             host = "4.56.1.0 Lite",
@@ -181,6 +195,7 @@ internal static class Probe
                 properties = voiceProperties,
                 methods = voiceMethods
             },
+            character = characterSurface,
             implementors,
             factories,
             reachable
