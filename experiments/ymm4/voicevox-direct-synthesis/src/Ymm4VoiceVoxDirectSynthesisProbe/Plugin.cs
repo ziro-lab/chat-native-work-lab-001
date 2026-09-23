@@ -153,6 +153,35 @@ internal static class Probe
                 returned is not null &&
                 returned.GetType().FullName?.Contains("VOICEVOXVoicePronounce", StringComparison.Ordinal) == true);
 
+            var engineWav = Path.Combine(output, "engine-direct.wav");
+            Exception? engineDirectError = null;
+            bool engineDirectInvoked = false;
+            try
+            {
+                var engineCreate = typeof(VOICEVOXEngine)
+                    .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                    .FirstOrDefault(m => m.Name == "CreateVoiceFileAsync" && m.GetParameters().Length == 3)
+                    ?? throw new MissingMethodException(typeof(VOICEVOXEngine).FullName, "CreateVoiceFileAsync");
+
+                var args = new object?[] { query, engineWav, parameter };
+                var result = engineCreate.Invoke(engine, args);
+                engineDirectInvoked = true;
+                if (result is Task task)
+                    await task;
+            }
+            catch (TargetInvocationException ex)
+            {
+                engineDirectError = ex.InnerException ?? ex;
+            }
+            catch (Exception ex)
+            {
+                engineDirectError = ex;
+            }
+
+            Check("engine_direct_invoked", engineDirectInvoked);
+            Check("engine_direct_completed", engineDirectInvoked && engineDirectError is null);
+            Check("engine_direct_wav_written", File.Exists(engineWav) && new FileInfo(engineWav).Length > 44);
+
             var observation = new
             {
                 host = "4.56.1.0 Lite",
@@ -177,7 +206,14 @@ internal static class Probe
                         }),
                 wavExists = File.Exists(wav),
                 wavLength = File.Exists(wav) ? new FileInfo(wav).Length : 0,
-                synthesisError = synthesisError?.ToString()
+                synthesisError = synthesisError?.ToString(),
+                engineDirect = new
+                {
+                    invoked = engineDirectInvoked,
+                    wavExists = File.Exists(engineWav),
+                    wavLength = File.Exists(engineWav) ? new FileInfo(engineWav).Length : 0,
+                    error = engineDirectError?.ToString()
+                }
             };
 
             File.WriteAllText(Path.Combine(output, "plugin-observation.json"),
