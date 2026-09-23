@@ -1473,6 +1473,88 @@ internal sealed partial class HandsOnController : IDisposable
             await Task.Delay(700);
             display.ThrowIfFailed();
 
+            void AssertFolderRowVisualSync(
+                bool collapsed,
+                string phase)
+            {
+                if (adorner is null)
+                    throw new InvalidOperationException(
+                        $"S5 folder overlay missing at {phase}.");
+
+                if (!adorner.TryGetRenderedRowRect(
+                        1,
+                        out var ownerRowRect))
+                {
+                    throw new InvalidOperationException(
+                        $"S5 owner layer row is not rendered at {phase}.");
+                }
+
+                if (!adorner.TryGetFolderRect(
+                        folderId,
+                        out var folderRect))
+                {
+                    throw new InvalidOperationException(
+                        $"S5 folder tag rect missing at {phase}.");
+                }
+
+                var ownerCenter =
+                    ownerRowRect.Top
+                    + ownerRowRect.Height / 2.0;
+                var folderCenter =
+                    folderRect.Top
+                    + folderRect.Height / 2.0;
+
+                if (Math.Abs(
+                        ownerCenter
+                        - folderCenter)
+                    > 0.75)
+                {
+                    throw new InvalidOperationException(
+                        $"S5 folder tag center is offset from the rendered owner row at {phase}: " +
+                        $"owner={ownerCenter:R}, folder={folderCenter:R}.");
+                }
+
+                var realizedChildren =
+                    new[] { 2, 3, 4 }
+                        .Count(layer =>
+                            adorner.TryGetRenderedRowRect(
+                                layer,
+                                out _));
+
+                var expectedChildren =
+                    collapsed
+                        ? 0
+                        : 3;
+
+                if (realizedChildren
+                    != expectedChildren)
+                {
+                    throw new InvalidOperationException(
+                        $"S5 LayerLabels did not refresh without scrolling at {phase}: " +
+                        $"realized_children={realizedChildren}, expected={expectedChildren}.");
+                }
+            }
+
+            AssertFolderRowVisualSync(
+                collapsed: true,
+                phase: "initial-collapse");
+
+            commands.ToggleCollapsed(folderId);
+            await Task.Delay(550);
+            display.ThrowIfFailed();
+
+            AssertFolderRowVisualSync(
+                collapsed: false,
+                phase: "expand-no-scroll");
+
+            commands.ToggleCollapsed(folderId);
+            await Task.Delay(550);
+            display.ThrowIfFailed();
+
+            AssertFolderRowVisualSync(
+                collapsed: true,
+                phase: "collapse-no-scroll");
+
             if (visualSummary is null)
                 throw new InvalidOperationException(
                     "S5 item-area visual summary overlay is not attached.");
@@ -1714,6 +1796,8 @@ internal sealed partial class HandsOnController : IDisposable
                         $"timing_bands={visualSummary.TimingBandCount}",
                         $"group_segments={visualSummary.GroupSegmentCount}",
                         "timing_x_width_y=true",
+                        "fold_expand_no_scroll_refresh=true",
+                        "folder_tag_rendered_row_alignment=true",
                         "zoom_follow=true",
                         "horizontal_scroll_content_alignment=true",
                         $"owner_native_visuals={nativeVisuals}"
@@ -4413,8 +4497,12 @@ internal sealed partial class HandsOnController : IDisposable
                     continue;
                 }
 
-                if (!double.IsFinite(point.Y))
+                if (!double.IsFinite(point.Y)
+                    || point.Y + element.ActualHeight < -0.5
+                    || point.Y > AdornedElement.RenderSize.Height + 0.5)
+                {
                     continue;
+                }
 
                 var area =
                     element.ActualWidth
