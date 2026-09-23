@@ -237,6 +237,10 @@ internal static class HandsOnRuntime
                 || string.Equals(
                     Environment.GetEnvironmentVariable("CNWL_P5_CONFIGURED_VOICE_SMOKE"),
                     "1",
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    Environment.GetEnvironmentVariable("CNWL_P6_DENSITY_STRESS_SMOKE"),
+                    "1",
                     StringComparison.Ordinal);
 
             // The ordinary startup smoke keeps its VoiceItem fixture. Structural
