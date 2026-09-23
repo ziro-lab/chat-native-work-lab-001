@@ -45,9 +45,10 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Candidate/ymme build failed'}
 
           $dll='out/plugin/Ymm4NoHarmonyFolderHandsOn.dll'
-          $ymme='publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme'
+          $ymme=(Get-ChildItem publish -Filter '*.ymme' -File | Select-Object -First 1).FullName
           if(-not(Test-Path $dll)){throw 'Candidate DLL missing'}
-          if(-not(Test-Path $ymme)){throw 'Candidate .ymme missing'}
+          if(-not $ymme){throw 'Candidate .ymme missing'}
+          if(@(Get-ChildItem publish -Filter '*.ymme' -File).Count -ne 1){throw 'Expected exactly one .ymme package'}
 
           $harmony=Get-ChildItem out/plugin -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }
           if($harmony){throw ('Unexpected Harmony dependency: ' + ($harmony.Name -join ','))}
@@ -80,7 +81,8 @@ jobs:
       - name: Exercise real YMM4 .ymme installation and startup
         shell: pwsh
         run: |
-          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunYmmeInstall.ps1 -Ymm4Dir $env:YMM4_DIR -Package (Join-Path $PWD 'publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme') -ExpectedDll (Join-Path $PWD 'out/plugin/Ymm4NoHarmonyFolderHandsOn.dll') -OutputDir (Join-Path $PWD 'out/evidence/install')
+          $ymme=(Get-ChildItem publish -Filter '*.ymme' -File | Select-Object -First 1).FullName
+          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunYmmeInstall.ps1 -Ymm4Dir $env:YMM4_DIR -Package $ymme -ExpectedDll (Join-Path $PWD 'out/plugin/Ymm4NoHarmonyFolderHandsOn.dll') -OutputDir (Join-Path $PWD 'out/evidence/install')
 
       - name: Verify install/package identity
         shell: pwsh
@@ -91,7 +93,8 @@ jobs:
           $built=(Get-FileHash out/plugin/Ymm4NoHarmonyFolderHandsOn.dll -Algorithm SHA256).Hash.ToLowerInvariant()
           if($result.expected_dll_sha256 -ne $built -or $result.installed_dll_sha256 -ne $built){throw 'Installed DLL identity differs from built candidate'}
 
-          $ymme=(Get-FileHash publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme -Algorithm SHA256).Hash.ToLowerInvariant()
+          $ymmeFile=(Get-ChildItem publish -Filter '*.ymme' -File | Select-Object -First 1).FullName
+          $ymme=(Get-FileHash $ymmeFile -Algorithm SHA256).Hash.ToLowerInvariant()
           if($result.package_sha256 -ne $ymme){throw 'Installed .ymme identity mismatch'}
 
           'PASS_P4_YMME_PACKAGE'|Set-Content out/evidence/PASS_P4_YMME_PACKAGE.txt
@@ -111,7 +114,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ymm4-no-harmony-folder-P4.4-ymme
-          path: out/package/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme
+          path: out/package/*.ymme
           retention-days: 30
 
       - if: always()
