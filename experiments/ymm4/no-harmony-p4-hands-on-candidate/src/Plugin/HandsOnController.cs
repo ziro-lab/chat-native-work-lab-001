@@ -215,6 +215,99 @@ internal sealed class HandsOnController : IDisposable
             }
 
             var timelineVm = host.Vm;
+
+            var itemVmA = host.ItemView(a).DataContext
+                ?? throw new InvalidOperationException(
+                    "S5 item A DataContext missing.");
+            var leftProperty = itemVmA.GetType()
+                .GetProperty("Left", Host.Flags)
+                ?? throw new MissingMemberException(
+                    itemVmA.GetType().FullName,
+                    "Left");
+            var widthProperty = itemVmA.GetType()
+                .GetProperty("Width", Host.Flags)
+                ?? throw new MissingMemberException(
+                    itemVmA.GetType().FullName,
+                    "Width");
+
+            var zoomHolder = Host.Get(
+                timelineVm,
+                "TimelineZoom");
+            var zoomValueProperty = zoomHolder?.GetType()
+                .GetProperty(
+                    "Value",
+                    System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Public);
+            var zoomBefore = zoomValueProperty?.GetValue(
+                zoomHolder);
+
+            var adornerAvailable =
+                AdornerLayer.GetAdornerLayer(host.Source)
+                is not null;
+
+            string ZoomSnapshot(string prefix)
+            {
+                var aView = host.ItemView(a);
+                var bView = host.ItemView(b);
+                var aVm = aView.DataContext!;
+                var bVm = bView.DataContext!;
+                var aPoint = aView.TranslatePoint(
+                    new Point(),
+                    host.Source);
+                var bPoint = bView.TranslatePoint(
+                    new Point(),
+                    host.Source);
+
+                return string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        $"{prefix}_zoom={zoomValueProperty?.GetValue(zoomHolder) ?? "<null>"}",
+                        $"{prefix}_a_left={leftProperty.GetValue(aVm)}",
+                        $"{prefix}_a_width={widthProperty.GetValue(aVm)}",
+                        $"{prefix}_a_view_x={aPoint.X:R}",
+                        $"{prefix}_a_actual_width={aView.ActualWidth:R}",
+                        $"{prefix}_b_left={leftProperty.GetValue(bVm)}",
+                        $"{prefix}_b_width={widthProperty.GetValue(bVm)}",
+                        $"{prefix}_b_view_x={bPoint.X:R}",
+                        $"{prefix}_b_actual_width={bView.ActualWidth:R}",
+                        $"{prefix}_scroll_h_offset={host.Scroll.HorizontalOffset:R}",
+                        $"{prefix}_viewport={Host.Reactive(timelineVm, "Viewport")}"
+                    });
+            }
+
+            string? zoom150 = null;
+            if (zoomHolder is not null
+                && zoomValueProperty?.SetMethod?.IsPublic == true)
+            {
+                zoomValueProperty.SetValue(
+                    zoomHolder,
+                    150.0);
+                await Task.Delay(500);
+                zoom150 = ZoomSnapshot("zoom150");
+
+                if (zoomBefore is not null)
+                {
+                    zoomValueProperty.SetValue(
+                        zoomHolder,
+                        zoomBefore);
+                    await Task.Delay(400);
+                }
+            }
+
+            var scrollBefore = host.Scroll.HorizontalOffset;
+            host.Scroll.ScrollToHorizontalOffset(
+                Math.Min(
+                    120,
+                    Math.Max(
+                        0,
+                        host.Scroll.ExtentWidth
+                        - host.Scroll.ViewportWidth)));
+            await Task.Delay(300);
+            var scrollSnapshot = ZoomSnapshot("scroll");
+            host.Scroll.ScrollToHorizontalOffset(scrollBefore);
+            await Task.Delay(250);
+
             var vmCandidates = timelineVm.GetType()
                 .GetProperties(Host.Flags)
                 .Where(property =>
@@ -265,8 +358,18 @@ internal sealed class HandsOnController : IDisposable
                     $"scroll_h_viewport={host.Scroll.ViewportWidth:R}",
                     $"timeline_vm_type={timelineVm.GetType().FullName}",
                     $"timeline_vm_candidates={string.Join("|", vmCandidates)}",
+                    $"item_left_type={leftProperty.PropertyType.FullName}",
+                    $"item_left_get_public={leftProperty.GetMethod?.IsPublic}",
+                    $"item_width_type={widthProperty.PropertyType.FullName}",
+                    $"item_width_get_public={widthProperty.GetMethod?.IsPublic}",
+                    $"timeline_zoom_holder_type={zoomHolder?.GetType().FullName ?? "<null>"}",
+                    $"timeline_zoom_value_get_public={zoomValueProperty?.GetMethod?.IsPublic}",
+                    $"timeline_zoom_value_set_public={zoomValueProperty?.SetMethod?.IsPublic}",
+                    $"source_adorner_layer={adornerAvailable}",
                     DescribeItem("a", a),
-                    DescribeItem("b", b)
+                    DescribeItem("b", b),
+                    zoom150 ?? "zoom150=UNAVAILABLE",
+                    scrollSnapshot
                 });
 
             WriteS5CoordinateResult(
