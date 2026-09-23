@@ -382,13 +382,17 @@ internal static class Probe
         _ => false
     };
 
-    static object DescribeCache(object? value) => value switch
+    sealed record CacheDescription(string Type, int Length);
+
+    static CacheDescription DescribeCache(object? value) => value switch
     {
-        null => new { type = "<null>", length = 0 },
-        string s => new { type = typeof(string).FullName, length = s.Length },
-        Array a => new { type = a.GetType().FullName, length = a.Length },
-        ICollection c => new { type = c.GetType().FullName, length = c.Count },
-        _ => new { type = value.GetType().FullName, length = -1 }
+        null => new CacheDescription("<null>", 0),
+        string s => new CacheDescription(typeof(string).FullName ?? nameof(String), s.Length),
+        Array a => new CacheDescription(a.GetType().FullName ?? a.GetType().Name, a.Length),
+        ICollection collection => new CacheDescription(
+            collection.GetType().FullName ?? collection.GetType().Name,
+            collection.Count),
+        _ => new CacheDescription(value.GetType().FullName ?? value.GetType().Name, -1)
     };
 
     static string HashFile(string path) =>
