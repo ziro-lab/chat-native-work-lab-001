@@ -35,7 +35,6 @@ public sealed class ControlTool : IToolPlugin
     public Type ViewType => typeof(UndoRouteView);
     public bool AllowMultipleInstances => false;
     public string DefaultGroupName => YukkuriMovieMaker.Resources.Localization.Texts.ToolGroupUtilityName;
-    public int DefaultOrder => 991;
 }
 
 public sealed class UndoRouteView : UserControl
@@ -103,7 +102,6 @@ internal static class Probe
         scheduled = true;
         output = Path.GetFullPath(dir);
         Directory.CreateDirectory(output);
-        DumpPluginSurface();
         Application.Current.Dispatcher.BeginInvoke(new Action(Start), DispatcherPriority.ApplicationIdle);
     }
 
