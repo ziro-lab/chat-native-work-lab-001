@@ -24,10 +24,13 @@ try {
   $req=@(
     'timeline_resolved',
     'identity_surface_inventoried',
+    'no_public_guid_surface',
     'voice_added_to_real_timeline',
     'observable_identity_stable_after_timeline_add',
-    'serialized_guid_observed_unique',
-    'serialized_guid_stable_across_basic_edits'
+    'standalone_serialization_has_no_guid',
+    'standalone_serialization_still_has_no_guid_after_edit',
+    'timeline_retains_live_object_reference',
+    'public_getclone_available'
   )
   if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count)"}
   foreach($id in $req){
