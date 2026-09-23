@@ -1,3 +1,6 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Threading;
 using Ymm4NoHarmonyPersistence;
 using Ymm4NoHarmonyProductState;
 using YukkuriMovieMaker.Project.Items;
