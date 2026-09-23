@@ -131,9 +131,9 @@ internal static class Probe
                      m.Name.Contains("Voice", StringComparison.OrdinalIgnoreCase) ||
                      m.Name.Contains("Service", StringComparison.OrdinalIgnoreCase)));
             })
+            .OrderBy(m => m.DeclaringType?.FullName)
+            .ThenBy(m => m.Name)
             .Select(DescribeMethodWithDeclaringType)
-            .OrderBy(x => x.declaringType)
-            .ThenBy(x => x.name)
             .ToArray();
 
         var voiceMethods = typeof(VoiceItem)
@@ -141,16 +141,16 @@ internal static class Probe
             .Where(m => Relevant(m.Name) ||
                         editServiceType.IsAssignableFrom(m.ReturnType) ||
                         m.GetParameters().Any(p => editServiceType.IsAssignableFrom(p.ParameterType)))
+            .OrderBy(m => m.Name)
             .Select(DescribeMethod)
-            .OrderBy(x => x.name)
             .ToArray();
 
         var voiceProperties = typeof(VoiceItem)
             .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Where(p => Relevant(p.Name) ||
                         editServiceType.IsAssignableFrom(p.PropertyType))
+            .OrderBy(p => p.Name)
             .Select(DescribeProperty)
-            .OrderBy(x => x.name)
             .ToArray();
 
         var reachable = new List<object>();
