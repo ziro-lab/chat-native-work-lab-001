@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Ymm4NoHarmonyPanel;
 using Ymm4NoHarmonyPersistence;
@@ -436,6 +437,8 @@ internal sealed class HandsOnController : IDisposable
                                     + y.ToString("R");
                             }));
 
+            WriteS5Screenshot();
+
             WriteS5Result(
                 string.Join(
                     Environment.NewLine,
@@ -462,6 +465,38 @@ internal sealed class HandsOnController : IDisposable
                 + ex
                 + "\n");
         }
+    }
+
+    private void WriteS5Screenshot()
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        var width = Math.Max(
+            1,
+            (int)Math.Ceiling(host.View.ActualWidth));
+        var height = Math.Max(
+            1,
+            (int)Math.Ceiling(host.View.ActualHeight));
+
+        var bitmap = new RenderTargetBitmap(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Pbgra32);
+        bitmap.Render(host.View);
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(
+            BitmapFrame.Create(bitmap));
+
+        Directory.CreateDirectory(dir);
+        using var stream = File.Create(
+            Path.Combine(dir, "s5-view.png"));
+        encoder.Save(stream);
     }
 
     private static void WriteS5Result(string text)
