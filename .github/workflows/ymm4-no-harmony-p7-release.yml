@@ -6,6 +6,7 @@ on:
     paths:
       - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
       - 'docs/YMM4_NO_HARMONY_P7_RELEASE_PLAN.md'
+      - '.github/workflows/ymm4-no-harmony-p4-ymme-package.yml'
       - '.github/workflows/ymm4-no-harmony-p7-release.yml'
 
 permissions:
