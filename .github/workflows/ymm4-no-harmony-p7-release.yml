@@ -23,8 +23,8 @@ jobs:
     env:
       RELEASE_VERSION: '0.1.0'
       PACKAGE_NAME: 'YMM4_LayerFolder_noHarmony_v0.1.0.ymme'
-      BUILD_HOST_VERSION: '4.56.1.0'
-      BUILD_HOST_HASH: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+      BUILD_HOST_VERSION: '4.55.1.1'
+      BUILD_HOST_HASH: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
