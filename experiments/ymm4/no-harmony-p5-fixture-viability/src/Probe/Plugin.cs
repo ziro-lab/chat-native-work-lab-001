@@ -229,12 +229,16 @@ internal static class FixtureViabilityProbe
                     itemsByType[
                         type.FullName ?? type.Name] = item;
 
-                    var frame = 40 + index * 70;
-                    var layer = index + 1;
+                    // Keep all item classes inside the same vertically visible
+                    // row. The previous one-type-per-layer fixture only proved
+                    // TimelineViewModel vertical virtualization, not a type
+                    // compatibility difference.
+                    var frame = 20 + index * 34;
+                    const int layer = 1;
 
                     SetInt(raw, "Frame", frame);
                     SetInt(raw, "Layer", layer);
-                    SetInt(raw, "Length", 30);
+                    SetInt(raw, "Length", 20);
                     SetStringIfPossible(
                         raw,
                         "Remark",
