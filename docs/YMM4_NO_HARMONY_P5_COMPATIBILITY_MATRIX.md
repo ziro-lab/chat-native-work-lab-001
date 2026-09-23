@@ -37,12 +37,12 @@ Do not add a type-specific adapter merely because setup differs.
 
 | Family | Candidate host type | Fixture route | 4.55.1.1 | 4.56.1.0 | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Voice / speech | discovery pending | resource/config dependent | Pending | Pending | Voice resource availability must not be faked as compatibility |
-| Text-like | discovery pending | pending | Pending | Pending | Use actual shipped item type, not guessed class name |
-| Image | discovery pending | public item/file route | Pending | Pending | Existing real PNG FileDrop is related evidence, not full P5 classification |
-| Video | discovery pending | media fixture | Pending | Pending | Exact test media can be generated in CI if host route is public |
-| Audio | discovery pending | media fixture | Pending | Pending | Same |
-| Shape | discovery pending | public shape/item route | Pending | Pending | Prefer built-in shape with no external asset |
+| Voice / speech | `VoiceItem` | public ctor; runtime viability next | Metadata confirmed | Metadata confirmed | Parameterless + Character ctor exist on both hosts |
+| Text-like | `TextItem` | public parameterless ctor | Metadata confirmed | Metadata confirmed | Also has VoiceItem-copy ctor |
+| Image | `ImageItem` | parameterless / string file / real FileDrop | Metadata confirmed | Metadata confirmed | Existing PNG FileDrop is related evidence, not full P5 classification |
+| Video | `VideoItem` | parameterless / string file | Metadata confirmed | Metadata confirmed | Media-backed runtime route still needs fixture |
+| Audio | `AudioItem` | parameterless / string file | Metadata confirmed | Metadata confirmed | Media-backed runtime route still needs fixture |
+| Shape | `ShapeItem` | public parameterless ctor | Metadata confirmed | Metadata confirmed | Strong zero-resource fixture candidate |
 | Group Control | `GroupItem` | public item construction | **P4 confirmed** | **P4 confirmed** | P5 may reuse as baseline/special-item control |
 | Effect-bearing item | discovery pending | one representative item + effect | Pending | Pending | Effect itself need not become a folder-owned model |
 | Transition / special multi-layer | discovery pending | pending | Pending | Pending | Only test if a concrete shipped item uses distinct layer/visual semantics |
@@ -61,20 +61,52 @@ P5 is specifically looking for evidence that one of these common assumptions fai
 
 If an assumption fails, record the exact type and surface first. Do not broaden the architecture preemptively.
 
-## 5. Exact-host discovery gate
+## 5. Exact-host discovery gate — COMPLETE
 
-Before selecting fixtures, enumerate concrete `IItem` types on both pinned hosts and record:
+Workflow:
 
-- full type name;
-- assembly;
-- abstract/sealed status;
-- public constructors;
-- whether a public parameterless constructor exists;
-- direct/base interfaces relevant to `IItem`;
-- public Frame / Length / Layer properties;
-- host-version additions/removals.
+- `35834475296`
 
-The discovery result is metadata evidence only. It does not count as runtime compatibility for that item family.
+Result on both pinned hosts:
+
+- `PASS_P5_ITEM_INVENTORY`;
+- total IItem-compatible types = **19**;
+- concrete IItem types = **13**;
+- no Harmony loaded;
+- **the concrete type set and public constructor surfaces are identical on 4.55.1.1 and 4.56.1.0**.
+
+Artifacts:
+
+- 4.55.1.1: `10738468027`, `sha256:3199c95106b99fe09fd6f3adb29a886fa7c0782606bdc2d283bceff23c07f02c`;
+- 4.56.1.0: `10738491905`, `sha256:0c199cba3548953a5a499dd8eca172778cb7edcb9ba403b419c5607632198190`.
+
+Concrete built-in types found on both hosts:
+
+| Type | Public parameterless ctor | Additional public ctor |
+| --- | --- | --- |
+| `AudioItem` | Yes | `AudioItem(string file)` |
+| `EffectItem` | Yes | — |
+| `FrameBufferItem` | Yes | — |
+| `GroupItem` | Yes | — |
+| `ImageItem` | Yes | `ImageItem(string file)` |
+| `SceneItem` | Yes | — |
+| `ShapeItem` | Yes | — |
+| `TachieFaceItem` | Yes | `TachieFaceItem(Character)`, `TachieFaceItem(VoiceItem)` |
+| `TachieItem` | Yes | `TachieItem(Character)` |
+| `TextItem` | Yes | `TextItem(VoiceItem)` |
+| `TransitionItem` | Yes | — |
+| `VideoItem` | Yes | `VideoItem(string file)` |
+| `VoiceItem` | Yes | `VoiceItem(Character)` |
+
+All 13 concrete types expose public `Frame`, `Length`, and `Layer` get/set through the common `BaseItem` surface.
+
+### P5.1 conclusion
+
+The first frozen common-path assumption is strongly supported:
+
+> built-in concrete item classes share one public BaseItem positional contract on both pinned hosts.
+
+This is still metadata evidence, not runtime compatibility. The next gate is zero-resource fixture viability: instantiate each public parameterless type, attempt native Timeline insertion, and classify which families can be exercised without external media/voice/plugin resources.
 
 ## 6. Exit gate
 
