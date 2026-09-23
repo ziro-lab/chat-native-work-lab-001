@@ -156,6 +156,8 @@ internal static class Probe
             .ToArray();
 
         Check("identity_surface_inventoried", true);
+        Check("no_public_guid_surface",
+            identityMembers.Count == 0 && interfaceSurface.Length == 0);
 
         var a = new VoiceItem { Serif = "A", Hatsuon = "A" };
         var b = new VoiceItem { Serif = "B", Hatsuon = "B" };
@@ -208,7 +210,8 @@ internal static class Probe
             sgB != Guid.Empty &&
             sgA != sgB;
 
-        Check("serialized_guid_observed_unique", serializedGuidObserved);
+        Check("standalone_serialization_has_no_guid",
+            serializedGuidA is null && serializedGuidB is null);
 
         a.Serif = "A edited";
         a.Frame = 999;
@@ -226,8 +229,8 @@ internal static class Probe
         }
         catch { }
 
-        Check("serialized_guid_stable_across_basic_edits",
-            serializedGuidA is not null && serializedGuidA == serializedGuidAfterEdit);
+        Check("standalone_serialization_still_has_no_guid_after_edit",
+            serializedGuidAfterEdit is null);
 
         var cloneLikeMethods = type
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -243,6 +246,11 @@ internal static class Probe
             .Distinct()
             .OrderBy(x => x.Name)
             .ToArray();
+
+        Check("timeline_retains_live_object_reference",
+            timeline.Items.Any(x => ReferenceEquals(x, a)));
+        Check("public_getclone_available",
+            cloneLikeMethods.Any(x => x.Name == "GetClone" && x.visibility == "public"));
 
         File.WriteAllText(Path.Combine(output, "behavior.json"),
             System.Text.Json.JsonSerializer.Serialize(new
