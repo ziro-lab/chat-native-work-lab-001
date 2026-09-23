@@ -101,9 +101,9 @@ internal sealed partial class HandsOnController : IDisposable
         ScheduleP6Probes();
     }
 
-        partial void ScheduleP6Probes();
+    partial void ScheduleP6Probes();
 
-private void ScheduleP5ConfiguredVoiceSmoke()
+    private void ScheduleP5ConfiguredVoiceSmoke()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("CNWL_P5_CONFIGURED_VOICE_SMOKE"),
