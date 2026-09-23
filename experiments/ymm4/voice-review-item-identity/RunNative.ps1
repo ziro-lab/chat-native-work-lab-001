@@ -23,13 +23,11 @@ try {
 
   $req=@(
     'timeline_resolved',
-    'voiceitem_guid_public_readable',
-    'new_voiceitem_guid_nonempty',
-    'new_voiceitem_guids_unique',
-    'guid_stable_across_basic_edits',
+    'identity_surface_inventoried',
     'voice_added_to_real_timeline',
-    'guid_stable_after_timeline_add',
-    'timeline_contains_same_guid'
+    'observable_identity_stable_after_timeline_add',
+    'serialized_guid_observed_unique',
+    'serialized_guid_stable_across_basic_edits'
   )
   if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count)"}
   foreach($id in $req){
