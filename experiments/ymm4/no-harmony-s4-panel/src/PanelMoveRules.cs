@@ -50,7 +50,7 @@ public static class PanelMoveRules
         return Array.AsReadOnly(rows
             .Where(row =>
                 !selectedFolders.Any(folder =>
-                    !ReferenceEquals(folder, row)
+                    !string.Equals(folder.Key, row.Key, StringComparison.Ordinal)
                     && folder.First <= row.First
                     && row.Last <= folder.Last
                     && row.Depth > folder.Depth))
