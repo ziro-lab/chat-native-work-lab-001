@@ -165,6 +165,27 @@ internal static class Probe
         Check("reachable_host_objects_inventoried", true);
         Check("voice_present_in_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
 
+        var voiceDescriptionType = typeof(YukkuriMovieMaker.Plugin.Voice.IVoiceSpeaker).Assembly
+            .GetType("YukkuriMovieMaker.Plugin.Voice.VoiceDescription")
+            ?? throw new InvalidOperationException("VoiceDescription type not found.");
+        var voiceDescriptionSurface = new
+        {
+            type = voiceDescriptionType.FullName,
+            constructors = voiceDescriptionType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Select(x => new { visibility = Visibility(x), signature = x.ToString() }).ToArray(),
+            properties = voiceDescriptionType.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .OrderBy(p => p.Name)
+                .Select(DescribeProperty).ToArray(),
+            methods = voiceDescriptionType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(m => !m.IsSpecialName &&
+                    (m.Name.Contains("Speaker", StringComparison.OrdinalIgnoreCase) ||
+                     m.Name.Contains("Voice", StringComparison.OrdinalIgnoreCase) ||
+                     m.Name.Contains("Set", StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(m => m.Name)
+                .Select(DescribeMethod).ToArray()
+        };
+        Check("voice_description_surface_inventoried", true);
+
         var characterType = typeof(YukkuriMovieMaker.Project.Character);
         var characterSurface = new
         {
@@ -196,6 +217,7 @@ internal static class Probe
                 methods = voiceMethods
             },
             character = characterSurface,
+            voiceDescription = voiceDescriptionSurface,
             implementors,
             factories,
             reachable
