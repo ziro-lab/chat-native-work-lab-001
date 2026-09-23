@@ -69,8 +69,6 @@ try {
      $r.error){throw 'Native result rejected'}
 
   $req=@(
-    'tool_menu_item_found',
-    'tool_menu_open_invoked',
     'host_set_timeline_tool_info_called',
     'timeline_info_timeline_nonnull',
     'timeline_info_undo_manager_nonnull',
