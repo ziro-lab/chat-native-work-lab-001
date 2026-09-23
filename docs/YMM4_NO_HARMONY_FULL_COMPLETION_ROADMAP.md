@@ -800,26 +800,39 @@ Completed:
 
 The panel remains a View/projection and does not own a second structural engine or persistence model.
 
-#### S5 — visual parity requiring redesign — ACTIVE / NEXT
+#### S5 — visual parity requiring redesign — COMPLETE / FROZEN
 
-- collapsed-owner-row inner timing summary;
-- folded Group/background visual compatibility;
-- final Timeline visual polish.
+Freeze record:
+- `docs/YMM4_NO_HARMONY_S5_VISUAL_PARITY_FREEZE.md`
 
-Do not reproduce LayerPatan's native item Top/Height Harmony patch. Use plugin-owned overlay/drawing where viable.
+Completed:
 
-### Exit gate
+- hidden-item timing summary on collapsed owner rows;
+- folded GroupRange compatibility overlay only when fold actually affects the range;
+- public YMM4 `TimelineItemViewModel.Left / Width` as X / Width authority;
+- existing FoldMap / DirectDisplay as Y / owner-row authority;
+- zoom and horizontal-scroll alignment;
+- offscreen/unrealized items supported through Timeline item VM geometry;
+- plugin-owned item-area Adorner;
+- normal unfolded timeline fast-path with no visual-summary item scan;
+- pure **17/17 PASS**;
+- dual-host coordinate discovery GREEN;
+- dual-host S5 visual integration GREEN;
+- accepted screenshot evidence for representative folded timing/Group display;
+- integrated Track C **134/134** on both pinned hosts;
+- Track C structural **353/353** on both pinned hosts;
+- S0-S4 / startup / real .ymme regressions GREEN.
 
-P4 completes only when:
+No S5-specific state, Undo stack, structural observer, timer, or alternate FoldMap was introduced.
 
-- the LayerPatan reference feature set is either reproduced or explicitly documented as intentionally different with an equivalent user outcome;
-- the frozen no-Harmony core remains authoritative;
-- Tool panel and Timeline UI call the same command/state boundaries;
-- no Harmony dependency is introduced;
-- host-sensitive new mechanisms have narrow Lab evidence;
-- hands-on confirms the resulting workflow is practical.
+### P4 exit
 
-Styling differences are acceptable only when they do not remove reference functionality.
+P4 Full feature construction is **COMPLETE / FROZEN**.
+
+Freeze record:
+- `docs/YMM4_NO_HARMONY_P4_FULL_FREEZE.md`
+
+P5+ must treat S0-S5 ownership as frozen unless new compatibility evidence directly contradicts a specific assumption.
 
 ---
 
@@ -938,9 +951,9 @@ P0 Core Spine                 DONE
   -> S2 color / visibility / persistence extension DONE
   -> S3 structural convenience / Group Control DONE
   -> S4 management panel parity DONE
-  -> S5 visual parity redesign NEXT
-  -> P4 freeze
-  -> P5 compatibility
+  -> S5 visual parity redesign DONE
+  -> P4 Full freeze             DONE
+  -> P5 compatibility           NEXT
   -> P6 hardening
   -> P7 release
 ```
@@ -963,6 +976,8 @@ To avoid turning the Full exploration into an unbounded rewrite:
 
 **Feasible:** already demonstrated by the P0 spine plus real FileDrop and the P1.1 standard structural-command proof.
 
-**Complete:** not yet. Completion requires the remaining P1-P7 gates, especially structural folder tracking, persistence, product UX and hardening.
+**P4 Full feature construction:** complete and frozen at `docs/YMM4_NO_HARMONY_P4_FULL_FREEZE.md`.
+
+**Release completion:** not yet. Completion still requires P5 compatibility, P6 hardening/performance, and P7 release gates.
 
 This distinction should remain explicit in PRs and release notes.
