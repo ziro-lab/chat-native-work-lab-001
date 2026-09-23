@@ -96,3 +96,21 @@ For a boundary marker such as `<w0>`:
 - use `ControlTagParser.GetPlainText` when product code needs the official clean text;
 - inspect the original Serif first when the pronunciation-assist controller needs marker positions;
 - no custom subtitle renderer and no Harmony are required for this boundary-marker path.
+
+
+## Phase 3 — boundary-selection rule
+
+Native run `35857808252` proved that public `ControlTagParser.Parse` returns, for `A<w0>B`:
+
+- clean text: `AB`
+- one public `TimingTag`
+- `Position = 1`
+- `Type = Wait`
+- `Value = 0`
+- `Operator = Set`
+
+The next slice freezes the candidate product rule as:
+
+> A pronunciation boundary marker is an official timing tag where Type=Wait, Value=0, Operator=Set.
+
+It also verifies that multiple `<w0>` markers map to clean-text positions and that a non-zero wait (for example `<w100>`) is not mistaken for a pronunciation boundary.
