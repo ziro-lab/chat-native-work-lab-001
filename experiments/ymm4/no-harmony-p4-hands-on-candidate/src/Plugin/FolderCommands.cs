@@ -305,6 +305,73 @@ internal sealed class FolderCommands
             item => folder.Start <= item.Layer && item.Layer <= folder.End);
     }
 
+    internal void AddStandardLayer(int position)
+    {
+        EnsureEditable();
+
+        if (position < 0)
+            throw new ArgumentOutOfRangeException(nameof(position));
+
+        if (!HandsOnHostAccess.TryExecuteTimelineCommand(
+                host,
+                window,
+                CommandType.AddLayer,
+                position))
+        {
+            throw new InvalidOperationException(
+                $"YMM4 cannot add a layer at L{position}.");
+        }
+    }
+
+    internal void ToggleLayerVisibility(int layer)
+    {
+        EnsureEditable();
+
+        if (layer < 0)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+
+        var before = FolderProductStateRules.NormalizeAndValidate(
+            state.ProductState);
+        var hidden = FolderProductStateRules.HiddenLayers(
+            before,
+            TimelineKey);
+
+        if (hidden.Contains(layer))
+        {
+            var restore = FolderProductStateRules.RestoreMap(
+                    before,
+                    TimelineKey)
+                .ToDictionary(x => x.Key, x => x.Value);
+            var desired = restore.TryGetValue(layer, out var remembered)
+                ? remembered
+                : timeline.LayerSettings.IsVisibles[layer];
+
+            restore[layer] = !desired;
+
+            // Panel eye edits the post-folder state. Keep the native row
+            // suppressed while a Hidden reason still owns it.
+            if (timeline.LayerSettings.IsVisibles[layer])
+                timeline.LayerSettings.IsVisibles[layer] = false;
+
+            var after = FolderProductStateRules.ReplaceRestoreMap(
+                before,
+                TimelineKey,
+                restore);
+            CommitResolvedProductState(
+                before,
+                after,
+                "toggle_layer_visibility_hidden");
+            return;
+        }
+
+        timeline.LayerSettings.IsVisibles[layer] =
+            !timeline.LayerSettings.IsVisibles[layer];
+        undo.Record();
+
+        log(
+            $"folder_command toggle_layer_visibility layer={layer}");
+    }
+
     internal void AddLayerAtFolderEnd(Guid folderId)
     {
         var folder = FindFolder(folderId)
@@ -352,6 +419,105 @@ internal sealed class FolderCommands
             groups,
             newGroup: null,
             "insert_into_folder");
+    }
+
+    internal void DeleteLayers(
+        IEnumerable<int> layers)
+    {
+        ArgumentNullException.ThrowIfNull(layers);
+        EnsureEditable();
+
+        var targets = layers
+            .Distinct()
+            .OrderByDescending(x => x)
+            .ToArray();
+
+        if (targets.Length == 0)
+            return;
+        if (targets.Any(x => x < 0))
+            throw new ArgumentOutOfRangeException(nameof(layers));
+
+        var beforeProduct =
+            FolderProductStateRules.NormalizeAndValidate(
+                state.ProductState);
+        var working = beforeProduct;
+
+        foreach (var layer in targets)
+        {
+            var timelineState = FolderDocumentRules.FindTimeline(
+                working.Core,
+                TimelineKey);
+            var edit =
+                new Ymm4NoHarmonyFolderRanges.DeleteLayers(
+                    layer,
+                    1);
+
+            var rangePlan =
+                Ymm4NoHarmonyFolderRanges.FolderRangeTracker.Apply(
+                    timelineState?.Folders.Select(
+                        folder =>
+                            new Ymm4NoHarmonyFolderRanges.FolderRange(
+                                folder.Id,
+                                folder.Start,
+                                folder.End))
+                    ?? [],
+                    edit);
+
+            var beforeById = (timelineState?.Folders ?? [])
+                .ToDictionary(x => x.Id);
+            var nextFolders = rangePlan.Ranges
+                .Select(range =>
+                {
+                    var original = beforeById[range.Id];
+                    return original with
+                    {
+                        Start = range.Start,
+                        End = range.End
+                    };
+                })
+                .ToArray();
+
+            var nextCore = FolderDocumentRules.ReplaceTimeline(
+                working.Core,
+                TimelineKey,
+                nextFolders);
+            var next = FolderProductStateRules.ReplaceCore(
+                working,
+                nextCore);
+            next = FolderProductStateRules.RemapRestoreLayers(
+                next,
+                TimelineKey,
+                rangePlan.MapLayer);
+
+            var groups = CurrentGroups();
+            var groupRanges =
+                StructuralConvenienceRules.PlanStandardGroupRangesBeforeHost(
+                    working.Core,
+                    TimelineKey,
+                    edit,
+                    GroupSpans(groups));
+
+            HandsOnHostAccess.ApplyGroupRanges(
+                groups,
+                groupRanges);
+            timeline.DeleteLayer(layer);
+
+            next = visibility.ApplyStructuralChange(
+                working,
+                next,
+                rangePlan.MapLayer);
+            working = next;
+        }
+
+        state.ReplaceProductState(working);
+        undo.AddCommand(new UndoRedoActionCommand(
+            () => state.ReplaceProductState(beforeProduct),
+            () => state.ReplaceProductState(working)));
+        undo.Record();
+
+        log(
+            $"folder_command delete_layers count={targets.Length} " +
+            $"layers={string.Join(",", targets)}");
     }
 
     internal void DeleteFolderContents(Guid folderId)
