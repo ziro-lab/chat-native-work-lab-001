@@ -1,0 +1,94 @@
+name: YMM4 no-Harmony P5 fixture viability
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p5-fixture-viability/**'
+      - '.github/workflows/ymm4-no-harmony-p5-fixture-viability.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p5-fixture-viability-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '4.55.1.1'
+            asset: 'YukkuriMovieMaker_v4.55.1.1_Lite.zip'
+            sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+          - version: '4.56.1.0'
+            asset: 'YukkuriMovieMaker_v4.56.1.0_Lite.zip'
+            sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+
+    runs-on: windows-latest
+    timeout-minutes: 7
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Acquire pinned host
+        shell: pwsh
+        env:
+          VER: '${{ matrix.version }}'
+          ASSET: '${{ matrix.asset }}'
+          EXPECTED: '${{ matrix.sha256 }}'
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:VER/$env:ASSET"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:EXPECTED){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build viability probe
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p5-fixture-viability/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'P5 viability build failed'}
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_P5_FixtureViability'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item out/probe/Ymm4P5FixtureViabilityProbe.dll $d
+          if(Test-Path out/probe/0Harmony.dll){throw 'Unexpected Harmony'}
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @(
+            "source_head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "host_version=${{ matrix.version }}",
+            "host_zip_sha256=${{ matrix.sha256 }}",
+            "probe_sha256=$((Get-FileHash out/probe/Ymm4P5FixtureViabilityProbe.dll -Algorithm SHA256).Hash)",
+            "run=$env:GITHUB_RUN_ID"
+          )|Set-Content out/evidence/manifest.txt
+
+      - name: Execute fixture viability
+        shell: pwsh
+        run: ./experiments/ymm4/no-harmony-p5-fixture-viability/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+
+      - if: always()
+        name: Show evidence
+        shell: pwsh
+        run: |
+          foreach($f in @('manifest.txt','result.txt','error.txt','runner-failure.txt')){
+            $p=Join-Path 'out/evidence' $f
+            if(Test-Path $p){
+              Write-Host "=== $f ==="
+              Get-Content $p
+            }
+          }
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-p5-fixture-viability-${{ matrix.version }}
+          path: out/evidence/
+          retention-days: 30
