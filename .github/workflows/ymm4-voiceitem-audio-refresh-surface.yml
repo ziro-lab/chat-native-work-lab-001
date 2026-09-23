@@ -1,0 +1,55 @@
+name: YMM4 VoiceItem audio refresh surface
+on:
+  workflow_dispatch:
+  push:
+    branches: ['lab/voiceitem-audio-refresh-surface']
+    paths:
+      - 'experiments/ymm4/voiceitem-audio-refresh-surface/**'
+      - '.github/workflows/ymm4-voiceitem-audio-refresh-surface.yml'
+permissions:
+  contents: read
+concurrency:
+  group: voiceitem-audio-refresh-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: { persist-credentials: false, fetch-depth: 1 }
+      - name: Prepare pinned YMM4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          curl.exe -L --fail --retry 2 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if($LASTEXITCODE-ne0){throw 'Host download blocked'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()-ne'49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'){throw 'Host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if($null-eq$exe){throw 'YMM4 executable not found'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build and install
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/voiceitem-audio-refresh-surface/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          if($LASTEXITCODE-ne0){throw 'Build failed'}
+          $dest=Join-Path $env:YMM4_DIR 'user/plugin/Ymm4VoiceItemAudioRefreshSurfaceProbe'
+          New-Item -ItemType Directory -Force $dest|Out-Null
+          Copy-Item out/probe/Ymm4VoiceItemAudioRefreshSurfaceProbe.dll $dest
+      - name: Native audio refresh validation
+        shell: pwsh
+        run: ./experiments/ymm4/voiceitem-audio-refresh-surface/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+      - name: Provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @{source_head=$env:GITHUB_SHA;run_id=$env:GITHUB_RUN_ID;host='4.56.1.0 Lite';host_sha256='49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'}|ConvertTo-Json|Set-Content out/evidence/provenance.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: voiceitem-audio-refresh-surface
+          path: out/evidence/
+          if-no-files-found: error
+          retention-days: 7
