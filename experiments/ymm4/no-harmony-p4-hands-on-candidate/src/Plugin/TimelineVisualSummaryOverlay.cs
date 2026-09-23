@@ -114,15 +114,32 @@ internal sealed class TimelineVisualSummaryOverlay : IDisposable
             foreach (var current in geometry)
             {
                 if (current.Item is not YmmGroupItem group
-                    || group.GroupRange < 1)
+                    || group.GroupRange < 1
+                    || group.Layer < 0
+                    || group.Layer > display.Layout.MaxLayer)
                 {
                     continue;
                 }
 
+                var availableRange = Math.Min(
+                    group.GroupRange,
+                    display.Layout.MaxLayer - group.Layer);
+
+                if (availableRange < 1)
+                    continue;
+
+                var foldAffected = Enumerable.Range(
+                        group.Layer,
+                        availableRange + 1)
+                    .Any(display.Layout.IsHidden);
+
+                if (!foldAffected)
+                    continue;
+
                 var segments =
                     VisualSummaryRules.BuildGroupSegments(
                         group.Layer,
-                        group.GroupRange,
+                        availableRange,
                         display.Layout.OwnerLogical,
                         display.Layout.VisualRowOfLogical);
 
