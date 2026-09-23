@@ -149,6 +149,25 @@ internal static class Probe
             Timeout = 10_000
         };
 
+        engine.EngineManifestJsonCache = new JObject
+        {
+            ["manifest_version"] = "0.13.1",
+            ["name"] = "CNWL Fake",
+            ["brand_name"] = "CNWL",
+            ["uuid"] = "00000000-0000-0000-0000-000000000001",
+            ["version"] = "0.0.0",
+            ["url"] = "https://example.invalid",
+            ["command"] = "",
+            ["port"] = 50126,
+            ["icon"] = "",
+            ["default_sampling_rate"] = 24000,
+            ["frame_rate"] = 93.75,
+            ["terms_of_service"] = "",
+            ["update_infos"] = new JArray(),
+            ["dependency_licenses"] = new JArray(),
+            ["supported_features"] = new JObject()
+        }.ToString(Newtonsoft.Json.Formatting.None);
+
         const string fakeSpeakerUuid = "11111111-1111-1111-1111-111111111111";
         engine.SpeakerInfos.Add(new VOICEVOXSpeakerInfo(fakeSpeakerUuid, ""));
 
@@ -168,6 +187,8 @@ internal static class Probe
         engine.SpeakersJsonCache = new JArray(speakerJson).ToString(Newtonsoft.Json.Formatting.None);
         Check("fake_engine_character_resolved",
             engine.Characters.Any(x => x.SpeakerUuid == fakeSpeakerUuid));
+        MarkSyntheticMetadataLoaded(engine);
+        Log("synthetic-engine-metadata-ready");
 
         var vvCharacter = new VOICEVOXCharacter(
             speakerJson,
@@ -259,32 +280,13 @@ internal static class Probe
             Check("project_b_saved", true);
 
             Log($"open-a-start return={openProject.ReturnType.FullName}");
-            Exception? openError = null;
-            var openTask = Task.Run(() =>
-            {
-                try
-                {
-                    openProject.Invoke(main, [pathA]);
-                    Log("open-a-invoke-returned");
-                }
-                catch (Exception ex)
-                {
-                    openError = ex.GetBaseException();
-                    Log("open-a-invoke-error " + openError);
-                }
-            });
-
+            openProject.Invoke(main, [pathA]);
+            Log("open-a-invoke-returned");
             await WaitUntil(
                 "open A",
-                () => openError is not null
-                   || (SamePath(GetProjectFilePath(main), pathA)
-                       && FindVoice(main, Remark) is not null),
-                20000);
-
-            if (openError is not null)
-                throw new InvalidOperationException("Background OpenProject failed.", openError);
-
-            await openTask;
+                () => SamePath(GetProjectFilePath(main), pathA)
+                   && FindVoice(main, Remark) is not null,
+                12000);
             Log("open-a-done");
             VoiceItem reloaded = FindVoice(main, Remark)
                 ?? throw new InvalidOperationException("Reloaded VoiceItem missing.");
@@ -516,6 +518,15 @@ internal static class Probe
         if (valueProperty.SetMethod?.IsPublic != true)
             throw new InvalidOperationException("VowelLength not writable.");
         valueProperty.SetValue(pause, value);
+    }
+
+    static void MarkSyntheticMetadataLoaded(VOICEVOXEngine engine)
+    {
+        var field = typeof(VOICEVOXEngine).GetField(
+            "isCharactersReloaded",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(VOICEVOXEngine).FullName, "isCharactersReloaded");
+        field.SetValue(engine, true);
     }
 
     sealed record SettingsRegistration(string SettingsType, object? ResolvedEngine, Action Restore);
