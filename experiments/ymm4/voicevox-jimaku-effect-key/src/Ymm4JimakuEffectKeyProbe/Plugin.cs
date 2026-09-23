@@ -307,7 +307,7 @@ internal static class Probe
         var current = prop.GetValue(voice)
             ?? throw new InvalidOperationException("JimakuVideoEffects returned null.");
 
-        if (current is IList list)
+        if (current is IList list && !list.IsReadOnly && !list.IsFixedSize)
         {
             list.Add(effect);
             return;
