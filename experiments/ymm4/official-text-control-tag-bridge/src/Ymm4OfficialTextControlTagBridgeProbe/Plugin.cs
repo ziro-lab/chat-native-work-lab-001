@@ -73,6 +73,7 @@ internal static class Probe
 
             var audio = await ObserveSerifToHatsuonAsync();
             var tagTypes = DiscoverTagRelatedTypes();
+            var parserMethods = DiscoverControlTagParserMethods();
 
             File.WriteAllText(Path.Combine(output, "behavior.json"),
                 JsonSerializer.Serialize(new
@@ -86,6 +87,7 @@ internal static class Probe
                     textSource = textObservation,
                     jimakuSource = jimakuObservation,
                     pronunciationObservation = audio,
+                    controlTagParserMethods = parserMethods,
                     tagRelatedTypes = tagTypes
                 }, new JsonSerializerOptions { WriteIndented = true }));
 
@@ -361,6 +363,32 @@ internal static class Probe
             else args[i] = null;
         }
         return args;
+    }
+
+    static object[] DiscoverControlTagParserMethods()
+    {
+        var type = typeof(VoiceItem).Assembly.GetType("YukkuriMovieMaker.Commons.ControlTagParser");
+        if (type is null)
+            return [new { error = "ControlTagParser not found" }];
+
+        return type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(m => !m.IsSpecialName)
+            .Select(m => (object)new
+            {
+                name = m.Name,
+                isStatic = m.IsStatic,
+                visibility = m.IsPublic ? "public" : m.IsAssembly ? "internal" : m.IsPrivate ? "private" : "nonpublic",
+                returnType = m.ReturnType.FullName,
+                parameters = m.GetParameters().Select(p => new
+                {
+                    p.Name,
+                    type = p.ParameterType.FullName,
+                    p.HasDefaultValue,
+                    defaultValue = p.HasDefaultValue ? p.DefaultValue?.ToString() : null
+                }).ToArray()
+            })
+            .OrderBy(x => x.ToString())
+            .ToArray();
     }
 
     static string[] DiscoverTagRelatedTypes()
