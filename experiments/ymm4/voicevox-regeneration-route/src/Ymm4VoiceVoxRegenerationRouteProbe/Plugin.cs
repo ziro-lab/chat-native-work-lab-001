@@ -147,6 +147,31 @@ internal static class Probe
                 .ThenBy(x => x.method)
                 .ToArray();
 
+            object Focus(Type? t) => t is null ? new { missing = true } : new
+            {
+                type = t.FullName,
+                constructors = t.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Select(x => x.ToString()).ToArray(),
+                properties = t.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Select(p => new
+                    {
+                        p.Name,
+                        type = p.PropertyType.FullName,
+                        isStatic = (p.GetMethod ?? p.SetMethod)?.IsStatic == true,
+                        publicGet = p.GetMethod?.IsPublic == true,
+                        publicSet = p.SetMethod?.IsPublic == true
+                    }).ToArray(),
+                fields = t.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Select(field => new
+                    {
+                        field.Name,
+                        type = field.FieldType.FullName,
+                        field.IsStatic,
+                        field.IsPublic,
+                        field.IsInitOnly
+                    }).ToArray()
+            };
+
             var result = new
             {
                 host = "4.56.1.0 Lite",
@@ -154,6 +179,17 @@ internal static class Probe
                 parameterType = parameter?.FullName,
                 pronounceType = pronounce?.FullName,
                 speakerTypes = speakers.Select(t => t.FullName).ToArray(),
+                focused = new
+                {
+                    engine = Focus(vv.FirstOrDefault(t => t.Name == "VOICEVOXEngine")),
+                    character = Focus(vv.FirstOrDefault(t => t.Name == "VOICEVOXCharacter")),
+                    style = Focus(vv.FirstOrDefault(t => t.Name == "VOICEVOXStyle")),
+                    parameter = Focus(parameter),
+                    pronounce = Focus(pronounce),
+                    speaker = Focus(speakers.FirstOrDefault()),
+                    speakerInfo = Focus(vv.FirstOrDefault(t => t.Name == "VOICEVOXSpeakerInfo")),
+                    api = Focus(vv.FirstOrDefault(t => t.Name == "VOICEVOXAPI"))
+                },
                 voiceVoxTypes = vv.Select(DescribeType).ToArray(),
                 crossReferences
             };
