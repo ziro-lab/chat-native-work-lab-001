@@ -1,7 +1,7 @@
 # YMM4 no-Harmony Full — P7 Release Gate Plan
 
 作成日: 2026-09-23  
-状態: **ACTIVE / RELEASE CANDIDATE PREP**
+状態: **COMPLETE / FROZEN — v0.1.0 RELEASE-READY**
 
 P6 is frozen at:
 
@@ -190,8 +190,34 @@ Runtime behavior is already frozen through P6, including:
 
 P7 reopens runtime behavior only if release packaging/metadata changes a runtime-relevant surface.
 
-## 6. Exit
+## 6. Final acceptance
 
-P7 is complete only when one canonical release package, without rebuild, passes both supported hosts and the package/documentation/recovery contracts above.
+Freeze record:
 
-At that point the no-Harmony Full candidate is release-ready.
+- `docs/YMM4_NO_HARMONY_P7_RELEASE_FREEZE.md`
+- accepted release source: `83305edf47059ee4d707176c53e33d75d36e724c`
+- final canonical workflow: `35866123710`
+
+Canonical identities:
+
+- .ymme SHA256:
+  `1cf501c85ef85333991d1120a0a4a9d6ec107bdd77acbe16ddbfbb118952b8d0`
+- DLL SHA256:
+  `aedc719d9147ec1dde0d1ee760d85ff7072d65eefe3c4aa64b482d69ac39a3d7`
+
+The exact same package/DLL bytes passed install, startup/attach, uninstall, and post-uninstall host startup on both:
+
+- YMM4 4.55.1.1 Lite;
+- YMM4 4.56.1.0 Lite.
+
+Final marker:
+
+`PASS_P7_CANONICAL_RELEASE`
+
+## 7. Exit
+
+P7 is **COMPLETE / FROZEN**.
+
+P0-P7 are all frozen and `レイヤーフォルダ (no-Harmony) v0.1.0` is release-ready.
+
+Publishing a GitHub Release or merging the stacked PR chain is a separate explicit operator action.
