@@ -37,12 +37,12 @@ Do not add a type-specific adapter merely because setup differs.
 
 | Family | Candidate host type | Fixture route | 4.55.1.1 | 4.56.1.0 | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Voice / speech | `VoiceItem` | public ctor; runtime viability next | Metadata confirmed | Metadata confirmed | Parameterless + Character ctor exist on both hosts |
-| Text-like | `TextItem` | public parameterless ctor | Metadata confirmed | Metadata confirmed | Also has VoiceItem-copy ctor |
-| Image | `ImageItem` | parameterless / string file / real FileDrop | Metadata confirmed | Metadata confirmed | Existing PNG FileDrop is related evidence, not full P5 classification |
-| Video | `VideoItem` | parameterless / string file | Metadata confirmed | Metadata confirmed | Media-backed runtime route still needs fixture |
-| Audio | `AudioItem` | parameterless / string file | Metadata confirmed | Metadata confirmed | Media-backed runtime route still needs fixture |
-| Shape | `ShapeItem` | public parameterless ctor | Metadata confirmed | Metadata confirmed | Strong zero-resource fixture candidate |
+| Voice / speech | `VoiceItem` | parameterless common path; configured speaker needed for history | Common-path with setup | Common-path with setup | Geometry/fold/timing/select confirmed; configured-voice history pending |
+| Text-like | `TextItem` | public parameterless ctor | **Confirmed** | **Confirmed** | Full P5.3 common path + block move Undo/Redo |
+| Image | `ImageItem` | parameterless common path; file-backed fixture next | Common path confirmed | Common path confirmed | Full P5.3 path confirmed; real PNG FileDrop already P0 evidence |
+| Video | `VideoItem` | parameterless common path; media fixture next | Common path confirmed | Common path confirmed | Full P5.3 path confirmed; media-backed playback/resource path pending |
+| Audio | `AudioItem` | parameterless common path; media fixture next | Common path confirmed | Common path confirmed | Full P5.3 path confirmed; media-backed resource path pending |
+| Shape | `ShapeItem` | public parameterless ctor | **Confirmed** | **Confirmed** | Full P5.3 common path + block move Undo/Redo |
 | Group Control | `GroupItem` | public item construction | **P4 confirmed** | **P4 confirmed** | P5 may reuse as baseline/special-item control |
 | Effect-bearing item | discovery pending | one representative item + effect | Pending | Pending | Effect itself need not become a folder-owned model |
 | Transition / special multi-layer | discovery pending | pending | Pending | Pending | Only test if a concrete shipped item uses distinct layer/visual semantics |
@@ -107,6 +107,85 @@ The first frozen common-path assumption is strongly supported:
 > built-in concrete item classes share one public BaseItem positional contract on both pinned hosts.
 
 This is still metadata evidence, not runtime compatibility. The next gate is zero-resource fixture viability: instantiate each public parameterless type, attempt native Timeline insertion, and classify which families can be exercised without external media/voice/plugin resources.
+
+## 5.2 Zero-resource fixture viability — COMPLETE
+
+Workflow:
+
+- `35835578672`
+
+Both pinned hosts:
+
+- all **13/13** concrete built-in types construct through their public parameterless constructor;
+- all **13/13** are accepted by `Timeline.TryAddItems`;
+- all **13/13** remain live Timeline items;
+- no Harmony loaded.
+
+Artifacts:
+
+- 4.55.1.1: `10738953558`, `sha256:7f25a24cf3a7cfba0f1809149b37e22888f4837864407b5e325f2378ae44d57a`;
+- 4.56.1.0: `10739246243`, `sha256:894e45bd4ecdca96caf62dec8494c094fbce65988bc8154309cd8e6335e72eb4`.
+
+The standalone viability probe deliberately does **not** use its VM-count as a type-compatibility verdict. Timeline item VMs are viewport-virtualized; the number present depends on the realized Timeline viewport. That observation is useful host behavior, but it is not an item-family failure.
+
+Common geometry compatibility is therefore accepted only in the P5.3 product-candidate gate below, where the viewport is realized and controlled.
+
+## 5.3 Common built-in product compatibility — COMPLETE
+
+Workflow:
+
+- `35835578837`
+
+Both pinned hosts returned:
+
+- `PASS_P5_COMMON_BUILTINS`;
+- concrete built-in types = **13**;
+- construct / add / live = **13/13**;
+- public Timeline item VM geometry = **13/13**;
+- FoldMap owner mapping = **13/13**;
+- hidden timing summary = **13/13**;
+- folder item selection = **13/13**;
+- no item-type-specific folder adapter.
+
+Representative built-in set:
+
+`AudioItem, EffectItem, FrameBufferItem, GroupItem, ImageItem, SceneItem, ShapeItem, TachieFaceItem, TachieItem, TextItem, TransitionItem, VideoItem, VoiceItem`
+
+### History-bearing explicit move
+
+A synthetic parameterless `VoiceItem` without a configured speaker is a known invalid resource fixture for YMM4 history recording. P4 already observed that YMM4 resource refresh can reject it at `UndoRedoManager.Record()`.
+
+P5 therefore separates two claims:
+
+1. **VoiceItem common folder/display path** — confirmed for construct/add/live/common geometry/fold/timing summary/selection.
+2. **Configured VoiceItem history path** — still **Common-path with setup** and requires a real configured speaker/voice fixture.
+
+After removing only the synthetic zero-resource Voice fixture, the remaining **12/12 built-in types** passed:
+
+- explicit folder block move;
+- shared Layer mapping;
+- one-step Undo;
+- one-step Redo;
+- common geometry after move.
+
+Artifacts:
+
+- 4.55.1.1: `10739685300`, `sha256:7eccc47921180ca12fcfc73e1c8b2b4902da48b5dfc89763a8ed9b23d74837bb`;
+- 4.56.1.0: `10738572961`, `sha256:b7320261ec61428d3247278d20b5dd33f7844b4d4e8c6a08e1e4957d0e5ce933`.
+
+### P5.3 conclusion
+
+The frozen P4 common path is valid across every built-in concrete item class for non-resource-specific folder/display operations on both pinned hosts.
+
+No built-in type has yet justified:
+
+- a type-specific FolderDocument;
+- a type-specific FoldMap;
+- a type-specific structural observer;
+- a type-specific Undo path;
+- a type-specific timing-coordinate formula.
+
+The remaining built-in work is **resource realism**, not core folder architecture: configured Voice history and media-backed Image/Video/Audio behavior.
 
 ## 6. Exit gate
 
