@@ -15,6 +15,7 @@ using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Plugin.Voice;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.UndoRedo;
 using YukkuriMovieMaker.Voice;
 
@@ -123,6 +124,20 @@ internal static class Probe
         var manager = managerAcquisition.Manager
             ?? throw new InvalidOperationException("UndoRedoManager acquisition returned null.");
         Check("host_undo_manager_acquired", true);
+
+        var managerPublicMethods = manager.GetType()
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .Where(m => !m.IsSpecialName)
+            .Select(m => new
+            {
+                m.Name,
+                returnType = m.ReturnType.FullName,
+                parameters = m.GetParameters().Select(p => p.ParameterType.FullName).ToArray()
+            })
+            .OrderBy(x => x.Name)
+            .ToArray();
+        Log("manager_public_methods=" + JsonSerializer.Serialize(managerPublicMethods));
+        Log("command_type_names=" + string.Join(",", Enum.GetNames(typeof(CommandType))));
 
         var engine = new VOICEVOXEngine(new VOICEVOXEngineContext())
         {
@@ -330,11 +345,30 @@ internal static class Probe
             await Task.Delay(250);
 
             Log($"before_undo recorded={recorded} undoed={undoed} redoed={redoed} callbacks={undoCallbacks}/{redoCallbacks}");
+
+            var undoMethod = manager.GetType().GetMethod(
+                "Undo",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+            var redoMethod = manager.GetType().GetMethod(
+                "Redo",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+            Check("manager_public_undo_available", undoMethod is not null);
+            Check("manager_public_redo_available", redoMethod is not null);
+
             var undoEventBefore = undoed;
-            await Native.Key(0x5A, ctrl: true);
-            Log($"after_undo_key undoed={undoed} callbacks={undoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
+            if (undoMethod is null)
+                throw new MissingMethodException(manager.GetType().FullName, "Undo()");
+            undoMethod.Invoke(manager, null);
+            await Task.Delay(250);
+            Log($"after_manager_undo undoed={undoed} callbacks={undoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
             await WaitUntil(
-                "correction undo stabilization",
+                "correction manager undo stabilization",
                 () => undoed > undoEventBefore
                    && undoCallbacks == 1
                    && ReferenceEquals(voice.Pronounce, baseline.Pronounce)
@@ -350,10 +384,13 @@ internal static class Probe
                 HashFile(voicePath) == baselineHash);
 
             var redoEventBefore = redoed;
-            await Native.Key(0x59, ctrl: true);
-            Log($"after_redo_key redoed={redoed} callbacks={redoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
+            if (redoMethod is null)
+                throw new MissingMethodException(manager.GetType().FullName, "Redo()");
+            redoMethod.Invoke(manager, null);
+            await Task.Delay(250);
+            Log($"after_manager_redo redoed={redoed} callbacks={redoCallbacks} pause={GetPauseVowelLength(GetAudioQuery(voice.Pronounce!))} hash={HashFile(voicePath)}");
             await WaitUntil(
-                "correction redo stabilization",
+                "correction manager redo stabilization",
                 () => redoed > redoEventBefore
                    && redoCallbacks == 1
                    && ReferenceEquals(voice.Pronounce, corrected.Pronounce)
@@ -369,9 +406,10 @@ internal static class Probe
                 HashFile(voicePath) == correctedHash);
 
             undoEventBefore = undoed;
-            await Native.Key(0x5A, ctrl: true);
+            undoMethod.Invoke(manager, null);
+            await Task.Delay(250);
             await WaitUntil(
-                "final undo stabilization",
+                "final manager undo stabilization",
                 () => undoed > undoEventBefore
                    && undoCallbacks == 2
                    && ReferenceEquals(voice.Pronounce, baseline.Pronounce)
