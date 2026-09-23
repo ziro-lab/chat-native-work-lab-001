@@ -107,7 +107,7 @@ internal static class Probe
 
     static async Task RunAsync(Window window, object main, object active, string url)
     {
-        window.WindowState = WindowState.Normal;
+        window.WindowState = System.Windows.WindowState.Normal;
         window.Left = 0;
         window.Top = 0;
         window.Width = 1000;
