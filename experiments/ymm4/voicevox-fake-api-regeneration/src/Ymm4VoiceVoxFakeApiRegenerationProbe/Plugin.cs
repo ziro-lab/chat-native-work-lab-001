@@ -71,7 +71,7 @@ internal static class Probe
             var speaker = (IVoiceSpeaker)speakerObject;
             Check("builtin_speaker_constructed", speaker is not null);
 
-            var parameter = speaker.CreateVoiceParameter()
+            var parameter = speaker!.CreateVoiceParameter()
                 ?? throw new InvalidOperationException("CreateVoiceParameter returned null");
             Check("voice_parameter_constructed", true);
             var styleProp = parameter.GetType().GetProperty("StyleID", BindingFlags.Instance | BindingFlags.Public);
