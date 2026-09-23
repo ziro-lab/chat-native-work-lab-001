@@ -1,11 +1,18 @@
 # YMM4 no-Harmony Full — P6 Hardening & Performance Plan
 
-Status: **ACTIVE / P6.1 NEXT**
+Status: **COMPLETE / FROZEN**
 
 P5 compatibility is frozen at:
 
 - `docs/YMM4_NO_HARMONY_P5_COMPATIBILITY_FREEZE.md`
 - P5 freeze branch HEAD `43886abe2699adb56495498495b3335d7a0aa882`
+
+P6 freeze record:
+
+- `docs/YMM4_NO_HARMONY_P6_HARDENING_FREEZE.md`
+- accepted product runtime source: `4d9fae9a8b96d069d6d2b6923bc33f00035967eb`
+- final evidence source: `ea0feed7b06c7b9fa172c62163fe41486654e54b`
+- final dual-host run: `35861609755`
 
 P6 does not add product features. It attempts to break the frozen P4/P5 architecture under larger, repeated, long-lived, and lifecycle-sensitive workloads.
 
@@ -27,7 +34,7 @@ P6 does not add product features. It attempts to break the frozen P4/P5 architec
 
 ## 2. P6 gates
 
-### P6.1 — bounded density / nesting / fold stress
+### P6.1 — bounded density / nesting / fold stress — COMPLETE / FROZEN
 
 Target:
 
@@ -45,7 +52,7 @@ Target:
 
 This is a hardening gate, not a throughput benchmark.
 
-### P6.2 — repeated structural/history cycles
+### P6.2 — repeated structural/history cycles — COMPLETE / FROZEN
 
 Representative repeated operations:
 
@@ -58,7 +65,7 @@ Representative repeated operations:
 
 Acceptance focuses on exact final state, bounded history ownership, and no drift after repeated cycles.
 
-### P6.3 — viewport / visual soak
+### P6.3 — viewport / visual soak — COMPLETE / INTEGRATED INTO P6.1
 
 Repeated:
 
@@ -74,7 +81,7 @@ Acceptance:
 - no stale hidden views;
 - no continuously increasing refresh/subscription counts after settling.
 
-### P6.4 — project/session lifecycle
+### P6.4 — project/session lifecycle — COMPLETE / FROZEN
 
 Representative:
 
@@ -85,7 +92,7 @@ Representative:
 - pending Dispatcher work during detach;
 - old-session callbacks cannot mutate the new session.
 
-### P6.5 — failure / recovery boundaries
+### P6.5 — failure / recovery boundaries — COMPLETE / FROZEN
 
 Inject bounded failures around:
 
@@ -102,7 +109,7 @@ Acceptance:
 - no unrelated Undo rollback;
 - recovery/raw preservation remains intact.
 
-### P6.6 — final dual-host soak / freeze
+### P6.6 — final dual-host soak / freeze — COMPLETE / FROZEN
 
 Run the representative P6 profile on both pinned hosts and record:
 
@@ -147,6 +154,8 @@ Record at least:
 
 Subscription stability is measured after setup and after repeated steady-state cycles. One-time growth caused by newly created host objects is distinguished from per-cycle leakage.
 
+The accepted P6.1 profile also includes a bounded 8-second idle soak after the repeated fold/viewport work has settled. Both pinned hosts recorded zero DirectDisplay application, mutation, canvas-refresh, and subscription deltas during that idle window.
+
 ## 5. P6 exit
 
 P6 is complete when the frozen architecture survives the defined density, repetition, viewport, lifecycle and failure scenarios without:
@@ -159,4 +168,6 @@ P6 is complete when the frozen architecture survives the defined density, repeti
 - old-session writes into a new project;
 - unsafe failure recovery.
 
-The next gate after P6 is P7 Release.
+**Exit satisfied.** See `docs/YMM4_NO_HARMONY_P6_HARDENING_FREEZE.md`.
+
+The next gate after P6 is **P7 Release**.
