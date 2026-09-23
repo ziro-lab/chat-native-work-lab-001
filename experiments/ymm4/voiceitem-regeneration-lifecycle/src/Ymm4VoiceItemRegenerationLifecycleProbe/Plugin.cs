@@ -164,6 +164,7 @@ internal static class Probe
             var voice = new VoiceItem
             {
                 Serif = "ア",
+                Hatsuon = "ア",
                 CharacterName = projectCharacter.Name,
                 VoiceParameter = parameter
             };
@@ -174,28 +175,6 @@ internal static class Probe
             Check("voice_present_in_real_timeline", timeline.Items.Any(x => ReferenceEquals(x, voice)));
             Check("voice_uses_fake_character",
                 ReferenceEquals(voice.Character, projectCharacter));
-
-            Exception? analysisError = null;
-            try
-            {
-                await voice.SerifToHatsuonAsync();
-            }
-            catch (Exception ex)
-            {
-                analysisError = ex;
-            }
-            Check("serif_to_hatsuon_completed", analysisError is null);
-            if (analysisError is not null)
-                throw new InvalidOperationException("SerifToHatsuonAsync failed.", analysisError);
-
-            var initialPronounce = voice.Pronounce
-                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after SerifToHatsuonAsync.");
-            Check("initial_voicevox_pronounce_created",
-                initialPronounce.GetType().FullName?.Contains("VOICEVOXVoicePronounce", StringComparison.Ordinal) == true);
-
-            var initialQuery = GetAudioQuery(initialPronounce);
-            var initialPause = GetPauseVowelLength(initialQuery);
-            Check("initial_pause_from_audio_query_nonzero", initialPause > 0.0);
 
             Exception? initialError = null;
             try
@@ -210,29 +189,75 @@ internal static class Probe
             if (initialError is not null)
                 throw new InvalidOperationException("Initial VoiceItem generation failed.", initialError);
 
-            voice.BeginEdit();
+            var voicePath = voice.FilePath;
+            Check("real_voiceitem_file_path_available",
+                !string.IsNullOrWhiteSpace(voicePath) && File.Exists(voicePath));
+            if (string.IsNullOrWhiteSpace(voicePath) || !File.Exists(voicePath))
+                throw new InvalidOperationException("Real VoiceItem file path was unavailable after generation.");
+
+            IVoicePronounce? baselinePronounce = null;
+            Exception? analysisError = null;
+            var analysisPath = Path.Combine(output, "baseline-analysis.wav");
+            try
+            {
+                baselinePronounce = await speaker.CreateVoiceAsync(
+                    voice.Hatsuon,
+                    pronounce: null,
+                    parameter,
+                    analysisPath);
+            }
+            catch (Exception ex)
+            {
+                analysisError = ex;
+            }
+            Check("public_speaker_analysis_completed", analysisError is null);
+            if (analysisError is not null)
+                throw new InvalidOperationException("Public speaker baseline analysis failed.", analysisError);
+            if (baselinePronounce is null)
+                throw new InvalidOperationException("Public speaker returned null Pronounce.");
+
+            voice.Pronounce = baselinePronounce;
+            Check("pronounce_assigned_to_real_voiceitem",
+                ReferenceEquals(voice.Pronounce, baselinePronounce));
+
+            var initialQuery = GetAudioQuery(baselinePronounce);
+            var initialPause = GetPauseVowelLength(initialQuery);
+            Check("initial_pause_from_audio_query_nonzero", initialPause > 0.0);
+
             SetPauseVowelLength(initialQuery, 0.0);
             var patchedPause = GetPauseVowelLength(initialQuery);
             Check("patched_pause_is_zero", patchedPause == 0.0);
 
-            Exception? editError = null;
+            IVoicePronounce? regeneratedPronounce = null;
+            Exception? regenerationError = null;
             try
             {
-                await voice.EndEditAsync();
+                regeneratedPronounce = await speaker.CreateVoiceAsync(
+                    voice.Hatsuon,
+                    baselinePronounce,
+                    parameter,
+                    voicePath);
             }
             catch (Exception ex)
             {
-                editError = ex;
+                regenerationError = ex;
             }
-            Check("public_voice_edit_lifecycle_completed", editError is null);
-            if (editError is not null)
-                throw new InvalidOperationException("VoiceItem EndEditAsync failed.", editError);
+            Check("public_speaker_regeneration_completed", regenerationError is null);
+            if (regenerationError is not null)
+                throw new InvalidOperationException("Public speaker regeneration failed.", regenerationError);
+            if (regeneratedPronounce is null)
+                throw new InvalidOperationException("Public speaker regeneration returned null Pronounce.");
 
-            var finalPronounce = voice.Pronounce
-                ?? throw new InvalidOperationException("VoiceItem.Pronounce was null after edit lifecycle.");
-            var finalQuery = GetAudioQuery(finalPronounce);
+            voice.ClearVoiceCache();
+            voice.Pronounce = regeneratedPronounce;
+            Check("regenerated_pronounce_assigned_to_real_voiceitem",
+                ReferenceEquals(voice.Pronounce, regeneratedPronounce));
+
+            var finalQuery = GetAudioQuery(regeneratedPronounce);
             var finalPause = GetPauseVowelLength(finalQuery);
-            Check("patched_pause_survives_edit_lifecycle", finalPause == 0.0);
+            Check("patched_pause_survives_regeneration", finalPause == 0.0);
+            Check("regenerated_real_voiceitem_file_exists",
+                File.Exists(voicePath) && new FileInfo(voicePath).Length > 44);
 
             File.WriteAllText(
                 Path.Combine(output, "lifecycle-observation.json"),
@@ -249,9 +274,11 @@ internal static class Probe
                     },
                     initial = new
                     {
-                        pronounceType = initialPronounce.GetType().FullName,
+                        pronounceType = baselinePronounce.GetType().FullName,
                         pauseVowelLength = initialPause,
                         voice.FilePath,
+                        voiceFileLength = new FileInfo(voicePath).Length,
+                        analysisFileLength = File.Exists(analysisPath) ? new FileInfo(analysisPath).Length : 0,
                         voiceCacheLength = voice.VoiceCache?.Length ?? 0
                     },
                     patched = new
@@ -260,10 +287,11 @@ internal static class Probe
                     },
                     regenerated = new
                     {
-                        pronounceType = finalPronounce.GetType().FullName,
+                        pronounceType = regeneratedPronounce.GetType().FullName,
                         pauseVowelLength = finalPause,
-                        samePronounceReference = ReferenceEquals(initialPronounce, finalPronounce),
+                        samePronounceReference = ReferenceEquals(baselinePronounce, regeneratedPronounce),
                         voice.FilePath,
+                        voiceFileLength = new FileInfo(voicePath).Length,
                         voiceCacheLength = voice.VoiceCache?.Length ?? 0
                     }
                 }, new JsonSerializerOptions { WriteIndented = true }));
