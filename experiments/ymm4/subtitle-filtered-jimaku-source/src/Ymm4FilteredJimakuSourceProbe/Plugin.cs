@@ -216,6 +216,7 @@ internal static class Probe
             Serif=serif,
             CharacterName="CNWL Probe"
         };
+        TrySetEnum(item,"JimakuVisibility","Custom");
         TrySet(item,"Font","Yu Gothic UI");
         TrySet(item,"BasePoint",BasePoint.LeftTop);
         return item;
@@ -227,6 +228,17 @@ internal static class Probe
         {
             var p=target.GetType().GetProperty(propertyName,BindingFlags.Instance|BindingFlags.Public);
             if(p?.SetMethod?.IsPublic==true) p.SetValue(target,value);
+        }
+        catch { }
+    }
+
+    static void TrySetEnum(object target,string propertyName,string enumName)
+    {
+        try
+        {
+            var p=target.GetType().GetProperty(propertyName,BindingFlags.Instance|BindingFlags.Public);
+            if(p?.SetMethod?.IsPublic!=true || !p.PropertyType.IsEnum) return;
+            p.SetValue(target,Enum.Parse(p.PropertyType,enumName,ignoreCase:true));
         }
         catch { }
     }
