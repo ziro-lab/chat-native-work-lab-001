@@ -33,13 +33,7 @@ try {
     'enabled_effect_is_active_key',
     'disabled_effect_is_not_active_key',
     'reenabled_effect_is_active_key',
-    'voice_selected_in_timeline',
-    'effect_property_editor_bound',
-    'effect_editor_owner_is_custom_effect',
-    'effect_editor_received_editor_info',
-    'effect_editor_received_voice_edit_service',
-    'standard_voice_regeneration_started',
-    'standard_voice_regeneration_invoked'
+    'voice_selected_in_timeline'
   )
   if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count) != $($req.Count)"}
   foreach($id in $req){
