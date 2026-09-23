@@ -912,29 +912,39 @@ P6 built one normal package separately against each host. P7 must produce **one 
 
 ## P7 — Release Gate
 
-**Purpose:** produce a distributable Full candidate.
+**Status: COMPLETE / FROZEN — v0.1.0 RELEASE-READY.**
 
-### Scope
+Freeze record:
 
-- package layout;
-- plugin metadata;
-- README / install / uninstall;
-- compatibility statement;
-- version / schema policy;
-- known limitations;
-- recovery instructions;
-- release artifact verification.
+- `docs/YMM4_NO_HARMONY_P7_RELEASE_FREEZE.md`
 
-### Full candidate acceptance
+Accepted release source / run:
 
-A release candidate is acceptable only when:
+- source `83305edf47059ee4d707176c53e33d75d36e724c`;
+- workflow `35866123710`.
 
-- P0-P6 are frozen green;
-- no Harmony dependency is present;
-- both pinned hosts pass the final acceptance suite;
-- persistence has a recovery path;
-- unsupported cases fail safely;
-- packaged bits match the tested bits.
+Canonical release identity:
+
+- `YMM4_LayerFolder_noHarmony_v0.1.0.ymme`;
+- .ymme SHA256:
+  `1cf501c85ef85333991d1120a0a4a9d6ec107bdd77acbe16ddbfbb118952b8d0`;
+- DLL SHA256:
+  `aedc719d9147ec1dde0d1ee760d85ff7072d65eefe3c4aa64b482d69ac39a3d7`.
+
+Final acceptance:
+
+- one canonical package built once against the 4.55.1.1 compatibility floor;
+- the same package/DLL bytes installed unchanged on 4.55.1.1 and 4.56.1.0;
+- startup/attach PASS on both;
+- uninstall + host startup without plugin PASS on both;
+- package/DLL SHA identity preserved on both;
+- README / LICENSE / THIRD_PARTY_NOTICES release contract PASS;
+- no P6 probe payload in release build;
+- no Harmony;
+- same-head release-relevant regressions GREEN;
+- final marker `PASS_P7_CANONICAL_RELEASE`.
+
+The candidate is release-ready. Actual publication and stacked-PR merge are separate explicit operator actions.
 
 ---
 
@@ -967,7 +977,7 @@ P0 Core Spine                 DONE
   -> P4 Full freeze             DONE
   -> P5 compatibility           DONE
   -> P6 hardening               DONE
-  -> P7 release                 NEXT
+  -> P7 release                 DONE
 ```
 
 P0-P3 are frozen. If later phases expose evidence that contradicts a frozen assumption, reopen only the affected gate with a new isolated proof rather than broadly rewriting earlier phases.
@@ -990,6 +1000,6 @@ To avoid turning the Full exploration into an unbounded rewrite:
 
 **P4 Full feature construction:** complete and frozen at `docs/YMM4_NO_HARMONY_P4_FULL_FREEZE.md`.
 
-**Release completion:** not yet. P0-P6 are frozen; completion now requires the P7 Release Gate.
+**Release completion:** complete at the P7 freeze. P0-P7 are frozen and v0.1.0 is release-ready. Publication/merge is a separate operator action.
 
 This distinction should remain explicit in PRs and release notes.

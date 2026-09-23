@@ -1,88 +1,203 @@
-# P4.4 no-Harmony folder Hands-on Candidate
+# レイヤーフォルダ (no-Harmony) v0.1.0
 
-This is a **manual UX candidate**, not a release build.
+YukkuriMovieMaker4（YMM4）のタイムラインで、複数レイヤーをフォルダとしてまとめ、折りたたんで表示できるプラグインです。
 
-It composes the already-green P0-P4 mechanisms into one plugin that can be installed into YMM4 and used without Lab fixture injection.
+このプラグインは **Harmonyを使用しません**。YMM4の標準操作・Undo/Redo・プロジェクト保存をできるだけそのまま利用しながら、レイヤーの表示とフォルダ操作を補助します。
 
-## Supported hands-on workflow
+## 対応確認済みYMM4
 
-Normal work is done from the Timeline layer-name column.
+v0.1.0は次の環境で実機自動検証しています。
 
-1. Select **2 or more contiguous layers** with normal YMM4 layer selection.
-2. Right-click a visible layer in the layer-name column.
-3. Open **レイヤーフォルダ**.
-4. Choose `Lx–Ly をフォルダにまとめる...`.
-5. Enter a name.
-6. Click the visible folder tag to collapse / expand.
-7. Right-click the folder range for:
-   - open / close;
-   - rename;
-   - **フォルダを解除（レイヤーは残す）**.
+- YMM4 4.55.1.1 Lite
+- YMM4 4.56.1.0 Lite
+- Windows
+- .NET 10
 
-A Tool entry named **レイヤーフォルダ (no-Harmony)** exists only so YMM4 owns the project ToolState. The Tool panel does not need to be open for normal editing.
+この範囲外のYMM4でも動作する可能性はありますが、このリリースでの互換性保証範囲には含めません。
 
-## Candidate behavior
+## インストール
 
-- no Harmony;
-- FoldMap/DirectDisplay owns folded geometry;
-- right-click maps folded display Y -> logical Layer through the frozen common mapping;
-- current realized YMM4 ContextMenu is extended, not replaced;
-- multiple folders and valid nested folders are displayed;
-- folder metadata commands use YMM4 UndoRedoManager history;
-- folder state is stored in project ToolState.SavedState;
-- malformed/newer unreadable state is preserved raw and editing is blocked rather than silently overwriting it;
-- project switch synchronizes from the host-restored ToolArea state;
-- a new project clears inherited folder metadata.
+### .ymmeからインストール
 
-## Creation candidate
+1. YMM4を終了します。
+2. `YMM4_LayerFolder_noHarmony_v0.1.0.ymme` をYMM4で開きます。
+3. YMM4のプラグインインストール画面に従ってインストールします。
+4. YMM4を起動します。
 
-For P4 hands-on:
+### 手動インストール
 
-- at least 2 selected layers;
-- selection must be contiguous;
-- nested/disjoint valid ranges are allowed;
-- crossing ranges and duplicate heads are rejected;
-- a single selected layer does **not** auto-insert another layer.
-
-This is intentionally still a UX candidate. Hands-on feedback can change the convenience policy without reopening the frozen FolderDocument model.
-
-## Known P3 limitation
-
-If this plugin is **completely unavailable** and a project containing folder metadata is opened and re-saved, YMM4 does not preserve the absent plugin's ToolState entry. The YMM4 project remains usable, but folder metadata can be lost.
-
-Do not test uninstall/re-save on an important project. Keep the previous project file / backup.
-
-## Manual install
-
-Place the candidate folder under:
+DLLを手動で配置する場合は、YMM4を終了した状態で次の場所へ配置してください。
 
 ```text
-<YMM4 folder>\user\plugin\Ymm4NoHarmonyFolderHandsOn\
+<YMM4フォルダ>\user\plugin\Ymm4NoHarmonyFolderHandsOn\
+  Ymm4NoHarmonyFolderHandsOn.dll
 ```
 
-with:
+内部のフォルダ名・DLL名に `HandsOn` が残っていますが、これは既存のプロジェクト状態やアップグレードとの互換性を優先して維持している内部識別子です。表示上のプラグイン名は **レイヤーフォルダ (no-Harmony)** です。
+
+## 更新
+
+新しいバージョンを入れるときはYMM4を終了してから更新してください。
+
+v0.1.0では、既存候補版との互換性を優先して次の内部識別子を維持しています。
+
+- `Ymm4NoHarmonyFolderHandsOn.dll`
+- `user\plugin\Ymm4NoHarmonyFolderHandsOn\`
+
+同じ内部識別子を持つ旧版と新版を別フォルダへ同時に置かないでください。
+
+## 主な機能
+
+### フォルダ作成・折りたたみ
+
+- 選択レイヤーをフォルダ化
+- 選択に隙間がある場合は最小～最大レイヤーを範囲として扱う
+- 選択外のレイヤーから作成した場合は、そのレイヤーを対象にする
+- 1レイヤーだけの作成では、必要な空レイヤーを1つ追加してフォルダ化
+- ネストしたフォルダ
+- 折りたたみ / 展開
+- すべて展開 / すべて折りたたみ
+- 名前変更
+- フォルダ解除（レイヤーとアイテムは残す）
+- フォルダ内アイテムの選択
+
+### レイヤー・フォルダ管理
+
+- フォルダ色
+- フォルダ単位の非表示
+- 非表示前の各レイヤー表示状態を復元
+- フォルダ色をYMM4のレイヤー色へ適用
+- フォルダ末尾へレイヤー追加
+- フォルダ内の指定レイヤー下へレイヤー追加
+- フォルダ内容を含む構造削除
+- Group Controlの追加
+- GroupRangeの問題表示とFit
+
+### 管理パネル
+
+**レイヤーフォルダ (no-Harmony)** ツールから、フォルダとレイヤーを一覧管理できます。
+
+- F2で名前変更
+- Ctrl+Gなどのフォルダ操作
+- 展開 / 折りたたみ
+- Timeline追従
+- 現在位置のアイテム情報
+- Group警告
+- 色 / 表示 / アイテム選択
+- Before / Into / After の明示的ドラッグ＆ドロップ
+- 複数行を含むフォルダ単位の移動
+
+### 折りたたみ中の時間情報
+
+折りたたまれたレイヤーのアイテムは、オーナー行上に細いタイミング帯として表示されます。
+
+折りたたみの影響を受けるGroupRangeについても補助表示します。通常表示のYMM4アイテムを別の独自アイテムへ置き換える仕組みではありません。
+
+## Undo / Redo
+
+フォルダ操作は、可能な限りYMM4の標準Undo/Redo履歴と同じ境界で動作します。
+
+標準のレイヤー追加・削除・移動、フォルダの構造操作、明示的なブロック移動などについて、YMM4のUndo/Redoとフォルダ状態が一緒に戻ることを検証しています。
+
+## プロジェクトへの保存
+
+フォルダ情報はYMM4プロジェクトのToolStateに保存されます。
+
+現在の保存形式は、既存のcore folderデータを内包する **product schema v2** です。旧v1データからの読み込み経路を持ちます。
+
+新しいバージョンなどで読めない保存データを検出した場合は、勝手に空データで上書きせず、元のrawデータを保持したままフォルダ編集をロックします。
+
+新規プロジェクトでは前のプロジェクトのフォルダ情報を引き継がず、プロジェクト切替時もそれぞれの状態を分離します。
+
+## 重要：アンインストール前のバックアップ
+
+**重要なプロジェクトを、このプラグインを外した状態で開いて再保存する前に、必ず元のプロジェクトファイルを残してください。**
+
+YMM4では、プラグインが完全に存在しない状態で、そのプラグインのToolStateを含むプロジェクトを開いて再保存すると、存在しないプラグインのToolStateが保存されない場合があります。
+
+その場合でもYMM4のプロジェクト本体は利用できますが、**このプラグインのフォルダ情報は失われる可能性があります**。
+
+## アンインストール
+
+1. 重要なプロジェクトをバックアップします。
+2. YMM4を終了します。
+3. 次のフォルダを削除します。
 
 ```text
-Ymm4NoHarmonyFolderHandsOn.dll
+<YMM4フォルダ>\user\plugin\Ymm4NoHarmonyFolderHandsOn\
 ```
 
-then restart YMM4.
+4. YMM4を起動します。
 
-## Hands-on script
+アンインストール後にフォルダ情報を保持したいプロジェクトを再保存しないよう注意してください。
 
-Use:
+## 互換性確認範囲
 
-`docs/YMM4_NO_HARMONY_P4_HANDS_ON.md`
+YMM4 4.55.1.1 Lite / 4.56.1.0 Liteで、次のbuilt-in itemを共通経路で確認しています。
 
-The manual run is for discoverability, comfort, wording and visual continuity. It should not manually re-prove the automated mechanism assertions.
+- AudioItem
+- EffectItem
+- FrameBufferItem
+- GroupItem
+- ImageItem
+- SceneItem
+- ShapeItem
+- TachieFaceItem
+- TachieItem
+- TextItem
+- TransitionItem
+- VideoItem
+- VoiceItem
 
-## Not yet a release claim
+さらに、
 
-Deferred from this candidate:
+- 実PNG / WAV / MP4を使ったImage / Audio / Video
+- YMM4同梱Recorded Voiceを使った設定済みVoice
+- Group / Effect / Transition
+- MITライセンスのYMM43D `LightItem : BaseItem`
 
-- final styling / color system;
-- folder-wide hide/show;
-- group-control conveniences;
-- broad special-item compatibility;
-- large-project performance;
-- final packaging / installer / release docs.
+を代表互換性ケースとして検証しています。
+
+これは、すべての第三者YMM4プラグインとの無条件な互換性を保証するものではありません。
+
+## 既知の制限
+
+### selection通知を伴わないbare ScrollToItem
+
+YMM4側から `TimelineViewModel.ScrollToItem` が単独で呼ばれ、selection変更通知も発生しない経路は、折りたたみ表示を考慮した縦位置補正の対象になりません。
+
+次の経路は対応しています。
+
+- YMM4側で単一選択が変化するナビゲーション
+- このプラグインが明示的に行うアイテムナビゲーション
+
+未対応のbare `ScrollToItem` は表示上のナビゲーション制限であり、アイテム座標やフォルダ情報を書き換えるものではありません。
+
+### プラグイン不在時の再保存
+
+前述のとおり、プラグインが完全に存在しない状態でプロジェクトを再保存すると、フォルダ情報が失われる可能性があります。
+
+## Hardening確認
+
+v0.1.0では、両対応YMM4上で次のbounded stressを確認しています。
+
+- 128レイヤー
+- 384アイテム
+- 24フォルダ
+- ネスト深度8
+- 折りたたみ / 展開の反復
+- zoom / 縦横scroll / window resizeの反復
+- Undo/Redo 72遷移
+- Project切替4回
+- controller detach後のsubscription cleanup
+- 8秒idle時の不要なdisplay mutation / refresh / subscription増加なし
+
+これは**処理速度や最大プロジェクト規模の保証値ではありません**。長時間利用や大きめの構成で状態が崩れないことを確認するためのbounded hardening条件です。
+
+## ライセンス
+
+この配布物のオリジナルコードとドキュメントはApache License 2.0です。
+
+同梱の `LICENSE` と `THIRD_PARTY_NOTICES.md` を参照してください。
+
+YMM4本体や検証に利用した第三者プラグインのバイナリは、この配布物には含まれません。

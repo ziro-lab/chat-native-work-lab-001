@@ -1,0 +1,372 @@
+name: YMM4 no-Harmony P7 canonical release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
+      - 'docs/YMM4_NO_HARMONY_P7_RELEASE_PLAN.md'
+      - '.github/workflows/ymm4-no-harmony-p4-ymme-package.yml'
+      - '.github/workflows/ymm4-no-harmony-p7-release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p7-canonical-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      RELEASE_VERSION: '0.1.0'
+      PACKAGE_NAME: 'YMM4_LayerFolder_noHarmony_v0.1.0.ymme'
+      BUILD_HOST_VERSION: '4.55.1.1'
+      BUILD_HOST_HASH: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate release source contract
+        shell: pwsh
+        run: |
+          $project='experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj'
+          $readme='experiments/ymm4/no-harmony-p4-hands-on-candidate/README.md'
+          $notice='experiments/ymm4/no-harmony-p4-hands-on-candidate/THIRD_PARTY_NOTICES.md'
+
+          $projectText=Get-Content $project -Raw
+          if($projectText -notmatch '<Version>0\.1\.0</Version>'){throw 'Release version is not 0.1.0'}
+          if($projectText -notmatch '<AssemblyName>Ymm4NoHarmonyFolderHandsOn</AssemblyName>'){throw 'Internal assembly identity changed'}
+          if($projectText -notmatch 'YMM4_LayerFolder_noHarmony_v\$\(Version\)\.ymme'){throw 'Release package name is not canonical'}
+          if($projectText -match 'YMM4_NO_HARMONY_P4_HANDS_ON'){throw 'P4 HANDS_ON is still packaged'}
+
+          $readmeText=Get-Content $readme -Raw
+          foreach($required in @(
+            'レイヤーフォルダ (no-Harmony) v0.1.0',
+            'YMM4 4.55.1.1 Lite',
+            'YMM4 4.56.1.0 Lite',
+            'インストール',
+            'アンインストール',
+            'Apache License 2.0',
+            'TimelineViewModel.ScrollToItem',
+            'フォルダ情報は失われる可能性があります'
+          )){
+            if(-not $readmeText.Contains($required)){throw "Release README missing: $required"}
+          }
+
+          foreach($forbidden in @(
+            'P4.4 no-Harmony folder Hands-on Candidate',
+            'manual UX candidate',
+            'not a release build',
+            'Not yet a release claim'
+          )){
+            if($readmeText.Contains($forbidden)){throw "Stale candidate wording remains: $forbidden"}
+          }
+
+          if(-not(Test-Path $notice)){throw 'Package third-party notice missing'}
+          $license=Get-Content LICENSE -Raw
+          if($license -notmatch 'Apache License'){throw 'Apache-2.0 LICENSE missing'}
+
+      - name: Acquire canonical build host
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:BUILD_HOST_VERSION/YukkuriMovieMaker_v$($env:BUILD_HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:BUILD_HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build canonical release once
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" "-p:PackYmme=true" -o out/release --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Canonical release build failed'}
+
+          $dll='out/release/Ymm4NoHarmonyFolderHandsOn.dll'
+          $ymme=Join-Path 'publish' $env:PACKAGE_NAME
+          if(-not(Test-Path $dll)){throw 'Canonical release DLL missing'}
+          if(-not(Test-Path $ymme)){throw 'Canonical .ymme missing'}
+
+          if(Get-ChildItem out/release -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){
+            throw 'Harmony file present in release output'
+          }
+
+          $assemblyVersion=[Reflection.AssemblyName]::GetAssemblyName((Resolve-Path $dll)).Version.ToString()
+          if($assemblyVersion -ne '0.1.0.0'){throw "Assembly version mismatch: $assemblyVersion"}
+
+          $binaryText=[Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Resolve-Path $dll)))
+          foreach($forbidden in @(
+            'PASS_P6_',
+            'CNWL_P6_DENSITY_STRESS_SMOKE',
+            'CNWL_P6_HISTORY_STRESS_SMOKE',
+            'CNWL_P6_LIFECYCLE_STRESS_SMOKE',
+            'CNWL_P6_FAILURE_RECOVERY_SMOKE',
+            '0Harmony',
+            'HarmonyLib'
+          )){
+            if($binaryText.Contains($forbidden)){throw "Release DLL contains hardening/Harmony marker: $forbidden"}
+          }
+
+          New-Item -ItemType Directory -Force out/inspect|Out-Null
+          $zip='out/inspect/package.zip'
+          Copy-Item $ymme $zip
+          Expand-Archive $zip out/inspect/extracted
+
+          $root='out/inspect/extracted/Ymm4NoHarmonyFolderHandsOn'
+          if(-not(Test-Path $root)){throw 'Expected compatible package root missing'}
+
+          $expected=@(
+            'LICENSE',
+            'README.md',
+            'THIRD_PARTY_NOTICES.md',
+            'Ymm4NoHarmonyFolderHandsOn.dll'
+          )|Sort-Object
+          $actual=@(Get-ChildItem $root -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $dirs=@(Get-ChildItem $root -Directory)
+
+          if($dirs.Count -ne 0){throw 'Unexpected subdirectory in release package'}
+          if((Compare-Object $expected $actual).Count -ne 0){
+            throw "Release package file allowlist mismatch. Actual: $($actual -join ', ')"
+          }
+
+          if(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){
+            throw 'Harmony file present inside canonical .ymme'
+          }
+
+          $packagedDll=Join-Path $root 'Ymm4NoHarmonyFolderHandsOn.dll'
+          $builtHash=(Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          $packagedHash=(Get-FileHash $packagedDll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($builtHash -ne $packagedHash){throw 'Packaged DLL differs from canonical build DLL'}
+
+          $packagedReadme=Get-Content (Join-Path $root 'README.md') -Raw
+          if(-not $packagedReadme.Contains('レイヤーフォルダ (no-Harmony) v0.1.0')){throw 'Packaged release README mismatch'}
+          if(-not (Get-Content (Join-Path $root 'LICENSE') -Raw).Contains('Apache License')){throw 'Packaged LICENSE mismatch'}
+
+          New-Item -ItemType Directory -Force out/canonical|Out-Null
+          Copy-Item $ymme (Join-Path out/canonical $env:PACKAGE_NAME)
+          Copy-Item $dll out/canonical/Ymm4NoHarmonyFolderHandsOn.dll
+          $actual|Set-Content out/canonical/package-files.txt
+
+          $packageHash=(Get-FileHash $ymme -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "source_head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "checkout=$(git rev-parse HEAD)",
+            "tree=$(git rev-parse 'HEAD^{tree}')",
+            "release_version=$env:RELEASE_VERSION",
+            "build_host_version=$env:BUILD_HOST_VERSION",
+            "build_host_zip_sha256=$env:BUILD_HOST_HASH",
+            "package_filename=$env:PACKAGE_NAME",
+            "dll_filename=Ymm4NoHarmonyFolderHandsOn.dll",
+            "dll_sha256=$builtHash",
+            "ymme_sha256=$packageHash",
+            "assembly_version=$assemblyVersion",
+            "internal_install_root=Ymm4NoHarmonyFolderHandsOn",
+            "package_files=$($actual -join ',')",
+            "p6_hardening_compiled=false",
+            "harmony_files=0",
+            "run=$env:GITHUB_RUN_ID"
+          )|Set-Content out/canonical/manifest.txt
+
+          Get-Content out/canonical/manifest.txt
+          Get-Content out/canonical/package-files.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-layer-folder-v0.1.0-canonical
+          path: out/canonical/
+          retention-days: 30
+
+  install:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '4.55.1.1'
+            sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+          - version: '4.56.1.0'
+            sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ymm4-layer-folder-v0.1.0-canonical
+          path: canonical
+
+      - name: Verify canonical artifact before host acquisition
+        shell: pwsh
+        run: |
+          $manifest=Get-Content canonical/manifest.txt|ConvertFrom-StringData
+          $package=Join-Path 'canonical' $manifest.package_filename
+          $dll=Join-Path 'canonical' $manifest.dll_filename
+
+          if(-not(Test-Path $package) -or -not(Test-Path $dll)){throw 'Canonical artifact files missing'}
+          if((Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.ymme_sha256){throw 'Canonical package SHA mismatch before install'}
+          if((Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.dll_sha256){throw 'Canonical DLL SHA mismatch before install'}
+          if($manifest.release_version -ne '0.1.0'){throw 'Canonical manifest version mismatch'}
+          if($manifest.p6_hardening_compiled -ne 'false'){throw 'Canonical manifest says P6 hardening compiled'}
+          if($manifest.harmony_files -ne '0'){throw 'Canonical manifest Harmony count nonzero'}
+
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          Copy-Item canonical/manifest.txt out/evidence/canonical-manifest.txt
+          @(
+            "host_version=${{ matrix.version }}",
+            "host_zip_sha256=${{ matrix.sha256 }}",
+            "canonical_ymme_sha256=$($manifest.ymme_sha256)",
+            "canonical_dll_sha256=$($manifest.dll_sha256)",
+            "matrix_rebuild=false",
+            "run=$env:GITHUB_RUN_ID"
+          )|Set-Content out/evidence/host-manifest.txt
+
+      - name: Acquire target host
+        shell: pwsh
+        env:
+          HOST_VERSION: '${{ matrix.version }}'
+          HOST_HASH: '${{ matrix.sha256 }}'
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install exact canonical ymme and startup
+        shell: pwsh
+        run: |
+          $manifest=Get-Content canonical/manifest.txt|ConvertFrom-StringData
+          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunYmmeInstall.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -Package (Join-Path $PWD ('canonical/'+$manifest.package_filename)) `
+            -ExpectedDll (Join-Path $PWD ('canonical/'+$manifest.dll_filename)) `
+            -OutputDir (Join-Path $PWD 'out/evidence/install')
+
+          $result=Get-Content out/evidence/install/ymme-install-result.json -Raw|ConvertFrom-Json
+          if($result.status -ne 'PASS_P4_YMME_INSTALL'){throw 'Canonical .ymme install failed'}
+          if($result.startup_marker -ne 'PASS_P4_YMME_STARTUP'){throw 'Canonical startup failed'}
+          if($result.package_sha256 -ne $manifest.ymme_sha256){throw 'Installed canonical package SHA mismatch'}
+          if($result.expected_dll_sha256 -ne $manifest.dll_sha256){throw 'Expected canonical DLL SHA mismatch'}
+          if($result.installed_dll_sha256 -ne $manifest.dll_sha256){throw 'Installed canonical DLL SHA mismatch'}
+          if($result.harmony_files_installed -ne 0){throw 'Harmony installed with canonical release'}
+
+          'PASS_P7_CANONICAL_INSTALL'|Set-Content out/evidence/PASS_P7_CANONICAL_INSTALL.txt
+
+      - name: Uninstall and start host without plugin
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunUninstallSmoke.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -PluginDir (Join-Path $env:YMM4_DIR 'user\plugin\Ymm4NoHarmonyFolderHandsOn') `
+            -OutputDir (Join-Path $PWD 'out/evidence/uninstall') `
+            -StableSeconds 10
+
+          $result=Get-Content out/evidence/uninstall/uninstall-result.json -Raw|ConvertFrom-Json
+          if($result.status -ne 'PASS_P7_UNINSTALL_STARTUP'){throw 'Uninstall startup smoke failed'}
+          if($result.plugin_dll_remaining -ne 0){throw 'Plugin DLL remained after uninstall'}
+
+      - name: Verify same-byte host acceptance
+        shell: pwsh
+        run: |
+          $manifest=Get-Content canonical/manifest.txt|ConvertFrom-StringData
+          $install=Get-Content out/evidence/install/ymme-install-result.json -Raw|ConvertFrom-Json
+          $uninstall=Get-Content out/evidence/uninstall/uninstall-result.json -Raw|ConvertFrom-Json
+
+          if($install.package_sha256 -ne $manifest.ymme_sha256){throw 'Host package differs from canonical package'}
+          if($install.installed_dll_sha256 -ne $manifest.dll_sha256){throw 'Host DLL differs from canonical DLL'}
+          if($uninstall.status -ne 'PASS_P7_UNINSTALL_STARTUP'){throw 'Host uninstall status failed'}
+
+          @(
+            "PASS_P7_SAME_BYTE_HOST",
+            "host_version=${{ matrix.version }}",
+            "canonical_ymme_sha256=$($manifest.ymme_sha256)",
+            "canonical_dll_sha256=$($manifest.dll_sha256)",
+            "install=true",
+            "startup=true",
+            "uninstall_startup=true",
+            "matrix_rebuild=false",
+            "harmony_files=0"
+          )|Set-Content out/evidence/p7-host-result.txt
+
+          Get-Content out/evidence/p7-host-result.txt
+
+      - if: always()
+        name: Show host evidence
+        shell: pwsh
+        run: |
+          foreach($p in @(
+            'out/evidence/canonical-manifest.txt',
+            'out/evidence/host-manifest.txt',
+            'out/evidence/install/ymme-install-result.json',
+            'out/evidence/uninstall/uninstall-result.json',
+            'out/evidence/p7-host-result.txt'
+          )){
+            if(Test-Path $p){
+              Write-Host "=== $p ==="
+              Get-Content $p
+            }
+          }
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-layer-folder-v0.1.0-host-${{ matrix.version }}-evidence
+          path: out/evidence/
+          retention-days: 30
+
+  release-gate:
+    needs: [build, install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ymm4-layer-folder-v0.1.0-canonical
+          path: canonical
+
+      - name: Mark canonical P7 release acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_sha="$(grep '^ymme_sha256=' canonical/manifest.txt | cut -d= -f2- | tr -d '\r')"
+          dll_sha="$(grep '^dll_sha256=' canonical/manifest.txt | cut -d= -f2- | tr -d '\r')"
+          version="$(grep '^release_version=' canonical/manifest.txt | cut -d= -f2- | tr -d '\r')"
+
+          test "$version" = "0.1.0"
+          test -n "$package_sha"
+          test -n "$dll_sha"
+
+          mkdir -p out
+          {
+            echo "PASS_P7_CANONICAL_RELEASE"
+            echo "release_version=$version"
+            echo "canonical_ymme_sha256=$package_sha"
+            echo "canonical_dll_sha256=$dll_sha"
+            echo "same_package_tested_on=4.55.1.1,4.56.1.0"
+            echo "matrix_rebuild=false"
+            echo "no_harmony=true"
+          } > out/P7_RELEASE_RESULT.txt
+
+          cat out/P7_RELEASE_RESULT.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-layer-folder-v0.1.0-release-gate
+          path: out/
+          retention-days: 30
