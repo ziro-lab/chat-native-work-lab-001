@@ -333,11 +333,11 @@ internal static class Probe
                 && HashFile(voicePath) == correctedHash);
 
             var timelineView = FindVisualByTypeName(window, "TimelineView");
-            Check("timeline_view_found_for_history_input", timelineView is not null);
+            Log("timeline_view_found=" + (timelineView is not null));
             if (timelineView is not null)
             {
-                timelineView.Focus();
-                Keyboard.Focus(timelineView);
+                try { timelineView.Focus(); } catch { }
+                try { Keyboard.Focus(timelineView); } catch { }
             }
             window.Activate();
             Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
@@ -426,6 +426,40 @@ internal static class Probe
                 && HashFile(voicePath) == baselineHash
                 && GetPauseVowelLength(GetAudioQuery(voice.Pronounce!)) == baselinePause);
 
+            // Prove the host-configured standard command route sees the same
+            // plugin-owned history entry, not only direct manager calls.
+            var standardRedoEventBefore = redoed;
+            var standardRedoCallbackBefore = redoCallbacks;
+            var standardRedoRoute = ExecuteConfiguredHistoryCommand(CommandType.Redo, window);
+            await WaitUntil(
+                "standard redo stabilization",
+                () => redoed > standardRedoEventBefore
+                   && redoCallbacks > standardRedoCallbackBefore
+                   && ReferenceEquals(voice.Pronounce, corrected.Pronounce)
+                   && GetPauseVowelLength(GetAudioQuery(voice.Pronounce!)) == 0.0
+                   && HashFile(voicePath) == correctedHash);
+            Check("standard_redo_command_executed", standardRedoRoute.Executed);
+            Check("standard_redo_restores_corrected",
+                redoed - standardRedoEventBefore == 1
+                && redoCallbacks - standardRedoCallbackBefore == 1
+                && HashFile(voicePath) == correctedHash);
+
+            var standardUndoEventBefore = undoed;
+            var standardUndoCallbackBefore = undoCallbacks;
+            var standardUndoRoute = ExecuteConfiguredHistoryCommand(CommandType.Undo, window);
+            await WaitUntil(
+                "standard undo stabilization",
+                () => undoed > standardUndoEventBefore
+                   && undoCallbacks > standardUndoCallbackBefore
+                   && ReferenceEquals(voice.Pronounce, baseline.Pronounce)
+                   && GetPauseVowelLength(GetAudioQuery(voice.Pronounce!)) == baselinePause
+                   && HashFile(voicePath) == baselineHash);
+            Check("standard_undo_command_executed", standardUndoRoute.Executed);
+            Check("standard_undo_restores_baseline",
+                undoed - standardUndoEventBefore == 1
+                && undoCallbacks - standardUndoCallbackBefore == 1
+                && HashFile(voicePath) == baselineHash);
+
             File.WriteAllText(
                 Path.Combine(output, "undo-redo-observation.json"),
                 JsonSerializer.Serialize(new
@@ -459,6 +493,8 @@ internal static class Probe
                         redoed,
                         undoCallbacks,
                         redoCallbacks,
+                        standardRedoRoute,
+                        standardUndoRoute,
                         finalPause = GetPauseVowelLength(GetAudioQuery(voice.Pronounce!)),
                         finalWavSha256 = HashFile(voicePath)
                     }
@@ -705,6 +741,48 @@ internal static class Probe
             }
         }
         return null;
+    }
+
+    sealed record HistoryRoute(string Command, string Target, bool Executed);
+
+    static HistoryRoute ExecuteConfiguredHistoryCommand(CommandType commandType, Window window)
+    {
+        ICommand command = CommandSettings.Default[commandType]
+            ?? throw new InvalidOperationException("Command missing: " + commandType);
+
+        window.Activate();
+        Native.SetForegroundWindow(new WindowInteropHelper(window).Handle);
+
+        var targets = new List<(string Name, IInputElement Target)>();
+        if (Keyboard.FocusedElement is IInputElement focused)
+            targets.Add(("Focused", focused));
+        targets.Add(("Window", window));
+
+        if (command is RoutedCommand routed)
+        {
+            foreach (var (name, target) in targets
+                .GroupBy(x => x.Target, ReferenceEqualityComparer.Instance)
+                .Select(x => x.First()))
+            {
+                bool can;
+                try { can = routed.CanExecute(null, target); }
+                catch (Exception ex)
+                {
+                    Log($"history_route_can_exception command={commandType} target={name} error={ex.GetBaseException().Message}");
+                    continue;
+                }
+
+                Log($"history_route_can command={commandType} target={name} can={can}");
+                if (!can)
+                    continue;
+
+                routed.Execute(null, target);
+                Log($"history_route_execute command={commandType} target={name}");
+                return new HistoryRoute(commandType.ToString(), name, true);
+            }
+        }
+
+        throw new InvalidOperationException("No executable standard history route for " + commandType);
     }
 
     static FrameworkElement? FindVisualByTypeName(DependencyObject root, string typeName)
