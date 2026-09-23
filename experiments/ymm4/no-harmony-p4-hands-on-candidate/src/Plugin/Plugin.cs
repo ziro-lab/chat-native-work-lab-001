@@ -13,7 +13,7 @@ namespace Ymm4NoHarmonyFolderLayoutProbe;
 
 public sealed class HandsOnEntry : ILocalizePlugin
 {
-    public string Name => "レイヤーフォルダ no-Harmony Hands-on";
+    public string Name => "レイヤーフォルダ (no-Harmony)";
     public void SetCulture(CultureInfo cultureInfo) => HandsOnRuntime.Start();
 }
 
