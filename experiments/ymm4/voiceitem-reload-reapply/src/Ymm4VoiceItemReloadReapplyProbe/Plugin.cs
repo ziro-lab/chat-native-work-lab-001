@@ -258,14 +258,33 @@ internal static class Probe
             Log("save-b-done");
             Check("project_b_saved", true);
 
-            Log("open-a-start");
-            openProject.Invoke(main, [pathA]);
+            Log($"open-a-start return={openProject.ReturnType.FullName}");
+            Exception? openError = null;
+            var openTask = Task.Run(() =>
+            {
+                try
+                {
+                    openProject.Invoke(main, [pathA]);
+                    Log("open-a-invoke-returned");
+                }
+                catch (Exception ex)
+                {
+                    openError = ex.GetBaseException();
+                    Log("open-a-invoke-error " + openError);
+                }
+            });
+
             await WaitUntil(
                 "open A",
-                () => SamePath(GetProjectFilePath(main), pathA)
-                   && FindVoice(main, Remark) is not null,
-                12000);
+                () => openError is not null
+                   || (SamePath(GetProjectFilePath(main), pathA)
+                       && FindVoice(main, Remark) is not null),
+                20000);
 
+            if (openError is not null)
+                throw new InvalidOperationException("Background OpenProject failed.", openError);
+
+            await openTask;
             Log("open-a-done");
             VoiceItem reloaded = FindVoice(main, Remark)
                 ?? throw new InvalidOperationException("Reloaded VoiceItem missing.");
