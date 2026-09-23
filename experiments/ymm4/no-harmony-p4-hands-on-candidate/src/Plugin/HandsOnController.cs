@@ -95,6 +95,300 @@ internal sealed class HandsOnController : IDisposable
         ScheduleS5CoordinateSmoke();
         ScheduleS5IntegrationSmoke();
         ScheduleP5CompatibilitySmoke();
+        ScheduleP5MediaCompatibilitySmoke();
+    }
+
+    private void ScheduleP5MediaCompatibilitySmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_MEDIA_COMPATIBILITY_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5MediaCompatibilitySmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5MediaCompatibilitySmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(500);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 media compatibility smoke must start from an empty Timeline.");
+
+            string RequiredPath(string variable)
+            {
+                var value = Environment.GetEnvironmentVariable(variable);
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new InvalidOperationException(
+                        $"P5 media fixture variable missing: {variable}.");
+
+                var full = Path.GetFullPath(value);
+                if (!File.Exists(full))
+                    throw new FileNotFoundException(
+                        $"P5 media fixture does not exist: {full}.",
+                        full);
+                return full;
+            }
+
+            var imagePath = RequiredPath("CNWL_P5_IMAGE_FILE");
+            var audioPath = RequiredPath("CNWL_P5_AUDIO_FILE");
+            var videoPath = RequiredPath("CNWL_P5_VIDEO_FILE");
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            var image = new ImageItem(imagePath)
+            {
+                Frame = 40,
+                Layer = 2,
+                Remark = "CNWL_P5_REAL_IMAGE"
+            };
+            var audio = new AudioItem(audioPath)
+            {
+                Frame = 140,
+                Layer = 2,
+                Remark = "CNWL_P5_REAL_AUDIO"
+            };
+            var video = new VideoItem(videoPath)
+            {
+                Frame = 260,
+                Layer = 2,
+                Remark = "CNWL_P5_REAL_VIDEO"
+            };
+
+            IItem[] fixtures = [image, audio, video];
+
+            foreach (var item in fixtures)
+            {
+                if (item.Length <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"P5 {item.GetType().Name} did not derive a positive media length.");
+                }
+
+                if (!timeline.TryAddItems(
+                        [item],
+                        item.Frame,
+                        item.Layer,
+                        isItemSelectionEnabled: false))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 TryAddItems returned false for media-backed {item.GetType().Name}.");
+                }
+            }
+
+            await Task.Delay(1000);
+
+            foreach (var item in fixtures)
+            {
+                if (!timeline.Items.Any(current =>
+                        ReferenceEquals(current, item)))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 media-backed {item.GetType().Name} did not remain live.");
+                }
+            }
+
+            var geometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm);
+
+            foreach (var item in fixtures)
+            {
+                var current = geometry.SingleOrDefault(candidate =>
+                    ReferenceEquals(candidate.Item, item));
+
+                if (current.Item is null
+                    || !double.IsFinite(current.Left)
+                    || !double.IsFinite(current.Width)
+                    || current.Width <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"P5 media-backed public geometry missing for {item.GetType().Name}.");
+                }
+            }
+
+            var folderId = Guid.Parse(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 Media",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(750);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 media fold mapping did not map L2 to owner L1.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 media visual summary overlay is unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 3)
+            {
+                throw new InvalidOperationException(
+                    $"P5 expected 3 media timing bands, got {visualSummary.TimingBandCount}.");
+            }
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            if (timeline.SelectedItems.Count(selected =>
+                    fixtures.Any(fixture =>
+                        ReferenceEquals(selected, fixture)))
+                != 3)
+            {
+                throw new InvalidOperationException(
+                    "P5 media folder selection did not select all three fixtures.");
+            }
+
+            undo.Record();
+            await Task.Delay(300);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(
+                        timeline.MaxLayer,
+                        timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(item => item.Layer)
+                        .ToDictionary(
+                            group => group.Key,
+                            group => group.Count()),
+                    [])
+                .Single(row =>
+                    row.FolderId == folderId);
+
+            var block = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 media folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(block, drop))
+                throw new InvalidOperationException(
+                    "P5 media block move was rejected.");
+
+            commands.MovePanelRows(block, drop);
+            await Task.Delay(550);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 4);
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 2);
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            AssertP5FixtureLayers(fixtures, expectedLayer: 4);
+            AssertP5Folder(folderId, 3, 4);
+
+            var afterGeometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm);
+
+            foreach (var item in fixtures)
+            {
+                if (!afterGeometry.Any(current =>
+                        ReferenceEquals(current.Item, item)
+                        && double.IsFinite(current.Left)
+                        && double.IsFinite(current.Width)
+                        && current.Width > 0))
+                {
+                    throw new InvalidOperationException(
+                        $"P5 media geometry missing after move for {item.GetType().Name}.");
+                }
+            }
+
+            WriteP5MediaResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_MEDIA_REALISM",
+                        $"timeline={key}",
+                        "media_types=ImageItem,AudioItem,VideoItem",
+                        $"image_length={image.Length}",
+                        $"audio_length={audio.Length}",
+                        $"video_length={video.Length}",
+                        "construct_from_real_file=3",
+                        "add_live_geometry=3",
+                        "fold_owner_mapping=3",
+                        "timing_summary=3",
+                        "folder_selection=3",
+                        "block_move_undo_redo=3",
+                        "no_type_specific_folder_adapter=true"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_media_compatibility_smoke_error=" + ex);
+
+            WriteP5MediaResult(
+                "FAIL_P5_MEDIA_REALISM\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteP5MediaResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-media-result.txt"),
+            text);
     }
 
     private void ScheduleP5CompatibilitySmoke()
