@@ -241,9 +241,9 @@ internal sealed class HandsOnController : IDisposable
             await Task.Delay(700);
             display.ThrowIfFailed();
 
-            // Let all current item/row view-model subscriptions settle before
-            // measuring stability across repeated state/viewport cycles.
-            var settledSubscriptions = display.SubscriptionCount;
+            // Counters start after the density fixture is constructed. Subscription
+            // stability is measured later, after two identical viewport warm-up
+            // sweeps have allowed YMM4 to realize/cache any host-owned row/item VMs.
             var applicationsStart = display.Applications;
             var mutationsStart = display.Mutations;
             var refreshesStart = display.CanvasRefreshes;
@@ -313,66 +313,85 @@ internal sealed class HandsOnController : IDisposable
 
             var zoomOriginal = zoomValue.GetValue(zoomHolder);
 
-            state.ReplaceProductState(collapsed);
-            await Task.Delay(350);
-
-            for (var cycle = 0; cycle < viewportCycles; cycle++)
+            async Task RunViewportPassAsync(string phase)
             {
-                var zoom = cycle % 3 switch
+                state.ReplaceProductState(collapsed);
+                await Task.Delay(350);
+
+                for (var cycle = 0; cycle < viewportCycles; cycle++)
                 {
-                    0 => 80.0,
-                    1 => 125.0,
-                    _ => 100.0
-                };
+                    var zoom = cycle % 3 switch
+                    {
+                        0 => 80.0,
+                        1 => 125.0,
+                        _ => 100.0
+                    };
 
-                zoomValue.SetValue(zoomHolder, zoom);
+                    zoomValue.SetValue(zoomHolder, zoom);
 
-                var horizontalMax = Math.Max(
-                    0,
-                    host.Scroll.ExtentWidth
-                        - host.Scroll.ViewportWidth);
-                var verticalMax = Math.Max(
-                    0,
-                    host.Scroll.ExtentHeight
-                        - host.Scroll.ViewportHeight);
+                    var horizontalMax = Math.Max(
+                        0,
+                        host.Scroll.ExtentWidth
+                            - host.Scroll.ViewportWidth);
+                    var verticalMax = Math.Max(
+                        0,
+                        host.Scroll.ExtentHeight
+                            - host.Scroll.ViewportHeight);
 
-                host.Scroll.ScrollToHorizontalOffset(
-                    horizontalMax <= 0
-                        ? 0
-                        : horizontalMax
-                            * ((cycle % 5) / 4.0));
-                host.Scroll.ScrollToVerticalOffset(
-                    verticalMax <= 0
-                        ? 0
-                        : verticalMax
-                            * ((cycle % 4) / 3.0));
+                    host.Scroll.ScrollToHorizontalOffset(
+                        horizontalMax <= 0
+                            ? 0
+                            : horizontalMax
+                                * ((cycle % 5) / 4.0));
+                    host.Scroll.ScrollToVerticalOffset(
+                        verticalMax <= 0
+                            ? 0
+                            : verticalMax
+                                * ((cycle % 4) / 3.0));
 
-                window.Width = cycle % 2 == 0
-                    ? 1040
-                    : 1180;
-                window.Height = cycle % 2 == 0
-                    ? 700
-                    : 760;
+                    window.Width = cycle % 2 == 0
+                        ? 1040
+                        : 1180;
+                    window.Height = cycle % 2 == 0
+                        ? 700
+                        : 760;
 
-                await Task.Delay(180);
+                    await Task.Delay(180);
+                    display.ThrowIfFailed();
+
+                    if (!display.GeometryMatches())
+                        throw new InvalidOperationException(
+                            $"P6.1 viewport geometry mismatch phase={phase} cycle={cycle}.");
+                }
+
+                if (zoomOriginal is not null)
+                    zoomValue.SetValue(zoomHolder, zoomOriginal);
+
+                host.Scroll.ScrollToHorizontalOffset(0);
+                host.Scroll.ScrollToVerticalOffset(0);
+                window.Width = 1100;
+                window.Height = 720;
+
+                state.ReplaceProductState(expanded);
+                await Task.Delay(700);
                 display.ThrowIfFailed();
 
                 if (!display.GeometryMatches())
                     throw new InvalidOperationException(
-                        $"P6.1 viewport geometry mismatch cycle={cycle}.");
+                        $"P6.1 viewport pass final geometry mismatch phase={phase}.");
             }
 
-            if (zoomOriginal is not null)
-                zoomValue.SetValue(zoomHolder, zoomOriginal);
+            // The first pass may legitimately create host-owned virtualized VMs.
+            // Repeat the same coverage once more before taking the leak baseline,
+            // then require a third identical pass to add no subscriptions.
+            await RunViewportPassAsync("warmup-1");
+            var subscriptionsAfterWarmup1 = display.SubscriptionCount;
 
-            host.Scroll.ScrollToHorizontalOffset(0);
-            host.Scroll.ScrollToVerticalOffset(0);
-            window.Width = 1100;
-            window.Height = 720;
+            await RunViewportPassAsync("warmup-2");
+            var settledSubscriptions = display.SubscriptionCount;
 
-            state.ReplaceProductState(expanded);
-            await Task.Delay(600);
-            display.ThrowIfFailed();
+            await RunViewportPassAsync("measured");
+            var finalSubscriptions = display.SubscriptionCount;
 
             var finalTimelineState =
                 FolderDocumentRules.FindTimeline(
@@ -397,11 +416,11 @@ internal sealed class HandsOnController : IDisposable
                     "P6.1 display failure remained set.",
                     display.Failure);
 
-            var finalSubscriptions = display.SubscriptionCount;
             if (finalSubscriptions != settledSubscriptions)
             {
                 throw new InvalidOperationException(
-                    $"P6.1 subscription count grew from {settledSubscriptions} to {finalSubscriptions}.");
+                    $"P6.1 steady-state subscription count grew from {settledSubscriptions} to {finalSubscriptions}; " +
+                    $"warmup1={subscriptionsAfterWarmup1}.");
             }
 
             if (!display.GeometryMatches())
@@ -430,8 +449,11 @@ internal sealed class HandsOnController : IDisposable
                         $"mutations_total={display.Mutations}",
                         $"canvas_refreshes_total={display.CanvasRefreshes}",
                         $"reentries={display.Reentries}",
+                        "viewport_warmup_passes=2",
+                        $"subscriptions_after_warmup1={subscriptionsAfterWarmup1}",
                         $"subscriptions_settled={settledSubscriptions}",
                         $"subscriptions_final={finalSubscriptions}",
+                        $"subscriptions_measured_growth={finalSubscriptions - settledSubscriptions}",
                         $"display_failure={(display.Failure is null ? "none" : display.Failure.GetType().Name)}",
                         "final_geometry=true",
                         "folder_validation=true",
