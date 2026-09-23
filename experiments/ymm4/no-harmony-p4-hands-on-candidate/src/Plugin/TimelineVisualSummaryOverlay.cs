@@ -18,6 +18,8 @@ internal sealed class TimelineVisualSummaryOverlay : IDisposable
 
     internal int TimingBandCount { get; private set; }
     internal int GroupSegmentCount { get; private set; }
+    internal IReadOnlyList<Rect> TimingRects { get; private set; } = [];
+    internal IReadOnlyList<Rect> GroupRects { get; private set; } = [];
 
     private TimelineVisualSummaryOverlay(
         Host host,
@@ -140,6 +142,10 @@ internal sealed class TimelineVisualSummaryOverlay : IDisposable
 
             TimingBandCount = timingDraw.Count;
             GroupSegmentCount = groupDraw.Count;
+            TimingRects = Array.AsReadOnly(
+                timingDraw.Select(x => x.Rect).ToArray());
+            GroupRects = Array.AsReadOnly(
+                groupDraw.Select(x => x.Rect).ToArray());
 
             adorner.SetSnapshot(
                 timingDraw,
@@ -153,6 +159,10 @@ internal sealed class TimelineVisualSummaryOverlay : IDisposable
         catch (Exception ex)
         {
             log("visual_summary_refresh_error=" + ex);
+            TimingBandCount = 0;
+            GroupSegmentCount = 0;
+            TimingRects = [];
+            GroupRects = [];
             adorner.SetSnapshot([], []);
         }
     }
