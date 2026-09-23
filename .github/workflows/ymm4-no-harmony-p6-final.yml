@@ -1,0 +1,300 @@
+name: YMM4 no-Harmony P6 final hardening
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/no-harmony-p6-hardening/**'
+      - '.github/workflows/ymm4-no-harmony-p6-final.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p6-final-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  final:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '4.55.1.1'
+            sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+          - version: '4.56.1.0'
+            sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '${{ github.event.pull_request.head.sha || github.sha }}'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Acquire pinned host
+        shell: pwsh
+        env:
+          HOST_VERSION: '${{ matrix.version }}'
+          HOST_HASH: '${{ matrix.sha256 }}'
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip "https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$env:HOST_VERSION/YukkuriMovieMaker_v$($env:HOST_VERSION)_Lite.zip"
+          if($LASTEXITCODE -ne 0){throw 'BLOCKED host download'}
+          if((Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:HOST_HASH){throw 'BLOCKED host hash mismatch'}
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe|Select-Object -First 1
+          if(-not $exe){throw 'BLOCKED host executable missing'}
+          "YMM4_DIR=$($exe.Directory.FullName)\"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build instrumented P6 candidate
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -p:EnableP6Hardening=true -o out/hardening --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Instrumented P6 candidate build failed'}
+
+          $dll='out/hardening/Ymm4NoHarmonyFolderHandsOn.dll'
+          if(-not(Test-Path $dll)){throw 'Instrumented P6 DLL missing'}
+          if(Get-ChildItem out/hardening -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){
+            throw 'Unexpected Harmony dependency in instrumented P6 candidate'
+          }
+
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4NoHarmonyFolderHandsOn'
+          New-Item -ItemType Directory -Force $d|Out-Null
+          Copy-Item $dll $d
+
+          New-Item -ItemType Directory -Force out/evidence|Out-Null
+          @(
+            "source_head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "checkout=$(git rev-parse HEAD)",
+            "tree=$(git rev-parse 'HEAD^{tree}')",
+            "host_version=${{ matrix.version }}",
+            "host_zip_sha256=${{ matrix.sha256 }}",
+            "hardening_candidate_sha256=$((Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant())",
+            "run=$env:GITHUB_RUN_ID",
+            "level=P6.6-final-dual-host"
+          )|Set-Content out/evidence/manifest.txt
+
+      - name: P6.1 density and viewport soak
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p6-hardening/RunProbe.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -OutputDir (Join-Path $PWD 'out/evidence/density') `
+            -ProbeEnv 'CNWL_P6_DENSITY_STRESS_SMOKE' `
+            -ResultFile 'p6-density-result.txt' `
+            -PassMarker 'PASS_P6_DENSITY_STRESS' `
+            -TimeoutSeconds 240
+
+      - name: P6.2 structural history soak
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p6-hardening/RunProbe.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -OutputDir (Join-Path $PWD 'out/evidence/history') `
+            -ProbeEnv 'CNWL_P6_HISTORY_STRESS_SMOKE' `
+            -ResultFile 'p6-history-result.txt' `
+            -PassMarker 'PASS_P6_HISTORY_STRESS' `
+            -TimeoutSeconds 240
+
+      - name: P6.4 lifecycle soak
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p6-hardening/RunProbe.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -OutputDir (Join-Path $PWD 'out/evidence/lifecycle') `
+            -ProbeEnv 'CNWL_P6_LIFECYCLE_STRESS_SMOKE' `
+            -ResultFile 'p6-lifecycle-result.txt' `
+            -PassMarker 'PASS_P6_LIFECYCLE_STRESS' `
+            -TimeoutSeconds 240
+
+      - name: P6.5 failure and recovery soak
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p6-hardening/RunProbe.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -OutputDir (Join-Path $PWD 'out/evidence/failure') `
+            -ProbeEnv 'CNWL_P6_FAILURE_RECOVERY_SMOKE' `
+            -ResultFile 'p6-failure-recovery-result.txt' `
+            -PassMarker 'PASS_P6_FAILURE_RECOVERY' `
+            -TimeoutSeconds 210
+
+      - name: Validate P6 final contracts
+        shell: pwsh
+        run: |
+          function Assert-Markers([string]$path,[string[]]$markers){
+            if(-not(Test-Path $path)){throw "Missing result: $path"}
+            $content=Get-Content $path
+            foreach($marker in $markers){
+              if(-not($content -contains $marker)){
+                throw "Missing marker '$marker' in $path"
+              }
+            }
+          }
+
+          Assert-Markers out/evidence/density/p6-density-result.txt @(
+            'layers=128',
+            'items=384',
+            'folders=24',
+            'max_nesting_depth=8',
+            'fold_cycles=12',
+            'viewport_cycles=12',
+            'subscriptions_measured_growth=0',
+            'idle_seconds=8',
+            'idle_mutations_delta=0',
+            'idle_canvas_refreshes_delta=0',
+            'idle_subscriptions_growth=0',
+            'idle_applications_bounded=true',
+            'reentries=0',
+            'display_failure=none',
+            'final_geometry=true',
+            'folder_validation=true',
+            'no_harmony=true'
+          )
+
+          Assert-Markers out/evidence/history/p6-history-result.txt @(
+            'cycles=4',
+            'operations=24',
+            'history_transitions=72',
+            'standard_add_delete_movedown=true',
+            'plugin_add_inside=true',
+            'hidden_undo_redo=true',
+            'block_move_undo_redo=true',
+            'exact_snapshot_restore=true',
+            'folder_validation=true',
+            'display_reentries=0',
+            'display_failure=none',
+            'no_harmony=true'
+          )
+
+          Assert-Markers out/evidence/lifecycle/p6-lifecycle-result.txt @(
+            'transitions=4',
+            'unique_timeline_ids=5',
+            'disposed_controllers=4',
+            'zero_subscription_controllers=4',
+            'empty_new_states=4',
+            'stale_visibility_ignored=4',
+            'old_controller_lookup_cleared=true',
+            'no_harmony=true'
+          )
+
+          Assert-Markers out/evidence/failure/p6-failure-recovery-result.txt @(
+            'unsupported_raw_locked=true',
+            'raw_preserved_exact=true',
+            'locked_structural_edit_rejected=true',
+            'locked_edit_native_unchanged=true',
+            'explicit_reset_recovers=true',
+            'invalid_precondition_rejected=true',
+            'invalid_precondition_state_unchanged=true',
+            'rejected_precondition_history_clean=true',
+            'rename_undo_redo=true',
+            'display_reentries=0',
+            'display_failure=none',
+            'no_harmony=true'
+          )
+
+          'PASS_P6_FINAL_HARDENING'|Set-Content out/evidence/PASS_P6_FINAL_HARDENING.txt
+
+      - name: Remove instrumented candidate
+        shell: pwsh
+        run: |
+          Get-Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProcessName -like 'YukkuriMovieMaker*' } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          $d=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4NoHarmonyFolderHandsOn'
+          Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Build normal release-form candidate and ymme
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" "-p:PackYmme=true" -o out/release --nologo -warnaserror
+          if($LASTEXITCODE -ne 0){throw 'Normal release-form candidate build failed'}
+
+          $dll='out/release/Ymm4NoHarmonyFolderHandsOn.dll'
+          $ymme='publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme'
+          if(-not(Test-Path $dll)){throw 'Normal candidate DLL missing'}
+          if(-not(Test-Path $ymme)){throw 'Normal .ymme missing'}
+
+          if(Get-ChildItem out/release -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){
+            throw 'Unexpected Harmony dependency in normal candidate'
+          }
+
+          $inspect='out/evidence/package-inspect'
+          New-Item -ItemType Directory -Force $inspect|Out-Null
+          $zip='out/evidence/package-inspect.zip'
+          Copy-Item $ymme $zip
+          Expand-Archive $zip $inspect
+
+          if(Get-ChildItem $inspect -Recurse -File | Where-Object { $_.Name -in @('0Harmony.dll','HarmonyLib.dll') }){
+            throw 'Harmony file present inside normal .ymme'
+          }
+
+          New-Item -ItemType Directory -Force out/package|Out-Null
+          Copy-Item $ymme out/package/
+
+          "release_candidate_sha256=$((Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant())"|Add-Content out/evidence/manifest.txt
+          "ymme_sha256=$((Get-FileHash $ymme -Algorithm SHA256).Hash.ToLowerInvariant())"|Add-Content out/evidence/manifest.txt
+          "release_build_has_p6_hardening=false"|Add-Content out/evidence/manifest.txt
+
+      - name: Exercise normal ymme install and startup
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunYmmeInstall.ps1 `
+            -Ymm4Dir $env:YMM4_DIR `
+            -Package (Join-Path $PWD 'publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme') `
+            -ExpectedDll (Join-Path $PWD 'out/release/Ymm4NoHarmonyFolderHandsOn.dll') `
+            -OutputDir (Join-Path $PWD 'out/evidence/install')
+
+      - name: Verify final package identity
+        shell: pwsh
+        run: |
+          $result=Get-Content out/evidence/install/ymme-install-result.json -Raw|ConvertFrom-Json
+          if($result.status -ne 'PASS_P4_YMME_INSTALL'){throw 'P6 final .ymme install marker failed'}
+          if($result.startup_marker -ne 'PASS_P4_YMME_STARTUP'){throw 'P6 final .ymme startup marker failed'}
+
+          $built=(Get-FileHash out/release/Ymm4NoHarmonyFolderHandsOn.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($result.expected_dll_sha256 -ne $built -or $result.installed_dll_sha256 -ne $built){
+            throw 'P6 final installed DLL identity mismatch'
+          }
+
+          $ymme=(Get-FileHash publish/Ymm4NoHarmonyFolderHandsOn.P4.4.ymme -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($result.package_sha256 -ne $ymme){throw 'P6 final package identity mismatch'}
+          if($result.harmony_files_installed -ne 0){throw 'P6 final installed Harmony count is not zero'}
+
+          "installed_candidate_sha256=$($result.installed_dll_sha256)"|Add-Content out/evidence/manifest.txt
+          "installed_ymme_sha256=$($result.package_sha256)"|Add-Content out/evidence/manifest.txt
+          'PASS_P6_FINAL_PACKAGE'|Set-Content out/evidence/PASS_P6_FINAL_PACKAGE.txt
+
+      - if: always()
+        name: Show final evidence
+        shell: pwsh
+        run: |
+          foreach($p in @(
+            'out/evidence/manifest.txt',
+            'out/evidence/density/p6-density-result.txt',
+            'out/evidence/history/p6-history-result.txt',
+            'out/evidence/lifecycle/p6-lifecycle-result.txt',
+            'out/evidence/failure/p6-failure-recovery-result.txt',
+            'out/evidence/install/ymme-install-result.json'
+          )){
+            if(Test-Path $p){
+              Write-Host "=== $p ==="
+              Get-Content $p
+            }
+          }
+
+      - if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-p6-final-package-${{ matrix.version }}
+          path: out/package/
+          retention-days: 30
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-no-harmony-p6-final-evidence-${{ matrix.version }}
+          path: out/evidence/
+          retention-days: 30

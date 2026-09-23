@@ -870,31 +870,43 @@ The compatibility matrix documents confirmed support and the tested resource/set
 
 ## P6 — Hardening & Performance
 
-**Purpose:** prove the feature remains stable in normal long sessions and larger projects.
+**Status: COMPLETE / FROZEN.**
 
-### Scope
+Freeze record:
 
-- large layer counts;
-- many timeline items;
-- many folders;
-- deep but valid nesting;
-- repeated collapse / expand;
-- repeated structural edits;
-- long idle;
-- scroll / zoom / resize;
-- project switching;
-- plugin detach / reload where applicable;
-- failure injection;
-- memory / subscription cleanup;
-- mutation / refresh budget observation.
+- `docs/YMM4_NO_HARMONY_P6_HARDENING_FREEZE.md`
 
-### Rule
+Accepted product runtime source:
 
-Stress counters are diagnostics, not performance claims unless measured under a defined benchmark.
+- `4d9fae9a8b96d069d6d2b6923bc33f00035967eb`
+- PR #124 stale virtualized display subscription cleanup.
 
-### Exit gate
+Final evidence source / run:
 
-No runaway refresh loop, persistent stale geometry, leaked subscriptions, or history corruption in the defined soak scenarios.
+- `ea0feed7b06c7b9fa172c62163fe41486654e54b`
+- run `35861609755`.
+
+Completed hardening:
+
+- 128 layers / 384 items / 24 folders / nesting depth 8;
+- 12 repeated collapse/expand cycles;
+- repeated zoom / horizontal+vertical scroll / window resize;
+- three identical viewport passes with steady-state subscription growth = **0**;
+- bounded 8-second idle with Applications / Mutations / CanvasRefreshes / subscriptions all delta **0**;
+- 24 repeated structural/product operations and 72 Undo/Redo transitions with exact snapshot restoration;
+- four Project transitions / five unique Timeline IDs;
+- disposed DirectDisplay subscriptions = **0**;
+- no old-session state writes into new projects;
+- unsupported/raw-state and rejected-precondition recovery remains non-destructive and history-clean;
+- final hardening profile GREEN on YMM4 4.55.1.1 Lite and 4.56.1.0 Lite;
+- normal probe-free real `.ymme` install/startup GREEN on both pinned hosts;
+- no Harmony.
+
+P6 does not claim benchmark throughput or latency. Its counters are bounded runaway/cleanup diagnostics.
+
+### P6 -> P7 boundary
+
+P6 built one normal package separately against each host. P7 must produce **one canonical release .ymme SHA** and test that exact same package unchanged on both pinned hosts, together with final release metadata/documentation and uninstall/recovery guidance.
 
 ---
 
@@ -954,8 +966,8 @@ P0 Core Spine                 DONE
   -> S5 visual parity redesign DONE
   -> P4 Full freeze             DONE
   -> P5 compatibility           DONE
-  -> P6 hardening               NEXT
-  -> P7 release
+  -> P6 hardening               DONE
+  -> P7 release                 NEXT
 ```
 
 P0-P3 are frozen. If later phases expose evidence that contradicts a frozen assumption, reopen only the affected gate with a new isolated proof rather than broadly rewriting earlier phases.
@@ -978,6 +990,6 @@ To avoid turning the Full exploration into an unbounded rewrite:
 
 **P4 Full feature construction:** complete and frozen at `docs/YMM4_NO_HARMONY_P4_FULL_FREEZE.md`.
 
-**Release completion:** not yet. Completion still requires P5 compatibility, P6 hardening/performance, and P7 release gates.
+**Release completion:** not yet. P0-P6 are frozen; completion now requires the P7 Release Gate.
 
 This distinction should remain explicit in PRs and release notes.
