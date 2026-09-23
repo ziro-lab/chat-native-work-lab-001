@@ -40,7 +40,10 @@ try {
     'official_get_plain_text_keeps_invalid_tag',
     'official_parse_public',
     'official_parse_clean_text_strips_w0',
-    'official_parse_returns_timing_tag'
+    'official_parse_returns_timing_tag',
+    'multiple_w0_clean_text_preserved',
+    'multiple_w0_positions_are_clean_text_positions',
+    'nonzero_wait_is_not_boundary_marker'
   )
   if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count) != $($req.Count)"}
   foreach($id in $req){
