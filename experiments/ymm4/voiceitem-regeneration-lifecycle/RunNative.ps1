@@ -34,6 +34,7 @@ try {
     'timeline_resolved',
     'voice_added_to_real_timeline',
     'edit_service_interface_loaded',
+    'voice_description_surface_inventoried',
     'voiceitem_surface_inventoried',
     'edit_service_implementors_inventoried',
     'edit_service_factories_inventoried',
