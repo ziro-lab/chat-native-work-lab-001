@@ -54,6 +54,7 @@ internal sealed class DirectDisplay : IDisposable
     internal int SubscriptionCount => watched.Count + collections.Count;
     internal double ExpectedExtent { get; private set; }
     internal bool GestureActive => gesture;
+    internal event EventHandler? Applied;
 
     internal DirectDisplay(Host host, Action<string> log)
     {
@@ -332,6 +333,7 @@ internal sealed class DirectDisplay : IDisposable
             try
             {
                 Apply();
+                Applied?.Invoke(this, EventArgs.Empty);
             }
             catch (Exception ex)
             {
