@@ -74,8 +74,8 @@ internal sealed class PronunciationAssistProbeEditorAttribute : PropertyEditorAt
 
 internal sealed class PronunciationAssistProbeEditor : Button, IPropertyEditorControl2
 {
-    public event EventHandler? BeginEdit;
-    public event EventHandler? EndEdit;
+    public event EventHandler? BeginEdit { add { } remove { } }
+    public event EventHandler? EndEdit { add { } remove { } }
     public ItemProperty[]? ItemProperties { get; set; }
 
     public PronunciationAssistProbeEditor() => Content = "CNWL 発音補助";
