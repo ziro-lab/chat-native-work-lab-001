@@ -80,6 +80,15 @@ internal static class Probe
             var speakerIdIl = speakerIdGetter is null ? [] : Decode(speakerIdGetter);
             var findEngineIl = findEngine is null ? [] : Decode(findEngine);
 
+            var displayClass = settingsType?.GetNestedType("<>c__DisplayClass18_0",
+                BindingFlags.NonPublic | BindingFlags.Public);
+            var predicate0 = displayClass?.GetMethod("<FindEngine>b__0",
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            var predicate1 = displayClass?.GetMethod("<FindEngine>b__1",
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            var predicate0Il = predicate0 is null ? [] : Decode(predicate0);
+            var predicate1Il = predicate1 is null ? [] : Decode(predicate1);
+
             var engineType = asm.GetType("YukkuriMovieMaker.Voice.VOICEVOXEngine");
             var speakerInfosProperty = engineType?.GetProperty("SpeakerInfos",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -131,6 +140,10 @@ internal static class Probe
                     settingsType = settingsType?.FullName,
                     findEngine = findEngine?.ToString(),
                     findEngineIL = findEngineIl,
+                    findEnginePredicate0 = predicate0?.ToString(),
+                    findEnginePredicate0IL = predicate0Il,
+                    findEnginePredicate1 = predicate1?.ToString(),
+                    findEnginePredicate1IL = predicate1Il,
                     engineSpeakerInfoSurface = new
                     {
                         engineType = engineType?.FullName,
