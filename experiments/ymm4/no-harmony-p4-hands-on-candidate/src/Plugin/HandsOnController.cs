@@ -97,6 +97,317 @@ internal sealed class HandsOnController : IDisposable
         ScheduleP5CompatibilitySmoke();
         ScheduleP5MediaCompatibilitySmoke();
         ScheduleP5ThirdPartyCompatibilitySmoke();
+        ScheduleP5ConfiguredVoiceSmoke();
+    }
+
+    private void ScheduleP5ConfiguredVoiceSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P5_CONFIGURED_VOICE_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP5ConfiguredVoiceSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP5ConfiguredVoiceSmokeAsync()
+    {
+        try
+        {
+            await Task.Delay(700);
+
+            if (timeline.Items.Any())
+                throw new InvalidOperationException(
+                    "P5 configured Voice smoke must start from an empty Timeline.");
+
+            var wav = Environment.GetEnvironmentVariable(
+                "CNWL_P5_VOICE_WAV");
+            if (string.IsNullOrWhiteSpace(wav))
+                throw new InvalidOperationException(
+                    "CNWL_P5_VOICE_WAV is missing.");
+
+            wav = Path.GetFullPath(wav);
+            if (!File.Exists(wav))
+                throw new FileNotFoundException(
+                    "Configured Voice WAV fixture missing.",
+                    wav);
+
+            for (var layer = 0; layer <= 6; layer++)
+            {
+                ExecuteHostCommand(CommandType.AddLayer, layer);
+                await Task.Delay(80);
+            }
+
+            static Type LoadedType(string fullName) =>
+                AppDomain.CurrentDomain
+                    .GetAssemblies()
+                    .SelectMany(assembly =>
+                    {
+                        try { return assembly.GetTypes(); }
+                        catch { return Type.EmptyTypes; }
+                    })
+                    .SingleOrDefault(type =>
+                        string.Equals(
+                            type.FullName,
+                            fullName,
+                            StringComparison.Ordinal))
+                ?? throw new TypeLoadException(fullName);
+
+            var speakerType = LoadedType(
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoiceSpeaker");
+            var parameterType = LoadedType(
+                "YukkuriMovieMaker.Plugin.Community.Voice.Recording.RecordedVoiceParameter");
+            var descriptionType = LoadedType(
+                "YukkuriMovieMaker.Plugin.Voice.VoiceDescription");
+
+            var speaker =
+                speakerType.GetProperty(
+                    "Instance",
+                    System.Reflection.BindingFlags.Static
+                    | System.Reflection.BindingFlags.Public)
+                ?.GetValue(null)
+                ?? Activator.CreateInstance(speakerType)
+                ?? throw new InvalidOperationException(
+                    "RecordedVoiceSpeaker instance unavailable.");
+
+            var parameter = Activator.CreateInstance(parameterType)
+                ?? throw new InvalidOperationException(
+                    "RecordedVoiceParameter instance unavailable.");
+
+            parameterType.GetProperty("AudioFilePath")
+                ?.SetValue(parameter, wav);
+            parameterType.GetProperty("RecordsDirectory")
+                ?.SetValue(parameter, Path.GetDirectoryName(wav) ?? "");
+            parameterType.GetProperty("Text")
+                ?.SetValue(parameter, "CNWL configured voice");
+
+            var description = Activator.CreateInstance(
+                    descriptionType,
+                    [speaker])
+                ?? throw new InvalidOperationException(
+                    "VoiceDescription could not be created.");
+
+            var character = new Character
+            {
+                Name = "CNWL_P5_CONFIGURED_VOICE"
+            };
+
+            character.GetType()
+                .GetProperty("Voice")
+                ?.SetValue(character, description);
+            character.GetType()
+                .GetProperty("VoiceParameter")
+                ?.SetValue(character, parameter);
+
+            var voice = new VoiceItem(character)
+            {
+                Frame = 100,
+                Layer = 2,
+                Length = 30,
+                Serif = "CNWL configured voice",
+                Remark = "CNWL_P5_CONFIGURED_VOICE"
+            };
+
+            voice.GetType()
+                .GetProperty("VoiceParameter")
+                ?.SetValue(voice, parameter);
+
+            if (!timeline.TryAddItems(
+                    [voice],
+                    voice.Frame,
+                    voice.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice TryAddItems returned false.");
+            }
+
+            await Task.Delay(1000);
+
+            if (!timeline.Items.Any(item =>
+                    ReferenceEquals(item, voice)))
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice did not remain live.");
+            }
+
+            var geometry =
+                HandsOnHostAccess.ReadTimelineItemGeometry(host.Vm)
+                    .SingleOrDefault(current =>
+                        ReferenceEquals(current.Item, voice));
+
+            if (geometry.Item is null
+                || !double.IsFinite(geometry.Left)
+                || !double.IsFinite(geometry.Width)
+                || geometry.Width <= 0)
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice public geometry missing.");
+            }
+
+            var folderId = Guid.Parse(
+                "dddddddd-eeee-ffff-0000-000000000001");
+            var key = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = key,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 2,
+                                            Name = "P5 Voice",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(700);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || display.Layout.OwnerLogical(2) != 1)
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice fold owner mapping failed.");
+            }
+
+            if (visualSummary is null)
+                throw new InvalidOperationException(
+                    "P5 configured Voice visual summary unavailable.");
+
+            visualSummary.Refresh();
+
+            if (visualSummary.TimingBandCount != 1)
+                throw new InvalidOperationException(
+                    $"P5 expected 1 configured Voice timing band, got {visualSummary.TimingBandCount}.");
+
+            commands.SelectItems(folderId);
+            await Task.Delay(150);
+
+            if (!timeline.SelectedItems.Any(item =>
+                    ReferenceEquals(item, voice)))
+            {
+                throw new InvalidOperationException(
+                    "P5 configured Voice selection failed.");
+            }
+
+            // This is the history boundary that the synthetic unconfigured
+            // Voice fixture could not cross.
+            undo.Record();
+            await Task.Delay(1000);
+
+            var folderRow = PanelProjection.Build(
+                    state.ProductState,
+                    key,
+                    Math.Max(
+                        timeline.MaxLayer,
+                        timeline.LayerSettings.MaxLayer),
+                    timeline.Items
+                        .GroupBy(item => item.Layer)
+                        .ToDictionary(
+                            group => group.Key,
+                            group => group.Count()),
+                    [])
+                .Single(row =>
+                    row.FolderId == folderId);
+
+            var dragBlock = PanelMoveRules.TryGetDragBlock([folderRow])
+                ?? throw new InvalidOperationException(
+                    "P5 configured Voice folder did not resolve to a drag block.");
+
+            var drop = new PanelDropTarget(
+                OriginalInsertionBoundary: 5,
+                IntoFolderId: null);
+
+            if (!commands.CanMovePanelRows(dragBlock, drop))
+                throw new InvalidOperationException(
+                    "P5 configured Voice block move was rejected.");
+
+            commands.MovePanelRows(dragBlock, drop);
+            await Task.Delay(550);
+
+            if (voice.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 configured Voice moved layer={voice.Layer}, expected 4.");
+            AssertP5Folder(folderId, 3, 4);
+
+            ExecuteHostCommand(CommandType.Undo, null);
+            await Task.Delay(500);
+
+            if (voice.Layer != 2)
+                throw new InvalidOperationException(
+                    $"P5 configured Voice Undo layer={voice.Layer}, expected 2.");
+            AssertP5Folder(folderId, 1, 2);
+
+            ExecuteHostCommand(CommandType.Redo, null);
+            await Task.Delay(500);
+
+            if (voice.Layer != 4)
+                throw new InvalidOperationException(
+                    $"P5 configured Voice Redo layer={voice.Layer}, expected 4.");
+            AssertP5Folder(folderId, 3, 4);
+
+            WriteP5ConfiguredVoiceResult(
+                string.Join(
+                    Environment.NewLine,
+                    new[]
+                    {
+                        "PASS_P5_CONFIGURED_VOICE",
+                        $"timeline={key}",
+                        "voice_backend=RecordedVoice",
+                        "voice_fixture=local_wav",
+                        "construct_add_live=1",
+                        "common_geometry=1",
+                        "fold_owner_mapping=1",
+                        "timing_summary=1",
+                        "folder_selection=1",
+                        "history_record=1",
+                        "block_move_undo_redo=1",
+                        "no_voice_specific_folder_adapter=true"
+                    })
+                + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p5_configured_voice_smoke_error=" + ex);
+
+            WriteP5ConfiguredVoiceResult(
+                "FAIL_P5_CONFIGURED_VOICE\n"
+                + ex
+                + "\n");
+        }
+    }
+
+    private static void WriteP5ConfiguredVoiceResult(string text)
+    {
+        var dir = Environment.GetEnvironmentVariable(
+            "CNWL_P4_HANDS_ON_DIAG_DIR");
+
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(
+            Path.Combine(dir, "p5-configured-voice-result.txt"),
+            text);
     }
 
     private void ScheduleP5ThirdPartyCompatibilitySmoke()
