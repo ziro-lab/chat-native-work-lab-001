@@ -1,6 +1,6 @@
 # YMM4 no-Harmony Full — P5 Compatibility Matrix
 
-Status: **ACTIVE / DISCOVERY**
+Status: **COMPLETE / FROZEN**
 
 P4 Full is frozen at:
 
@@ -37,7 +37,7 @@ Do not add a type-specific adapter merely because setup differs.
 
 | Family | Candidate host type | Fixture route | 4.55.1.1 | 4.56.1.0 | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Voice / speech | `VoiceItem` | parameterless common path; configured speaker needed for history | Common-path with setup | Common-path with setup | Geometry/fold/timing/select confirmed; configured-voice history pending |
+| Voice / speech | `VoiceItem` | Recorded Voice + deterministic local WAV | **Confirmed** | **Confirmed** | P5.5 configured Voice crosses native history + block move Undo/Redo |
 | Text-like | `TextItem` | public parameterless ctor | **Confirmed** | **Confirmed** | Full P5.3 common path + block move Undo/Redo |
 | Image | `ImageItem` | real PNG via public `ImageItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
 | Video | `VideoItem` | real MP4 via public `VideoItem(string file)` | **Confirmed** | **Confirmed** | P5.4 real-file add/fold/timing/select/block-move Undo/Redo |
@@ -46,7 +46,7 @@ Do not add a type-specific adapter merely because setup differs.
 | Group Control | `GroupItem` | public item construction | **Confirmed** | **Confirmed** | P5.3 common path + block move Undo/Redo; P4 GroupRange-specific behavior also frozen |
 | Effect-bearing timeline item | `EffectItem` | public parameterless ctor | **Confirmed** | **Confirmed** | P5.3 common geometry/fold/timing/select + block move Undo/Redo |
 | Transition / special timeline item | `TransitionItem` | public parameterless ctor | **Confirmed** | **Confirmed** | P5.3 common geometry/fold/timing/select + block move Undo/Redo |
-| Third-party custom item | `YMM43D.Project.Items.LightItem` | pinned MIT YMM43D build | Testing | Testing | Commit `a5fe44443d9b62912dec6861edf68cbdff9e7810`; dedicated P5 gate in progress |
+| Third-party custom item | `YMM43D.Project.Items.LightItem` | pinned MIT YMM43D build | **Confirmed** | **Confirmed** | Commit `a5fe44443d9b62912dec6861edf68cbdff9e7810`; P5.6 common path + Undo/Redo |
 
 ## 4. Frozen assumptions that P5 may challenge
 
@@ -233,13 +233,108 @@ The file-backed Image / Audio / Video paths do not require a media-specific fold
 
 Remaining resource/setup work is now narrowed to configured Voice and any special/third-party plugin semantics that are not represented by the built-in BaseItem path.
 
-## 6. Exit gate
+## 5.5 Configured Voice compatibility — COMPLETE
 
-P5 is complete when:
+Discovery proved on both pinned hosts that:
 
-- representative built-in families are classified;
-- both pinned hosts have a compatibility matrix;
-- Group/special behavior has at least one representative exact-host route;
-- one reasonable third-party item path is either confirmed or explicitly unavailable with a documented reason;
-- unsupported/resource-missing cases fail without folder-state corruption;
-- no new duplicate state/Undo/FoldMap ownership was introduced.
+- `Character.Voice` is public get/set `VoiceDescription`;
+- `Character.VoiceParameter` is public get/set `IVoiceParameter`;
+- Community `RecordedVoiceSpeaker`, `RecordedVoiceParameter`, and `VoiceDescription(IVoiceSpeaker)` are available with matching surfaces on both hosts;
+- `RecordedVoiceParameter.AudioFilePath` and `RecordsDirectory` are public settable.
+
+The configured Voice gate uses YMM4's bundled Community **Recorded Voice** implementation with a deterministic local PCM WAV. No external TTS engine, service, account, or network resource is required.
+
+Workflow:
+
+- `35845819363`
+
+Both pinned hosts returned:
+
+- `PASS_P5_CONFIGURED_VOICE`;
+- construct / add / live = **1/1**;
+- common public geometry = **1/1**;
+- FoldMap owner mapping = **1/1**;
+- hidden timing summary = **1/1**;
+- folder item selection = **1/1**;
+- native history `Record()` boundary = **PASS**;
+- explicit block move + one-step Undo/Redo = **1/1**;
+- no Voice-specific folder adapter.
+
+Voice WAV SHA256:
+
+`3fa20276d8a4131431490ed129d0b05fafa4e9c82d4339b5cf635512103d6615`
+
+Artifacts:
+
+- 4.55.1.1: `10743666802`, `sha256:82cd6f10ac396f725ae5d493f1b175f004304323a88041513b46a2e760ae0ca3`;
+- 4.56.1.0: `10743336836`, `sha256:4b52b127aee2ac28fc57990e7048c6d087efa36bdc844589562bf74368c7b629`.
+
+This closes the only resource-specific built-in history gap left by P5.3.
+
+## 5.6 Third-party custom item compatibility — COMPLETE
+
+Representative third-party plugin:
+
+- repository: `Dolphin-kun/YMM43D`;
+- pinned commit: `a5fe44443d9b62912dec6861edf68cbdff9e7810`;
+- license: **MIT**;
+- representative custom item: `YMM43D.Project.Items.LightItem : BaseItem`.
+
+The workflow fetches the pinned source, verifies the commit and MIT license marker, builds YMM43D against each exact pinned YMM4 host, rejects Harmony in its output, installs it through the ordinary YMM4 plugin path, and then exercises the folder plugin against the loaded custom item.
+
+Workflow:
+
+- `35845819534`
+
+Both pinned hosts returned:
+
+- `PASS_P5_THIRD_PARTY`;
+- construct / add / live = **1/1**;
+- common public geometry = **1/1**;
+- FoldMap owner mapping = **1/1**;
+- hidden timing summary = **1/1**;
+- folder item selection = **1/1**;
+- explicit block move + one-step Undo/Redo = **1/1**;
+- no type-specific folder adapter.
+
+YMM43D.dll SHA256:
+
+- 4.55.1.1 build: `f3b3f355d4cea2179af95a84076b6886f677f5ae6761de1647786d820ef4aff5`;
+- 4.56.1.0 build: `c8e108ad49dbf5bbfe7debc64d070819c3cd61a0a1c8d99cc458914f47dedcfc`.
+
+Artifacts:
+
+- 4.55.1.1: `10742907908`, `sha256:6c4c0f67ea0bcf151b05922e8c4c732500c83b029e7ecb922603cdb40cb6f2ce`;
+- 4.56.1.0: `10743057676`, `sha256:07b962c48b38ba12b098e629148e91a021fc622a8fd9f7b1678f629aa5729cb1`.
+
+### P5 compatibility conclusion
+
+Across the frozen P4 product path:
+
+- every built-in concrete item class shares the common folder/display contract;
+- file-backed Image / Audio / Video remain on the common path;
+- configured Voice remains on the common path once given a real bundled Recorded Voice configuration;
+- special built-ins including Group / Effect / Transition remain on the common path;
+- a real third-party custom BaseItem remains on the common path.
+
+No compatibility result justified a new FolderDocument, FoldMap, structural observer, Undo stack, or per-item timing-coordinate formula.
+
+## 6. Exit gate — SATISFIED
+
+P5 exit conditions are satisfied:
+
+- representative built-in families are classified on both pinned hosts;
+- all 13 concrete built-in item types pass the frozen common folder/display route;
+- 12/12 zero-resource history-valid built-ins pass explicit block move Undo/Redo;
+- configured Voice closes the remaining history setup gap;
+- real PNG / WAV / MP4 fixtures validate Image / Audio / Video resource realism;
+- Group / Effect / Transition provide representative built-in special-item coverage;
+- pinned MIT YMM43D `LightItem` provides real third-party custom-item coverage;
+- resource/setup limitations were isolated without folder-state corruption;
+- no duplicate state / Undo / FoldMap ownership was introduced.
+
+Freeze record:
+
+- `docs/YMM4_NO_HARMONY_P5_COMPATIBILITY_FREEZE.md`
+
+The active completion path advances to **P6 Hardening & Performance**.
