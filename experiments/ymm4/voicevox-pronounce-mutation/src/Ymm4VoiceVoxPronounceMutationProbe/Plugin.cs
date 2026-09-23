@@ -78,7 +78,8 @@ internal static class Probe
                     .FirstOrDefault()
                 : audioQueryType;
             Check("voicevox_audioquery_concrete_found", concreteAudioQueryType is not null);
-            concreteAudioQueryType ??= throw new InvalidOperationException($"No concrete implementation for {audioQueryType.FullName}");
+            if (concreteAudioQueryType is null)
+                throw new InvalidOperationException($"No concrete implementation for {audioQueryType.FullName}");
 
             var accentPhrasesMember = FindMember(audioQueryType, "AccentPhrases")
                 ?? FindMember(audioQueryType, "accent_phrases")
