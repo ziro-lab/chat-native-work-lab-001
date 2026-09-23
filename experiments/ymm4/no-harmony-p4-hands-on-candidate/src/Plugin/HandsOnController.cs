@@ -362,8 +362,8 @@ internal sealed class HandsOnController : IDisposable
             // The management panel itself must be constructible on the exact
             // host without optional XAML/resources or another state service.
             var panel = new FolderToolView();
-            if (panel.Content is not Grid
-                || !Host.Elements(panel)
+            if (panel.Content is not Grid panelRoot
+                || !panelRoot.Children
                     .OfType<ListBox>()
                     .Any())
             {
