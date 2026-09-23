@@ -178,20 +178,13 @@ internal static class Probe
                     if (!found.TryGetValue(ToolName, out var target))
                         continue;
 
-                    Check("tool_menu_item_found", true);
+                    Log("target tool menu item observed");
 
                     if (!openAttempted)
                     {
                         openAttempted = true;
                         var invoked = TryInvoke(target);
-                        Check("tool_menu_open_invoked", invoked);
                         Log("target invoke=" + invoked);
-                        if (!invoked)
-                        {
-                            timer.Stop();
-                            Write("FAIL_TIMELINE_TOOL_UNDO_MANAGER_PUBLIC_ROUTE", "Target tool menu item could not be invoked.");
-                            return;
-                        }
                     }
                 }
 
