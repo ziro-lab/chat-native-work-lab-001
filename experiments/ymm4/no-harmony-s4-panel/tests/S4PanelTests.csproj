@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/PanelProjection.cs" Link="PanelProjection.cs" />
+    <Compile Include="../src/PanelMoveRules.cs" Link="PanelMoveRules.cs" />
+    <Compile Include="../../no-harmony-s3-structural-convenience/src/StructuralConvenienceRules.cs" Link="StructuralConvenienceRules.cs" />
+    <Compile Include="../../no-harmony-s2-extended-state/src/FolderProductState.cs" Link="FolderProductState.cs" />
+    <Compile Include="../../no-harmony-s2-extended-state/src/FolderProductStateCodec.cs" Link="FolderProductStateCodec.cs" />
+    <Compile Include="../../no-harmony-p3-persistence/src/FolderDocument.cs" Link="FolderDocument.cs" />
+    <Compile Include="../../no-harmony-p3-persistence/src/FolderDocumentCodec.cs" Link="FolderDocumentCodec.cs" />
+    <Compile Include="../../no-harmony-folder-range-tracker/src/FolderRangeTracker.cs" Link="FolderRangeTracker.cs" />
+  </ItemGroup>
+</Project>
