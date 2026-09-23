@@ -838,33 +838,33 @@ P5+ must treat S0-S5 ownership as frozen unless new compatibility evidence direc
 
 ## P5 — Compatibility Coverage
 
-**Purpose:** expand beyond the minimal marker / voice-item evidence.
+**Status: COMPLETE / FROZEN.**
 
-### Scope
+Freeze record:
 
-Representative coverage for:
+- `docs/YMM4_NO_HARMONY_P5_COMPATIBILITY_FREEZE.md`
 
-- voice;
-- text;
-- image;
-- video;
-- audio;
-- shape;
-- effect / transition where relevant;
-- grouped items;
-- multi-layer / special host items;
-- reasonable third-party item implementations;
-- host version differences.
+**Purpose:** verify that the frozen P4 product path remains valid across representative built-in, resource-backed, special and third-party item implementations.
+
+Completed:
+
+- exact-host inventory of all concrete built-in `IItem` types on 4.55.1.1 / 4.56.1.0;
+- identical 13-type built-in surface across both pinned hosts;
+- 13/13 zero-resource construction / Timeline insertion / live state;
+- 13/13 common geometry / FoldMap owner / timing summary / folder selection;
+- 12/12 zero-resource history-valid built-ins through explicit block move + Undo/Redo;
+- configured `VoiceItem` using bundled Recorded Voice + local WAV through native history + Undo/Redo;
+- real PNG / WAV / MP4 `ImageItem / AudioItem / VideoItem` through the full common path;
+- special built-ins including Group / Effect / Transition through the common path;
+- pinned MIT `Dolphin-kun/YMM43D` `LightItem : BaseItem` through the full common path;
+- no type-specific FolderDocument / FoldMap / structural observer / Undo path / timing coordinate formula;
+- same-head S0-S5 / candidate / real .ymme regressions GREEN.
 
 ### Exit gate
 
-A compatibility matrix documents:
+Satisfied.
 
-- confirmed support;
-- graceful fallback;
-- known unsupported behavior.
-
-Version differences must not silently corrupt folder state.
+The compatibility matrix documents confirmed support and the tested resource/setup boundaries. No tested version or item family silently corrupts folder state.
 
 ---
 
@@ -953,8 +953,8 @@ P0 Core Spine                 DONE
   -> S4 management panel parity DONE
   -> S5 visual parity redesign DONE
   -> P4 Full freeze             DONE
-  -> P5 compatibility           NEXT
-  -> P6 hardening
+  -> P5 compatibility           DONE
+  -> P6 hardening               NEXT
   -> P7 release
 ```
 
