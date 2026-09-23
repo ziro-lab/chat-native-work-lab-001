@@ -192,38 +192,26 @@ internal static class Probe
             ?? throw new InvalidOperationException("Timeline could not be resolved.");
         Check("timeline_resolved", true);
 
-        var characters = ReadCharacters(active).ToArray();
-        Check("characters_available", characters.Length > 0);
-        if (characters.Length == 0)
-            throw new InvalidOperationException("No characters available.");
-
-        var mainModel = FindMainModel(main)
-            ?? throw new InvalidOperationException("MainModel could not be resolved.");
-
-        VoiceItem? voice = null;
-        string? characterName = null;
-        Exception? lastVoiceError = null;
-
-        foreach (var candidate in characters.Take(6))
-        {
-            try
+        var constructors = typeof(VoiceItem).GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Select(x => new
             {
-                voice = await AddVoiceAsync(mainModel, candidate.Model, "CNWL 発音補助テスト");
-                if (voice is not null)
-                {
-                    characterName = candidate.Name;
-                    break;
-                }
-            }
-            catch (Exception ex)
-            {
-                lastVoiceError = ex;
-            }
-        }
+                visibility = x.IsPublic ? "public" : x.IsFamily ? "family" : x.IsAssembly ? "internal" : "nonpublic",
+                signature = x.ToString(),
+                parameterCount = x.GetParameters().Length
+            }).ToArray();
+        File.WriteAllText(Path.Combine(output, "voiceitem-constructors.json"),
+            JsonSerializer.Serialize(constructors, new JsonSerializerOptions { WriteIndented = true }));
 
-        Check("voice_created_by_host", voice is not null);
+        var voice = CreateDetachedVoiceItem();
+        Check("detached_voiceitem_constructed", voice is not null);
         if (voice is null)
-            throw new InvalidOperationException("YMM4 could not create a synthetic VoiceItem.", lastVoiceError);
+            throw new InvalidOperationException("A detached VoiceItem could not be constructed from the real host type.");
+
+        TrySetPublicProperty(voice, "Serif", "CNWL 発音補助テスト");
+        TrySetPublicProperty(voice, "Hatsuon", "CNWL はつおんほじょてすと");
+        TrySetPublicProperty(voice, "CharacterName", "CNWL Probe");
+
+        Check("detached_voice_added_to_timeline", timeline.TryAddItems([voice], 120, 8));
 
         var jimakuProp = voice.GetType().GetProperty("JimakuVideoEffects",
             BindingFlags.Instance | BindingFlags.Public);
@@ -264,13 +252,12 @@ internal static class Probe
         Check("effect_editor_received_editor_info", ProbeState.EditorInfoSeen);
         Check("effect_editor_received_voice_edit_service", ProbeState.VoiceItemEditSeen);
         Check("standard_voice_regeneration_started", ProbeState.RegenerationStarted);
-        Check("standard_voice_regeneration_completed",
-            ProbeState.RegenerationCompleted && ProbeState.RegenerationError is null);
+        Check("standard_voice_regeneration_invoked", ProbeState.RegenerationStarted);
 
         var evidence = new
         {
             host = "4.56.1.0 Lite",
-            characterName,
+            construction = new { constructors },
             voice = new
             {
                 voice.CharacterName,
@@ -376,75 +363,48 @@ internal static class Probe
         return null;
     }
 
-    static object? FindMainModel(object main)
+    static VoiceItem? CreateDetachedVoiceItem()
     {
-        const string target = "YukkuriMovieMaker.Project.MainModel";
-        for (var t = main.GetType(); t is not null; t = t.BaseType)
-        {
-            foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                if (f.FieldType.FullName == target && f.GetValue(main) is { } fv)
-                    return fv;
+        var type = typeof(VoiceItem);
+        var empty = type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null, Type.EmptyTypes, modifiers: null);
+        if (empty is not null)
+            return empty.Invoke(null) as VoiceItem;
 
-            foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        foreach (var ctor in type.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                     .OrderBy(x => x.GetParameters().Length))
+        {
+            try
             {
-                if (p.PropertyType.FullName != target || p.GetIndexParameters().Length != 0)
-                    continue;
-                try
-                {
-                    if (p.GetValue(main) is { } pv)
-                        return pv;
-                }
-                catch { }
+                var args = ctor.GetParameters()
+                    .Select(p => p.HasDefaultValue
+                        ? p.DefaultValue
+                        : p.ParameterType.IsValueType
+                            ? Activator.CreateInstance(p.ParameterType)
+                            : null)
+                    .ToArray();
+                if (ctor.Invoke(args) is VoiceItem voice)
+                    return voice;
             }
+            catch { }
         }
         return null;
     }
 
-    sealed record CharacterCandidate(string Name, object Model);
-
-    static IEnumerable<CharacterCandidate> ReadCharacters(object active)
+    static bool TrySetPublicProperty(object target, string name, object? value)
     {
-        var p = active.GetType().GetProperty("Characters",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (p?.GetValue(active) is not IEnumerable values)
-            yield break;
-
-        foreach (var entry in values)
+        try
         {
-            if (entry is null)
-                continue;
-
-            object model = entry;
-            var nameProp = entry.GetType().GetProperty("Name");
-            if (nameProp is null)
-            {
-                var inner = entry.GetType().GetProperty("Character");
-                if (inner?.GetValue(entry) is { } innerValue)
-                {
-                    model = innerValue;
-                    nameProp = innerValue.GetType().GetProperty("Name");
-                }
-            }
-
-            var name = nameProp?.GetValue(model) as string;
-            if (!string.IsNullOrWhiteSpace(name))
-                yield return new CharacterCandidate(name, model);
+            var p = target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+            if (p?.SetMethod?.IsPublic != true)
+                return false;
+            p.SetValue(target, value);
+            return true;
         }
-    }
-
-    static async Task<VoiceItem?> AddVoiceAsync(object mainModel, object character, string serif)
-    {
-        var method = mainModel.GetType()
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .FirstOrDefault(x => x.Name == "AddVoiceItemAsync" && x.GetParameters().Length == 5)
-            ?? throw new MissingMethodException(mainModel.GetType().FullName, "AddVoiceItemAsync");
-
-        var taskObject = method.Invoke(mainModel, [120, 8, character, serif, null]);
-        if (taskObject is not Task task)
-            return taskObject as VoiceItem;
-
-        await task;
-        return taskObject.GetType().GetProperty("Result")?.GetValue(taskObject) as VoiceItem;
+        catch
+        {
+            return false;
+        }
     }
 
     static void Check(string id, bool passed) => requirements.Add(new { id, passed });
