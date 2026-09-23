@@ -140,6 +140,10 @@ jobs:
             if(-not($content -contains 'display_failure=none')){throw 'P6.1 display failure present'}
             if(-not($content -contains 'final_geometry=true')){throw 'P6.1 final geometry failed'}
             if(-not($content -contains 'folder_validation=true')){throw 'P6.1 folder validation failed'}
+            if(-not($content -contains 'idle_mutations_delta=0')){throw 'P6.1 idle mutation activity remained'}
+            if(-not($content -contains 'idle_canvas_refreshes_delta=0')){throw 'P6.1 idle canvas activity remained'}
+            if(-not($content -contains 'idle_subscriptions_growth=0')){throw 'P6.1 idle subscription growth remained'}
+            if(-not($content -contains 'idle_applications_bounded=true')){throw 'P6.1 idle application budget failed'}
           } finally {
             if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
             foreach($name in @(
