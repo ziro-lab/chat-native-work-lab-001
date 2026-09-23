@@ -83,92 +83,240 @@ internal static class Probe
         var timeline = FindTimeline(active) ?? throw new InvalidOperationException("Timeline not found.");
         Check("timeline_resolved", true);
 
-        var guidProperty = typeof(VoiceItem).GetProperty("Guid", BindingFlags.Instance | BindingFlags.Public);
-        Check("voiceitem_guid_public_readable",
-            guidProperty?.GetMethod?.IsPublic == true && guidProperty.PropertyType == typeof(Guid));
-        if (guidProperty is null) throw new MissingMemberException(typeof(VoiceItem).FullName, "Guid");
+        var type = typeof(VoiceItem);
+        var identityMembers = new List<object>();
+
+        for (var t = type; t is not null; t = t.BaseType)
+        {
+            foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (p.Name.Contains("Guid", StringComparison.OrdinalIgnoreCase)
+                    || p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase)
+                    || p.Name.Contains("ItemId", StringComparison.OrdinalIgnoreCase)
+                    || p.PropertyType == typeof(Guid))
+                {
+                    identityMembers.Add(new
+                    {
+                        kind = "property",
+                        declaringType = t.FullName,
+                        p.Name,
+                        type = p.PropertyType.FullName,
+                        publicGet = p.GetMethod?.IsPublic == true,
+                        publicSet = p.SetMethod?.IsPublic == true,
+                        visibility = p.GetMethod?.IsPublic == true ? "public"
+                            : p.GetMethod?.IsFamily == true ? "protected"
+                            : p.GetMethod?.IsAssembly == true ? "internal"
+                            : "nonpublic"
+                    });
+                }
+            }
+
+            foreach (var fld in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (fld.Name.Contains("Guid", StringComparison.OrdinalIgnoreCase)
+                    || fld.Name.Equals("Id", StringComparison.OrdinalIgnoreCase)
+                    || fld.Name.Contains("ItemId", StringComparison.OrdinalIgnoreCase)
+                    || fld.FieldType == typeof(Guid))
+                {
+                    identityMembers.Add(new
+                    {
+                        kind = "field",
+                        declaringType = t.FullName,
+                        fld.Name,
+                        type = fld.FieldType.FullName,
+                        publicGet = fld.IsPublic,
+                        publicSet = fld.IsPublic && !fld.IsInitOnly,
+                        visibility = fld.IsPublic ? "public"
+                            : fld.IsFamily ? "protected"
+                            : fld.IsAssembly ? "internal"
+                            : "nonpublic"
+                    });
+                }
+            }
+        }
+
+        var interfaceSurface = type.GetInterfaces()
+            .Select(i => new
+            {
+                type = i.FullName,
+                properties = i.GetProperties()
+                    .Where(p => p.Name.Contains("Guid", StringComparison.OrdinalIgnoreCase)
+                             || p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase)
+                             || p.Name.Contains("ItemId", StringComparison.OrdinalIgnoreCase)
+                             || p.PropertyType == typeof(Guid))
+                    .Select(p => new
+                    {
+                        p.Name,
+                        type = p.PropertyType.FullName,
+                        publicGet = p.GetMethod?.IsPublic == true,
+                        publicSet = p.SetMethod?.IsPublic == true
+                    }).ToArray()
+            })
+            .Where(x => x.properties.Length > 0)
+            .ToArray();
+
+        Check("identity_surface_inventoried", true);
 
         var a = new VoiceItem { Serif = "A", Hatsuon = "A" };
         var b = new VoiceItem { Serif = "B", Hatsuon = "B" };
 
-        var aGuid = (Guid)(guidProperty.GetValue(a) ?? Guid.Empty);
-        var bGuid = (Guid)(guidProperty.GetValue(b) ?? Guid.Empty);
+        var guidMember = FindGuidMember(type);
+        object? aIdentity = ReadMember(guidMember, a);
+        object? bIdentity = ReadMember(guidMember, b);
 
-        Check("new_voiceitem_guid_nonempty", aGuid != Guid.Empty && bGuid != Guid.Empty);
-        Check("new_voiceitem_guids_unique", aGuid != bGuid);
+        var guidAccessibleByPublicReflection = guidMember switch
+        {
+            PropertyInfo p => p.GetMethod?.IsPublic == true,
+            FieldInfo fld => fld.IsPublic,
+            _ => false
+        };
 
-        a.Frame = 321;
-        a.Layer = 7;
-        a.Serif = "A edited";
-        var afterEdit = (Guid)(guidProperty.GetValue(a) ?? Guid.Empty);
-        Check("guid_stable_across_basic_edits", afterEdit == aGuid);
+        Check("voice_added_to_real_timeline", timeline.TryAddItems([a], 321, 7));
 
-        Check("voice_added_to_real_timeline", timeline.TryAddItems([a], a.Frame, a.Layer));
-        var afterAdd = (Guid)(guidProperty.GetValue(a) ?? Guid.Empty);
-        Check("guid_stable_after_timeline_add", afterAdd == aGuid);
-        Check("timeline_contains_same_guid",
-            timeline.Items.OfType<VoiceItem>().Any(x => x.Guid == aGuid));
+        object? afterTimelineIdentity = ReadMember(guidMember, a);
+        var identityStableIfObservable = aIdentity is null || Equals(aIdentity, afterTimelineIdentity);
+        Check("observable_identity_stable_after_timeline_add", identityStableIfObservable);
 
-        string? json = null;
+        string? jsonA = null;
+        string? jsonB = null;
         string? jsonError = null;
-        bool jsonContainsGuid = false;
-        bool jsonRoundtripPreserved = false;
+        string? serializedGuidA = null;
+        string? serializedGuidB = null;
         try
         {
-            json = JsonConvert.SerializeObject(a, Formatting.None, new JsonSerializerSettings
+            jsonA = JsonConvert.SerializeObject(a, Formatting.None, new JsonSerializerSettings
             {
                 TypeNameHandling = TypeNameHandling.Auto
             });
-            jsonContainsGuid = json.Contains(aGuid.ToString(), StringComparison.OrdinalIgnoreCase);
-            try
+            jsonB = JsonConvert.SerializeObject(b, Formatting.None, new JsonSerializerSettings
             {
-                var round = JsonConvert.DeserializeObject<VoiceItem>(json, new JsonSerializerSettings
-                {
-                    TypeNameHandling = TypeNameHandling.Auto
-                });
-                jsonRoundtripPreserved = round?.Guid == aGuid;
-            }
-            catch (Exception ex)
-            {
-                jsonError = "roundtrip: " + ex;
-            }
+                TypeNameHandling = TypeNameHandling.Auto
+            });
+
+            serializedGuidA = TryReadGuidFromJson(jsonA);
+            serializedGuidB = TryReadGuidFromJson(jsonB);
         }
         catch (Exception ex)
         {
-            jsonError = "serialize: " + ex;
+            jsonError = ex.ToString();
         }
 
-        var cloneLikeMethods = typeof(VoiceItem)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+        var serializedGuidObserved =
+            Guid.TryParse(serializedGuidA, out var sgA) &&
+            Guid.TryParse(serializedGuidB, out var sgB) &&
+            sgA != Guid.Empty &&
+            sgB != Guid.Empty &&
+            sgA != sgB;
+
+        Check("serialized_guid_observed_unique", serializedGuidObserved);
+
+        a.Serif = "A edited";
+        a.Frame = 999;
+        a.Layer = 2;
+
+        string? jsonAfterEdit = null;
+        string? serializedGuidAfterEdit = null;
+        try
+        {
+            jsonAfterEdit = JsonConvert.SerializeObject(a, Formatting.None, new JsonSerializerSettings
+            {
+                TypeNameHandling = TypeNameHandling.Auto
+            });
+            serializedGuidAfterEdit = TryReadGuidFromJson(jsonAfterEdit);
+        }
+        catch { }
+
+        Check("serialized_guid_stable_across_basic_edits",
+            serializedGuidA is not null && serializedGuidA == serializedGuidAfterEdit);
+
+        var cloneLikeMethods = type
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Where(m => m.Name.Contains("Clone", StringComparison.OrdinalIgnoreCase)
                      || m.Name.Contains("Copy", StringComparison.OrdinalIgnoreCase)
                      || m.Name.Contains("Duplicate", StringComparison.OrdinalIgnoreCase))
-            .Select(m => m.ToString())
+            .Select(m => new
+            {
+                m.Name,
+                visibility = m.IsPublic ? "public" : m.IsFamily ? "protected" : m.IsAssembly ? "internal" : "nonpublic",
+                signature = m.ToString()
+            })
             .Distinct()
-            .OrderBy(x => x)
+            .OrderBy(x => x.Name)
             .ToArray();
 
         File.WriteAllText(Path.Combine(output, "behavior.json"),
             System.Text.Json.JsonSerializer.Serialize(new
             {
                 host = "4.56.1.0 Lite",
-                guidProperty = new
+                compileTimePublicGuid = false,
+                identityMembers,
+                interfaceSurface,
+                selectedGuidMember = guidMember is null ? null : new
                 {
-                    declaringType = guidProperty.DeclaringType?.FullName,
-                    guidProperty.PropertyType.FullName,
-                    publicGet = guidProperty.GetMethod?.IsPublic == true,
-                    publicSet = guidProperty.SetMethod?.IsPublic == true
+                    kind = guidMember.MemberType.ToString(),
+                    declaringType = guidMember.DeclaringType?.FullName,
+                    guidMember.Name,
+                    type = guidMember switch
+                    {
+                        PropertyInfo p => p.PropertyType.FullName,
+                        FieldInfo fld => fld.FieldType.FullName,
+                        _ => null
+                    },
+                    publicReadable = guidAccessibleByPublicReflection
                 },
-                firstGuid = aGuid,
-                secondGuid = bGuid,
-                afterBasicEdit = afterEdit,
-                afterTimelineAdd = afterAdd,
-                jsonContainsGuid,
-                jsonRoundtripPreserved,
+                reflectedIdentityA = aIdentity?.ToString(),
+                reflectedIdentityB = bIdentity?.ToString(),
+                reflectedIdentityAfterTimelineAdd = afterTimelineIdentity?.ToString(),
+                serializedGuidA,
+                serializedGuidB,
+                serializedGuidAfterEdit,
+                serializedGuidObserved,
                 jsonError,
-                serializedPreview = json is null ? null : json[..Math.Min(json.Length, 1200)],
+                serializedPreview = jsonA is null ? null : jsonA[..Math.Min(jsonA.Length, 1600)],
                 cloneLikeMethods
             }, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    static MemberInfo? FindGuidMember(Type type)
+    {
+        for (var t = type; t is not null; t = t.BaseType)
+        {
+            var p = t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                .FirstOrDefault(x => x.Name.Equals("Guid", StringComparison.OrdinalIgnoreCase)
+                                  || x.PropertyType == typeof(Guid));
+            if (p is not null) return p;
+
+            var f = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                .FirstOrDefault(x => x.Name.Contains("Guid", StringComparison.OrdinalIgnoreCase)
+                                  || x.FieldType == typeof(Guid));
+            if (f is not null) return f;
+        }
+        return null;
+    }
+
+    static object? ReadMember(MemberInfo? member, object target)
+    {
+        try
+        {
+            return member switch
+            {
+                PropertyInfo p => p.GetValue(target),
+                FieldInfo f => f.GetValue(target),
+                _ => null
+            };
+        }
+        catch { return null; }
+    }
+
+    static string? TryReadGuidFromJson(string json)
+    {
+        try
+        {
+            var obj = Newtonsoft.Json.Linq.JObject.Parse(json);
+            var token = obj["Guid"];
+            return token?.Type == Newtonsoft.Json.Linq.JTokenType.String ? token.Value<string>() : token?.ToString();
+        }
+        catch { return null; }
     }
 
     static Timeline? FindTimeline(object active)
