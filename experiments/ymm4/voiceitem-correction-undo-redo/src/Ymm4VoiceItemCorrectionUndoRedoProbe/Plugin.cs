@@ -114,8 +114,9 @@ internal static class Probe
         Check("timeline_resolved", true);
 
         var managerAcquisition = AcquireUndoManager(main, active, timeline);
-        var manager = managerAcquisition.Manager;
-        Check("host_undo_manager_acquired", manager is not null);
+        var manager = managerAcquisition.Manager
+            ?? throw new InvalidOperationException("UndoRedoManager acquisition returned null.");
+        Check("host_undo_manager_acquired", true);
 
         var engine = new VOICEVOXEngine(new VOICEVOXEngineContext())
         {
