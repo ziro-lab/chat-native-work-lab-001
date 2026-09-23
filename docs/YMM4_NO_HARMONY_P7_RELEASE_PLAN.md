@@ -97,9 +97,13 @@ Known navigation boundary:
 
 ### P7.2 — canonical one-package build
 
-Build **once** against the newest pinned supported host:
+Build **once** against the oldest pinned supported host:
 
-- YMM4 4.56.1.0 Lite.
+- YMM4 4.55.1.1 Lite.
+
+Reason:
+
+> The canonical release must be one binary that loads on both supported hosts. Building the first attempt against 4.56.1.0 produced a package that installed on 4.55.1.1 but did not attach after restart. The package itself was intact; the failure was the backward runtime load boundary. P7 therefore treats the oldest supported host as the compile-time compatibility floor and validates the exact same bytes forward on 4.56.1.0.
 
 Record:
 
