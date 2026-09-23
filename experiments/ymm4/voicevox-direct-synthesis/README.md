@@ -51,3 +51,21 @@ Artifact `10750448495`, SHA256 `563d021b230a881d0cbd7a1ec83b4e9a8dc4d19d6bcb9df2
 This proves the built-in YMM4 VOICEVOX engine synthesis layer accepts an already-modified AudioQuery and serializes that modified query directly to `/synthesis` without re-running `/audio_query`.
 
 It does **not** yet establish the correct public/product route for asking YMM4 to perform this synthesis. The public speaker wrapper no-op observed here must be understood separately before choosing the production integration boundary.
+
+
+## Phase 2 — public speaker with registered engine
+
+IL inventory on run `35867225162` identified the earlier public no-op condition:
+
+`VOICEVOXVoiceSpeaker.CreateVoiceAsync` begins by resolving its engine through
+`VOICEVOXSettings.Default.FindEngine(speaker.ID)`. If that lookup returns null,
+the method returns the supplied pronunciation immediately.
+
+The original fake-engine probe constructed an engine but did not register it in
+YMM4 settings, so it exercised that early-return path.
+
+The next slice temporarily registers the fake engine in the real YMM4
+`VOICEVOXSettings.Engines`, then calls the **public**
+`IVoiceSpeaker.CreateVoiceAsync` path again. Acceptance requires a WAV,
+exactly one `/synthesis`, zero `/audio_query`, and preservation of
+`pause_mora.vowel_length = 0`.
