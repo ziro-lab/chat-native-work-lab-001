@@ -32,9 +32,25 @@ public sealed class UndoRouteView : UserControl
     public UndoRouteView() => Content = new TextBlock { Text = Probe.ToolName };
 }
 
-public sealed class UndoRouteViewModel : ITimelineToolViewModel
+public sealed class UndoRouteViewModel : IToolViewModel, ITimelineToolViewModel
 {
+    public string Title => Probe.ToolName;
+    public bool CanSuspend => false;
+    public ToolState SaveState() => new() { Title = Title };
+    public void LoadState(ToolState stateData) { }
     public void SetTimelineToolInfo(TimelineToolInfo info) => Probe.Accept(info);
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged
+    {
+        add { }
+        remove { }
+    }
+
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested
+    {
+        add { }
+        remove { }
+    }
 }
 
 internal static class Probe
