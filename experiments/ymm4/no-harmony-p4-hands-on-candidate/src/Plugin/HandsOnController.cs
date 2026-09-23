@@ -19,7 +19,7 @@ using YukkuriMovieMaker.UndoRedo;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
-internal sealed class HandsOnController : IDisposable
+internal sealed partial class HandsOnController : IDisposable
 {
     private const string MenuTag = "CNWL.P4.HandsOn";
 
@@ -98,7 +98,10 @@ internal sealed class HandsOnController : IDisposable
         ScheduleP5MediaCompatibilitySmoke();
         ScheduleP5ThirdPartyCompatibilitySmoke();
         ScheduleP5ConfiguredVoiceSmoke();
+        ScheduleP6Probes();
     }
+
+    partial void ScheduleP6Probes();
 
     private void ScheduleP5ConfiguredVoiceSmoke()
     {
