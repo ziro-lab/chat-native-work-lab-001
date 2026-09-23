@@ -55,6 +55,7 @@ try {
       'builtin_voicevox_speaker_constructed',
       'fake_engine_registered',
       'voice_description_binds_speaker',
+      'voice_hatsuon_ready_after_character_binding',
       'voice_added_to_real_timeline',
       'voice_present_in_real_timeline',
       'voice_uses_fake_character',
