@@ -25,8 +25,8 @@ try {
 
   $req=@(
     'timeline_resolved',
-    'characters_available',
-    'voice_created_by_host',
+    'detached_voiceitem_constructed',
+    'detached_voice_added_to_timeline',
     'jimaku_effects_public_readable',
     'custom_effect_stored_in_jimaku',
     'custom_effect_detectable_by_type',
@@ -39,7 +39,7 @@ try {
     'effect_editor_received_editor_info',
     'effect_editor_received_voice_edit_service',
     'standard_voice_regeneration_started',
-    'standard_voice_regeneration_completed'
+    'standard_voice_regeneration_invoked'
   )
   if($r.requirements.Count-ne$req.Count){throw "Wrong requirement count: $($r.requirements.Count) != $($req.Count)"}
   foreach($id in $req){
