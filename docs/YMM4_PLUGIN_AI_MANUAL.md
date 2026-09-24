@@ -3,6 +3,10 @@
 > **AIと一緒に、ゆっくりMovieMaker4（YMM4）のプラグインを作るための配布用マニュアル**
 >
 > This is an unofficial, evidence-aware development guide for AI-assisted YMM4 plugin development.
+>
+> **Last curated:** 2026-09-25  
+> **Current project baseline:** YMM4 v4.47.0.0+ / .NET 10  
+> **Major native evidence currently includes:** YMM4 4.55.1.1 Lite / 4.56.1.0 Lite
 
 ## このマニュアルは何？
 
@@ -18,6 +22,57 @@
 4. 分からないYMM4挙動を推測せず、必要なら小さく検証する。
 
 このリポジトリには、そのための **公式資料整理 + 実YMM4での検証Evidence** があります。
+
+---
+
+## 配布するときのおすすめ
+
+### おすすめ: このLabリポジトリごと共有する
+
+一番おすすめです。
+
+共有相手には:
+
+- この `YMM4_PLUGIN_AI_MANUAL.md`
+- `YMM4_PLUGIN_AI_PROMPT.md`
+- 同じリポジトリ内のP0〜P3 / Knowledge Card / Lab Evidence
+
+をまとめて参照してもらえます。
+
+AIがGitHubを直接読める環境なら、**LabのリポジトリURL + このManualのパス**を渡すのが最も情報量を保てます。
+
+### 軽量: Manual + Promptだけ共有する
+
+この2ファイルだけでも:
+
+- 現在の開発baseline
+- surface選択
+- S1〜S4
+- source conflict rule
+- AIが避けるべき推測
+- Evidenceの読み方
+
+は利用できます。
+
+ただし、Knowledge Cardの根拠やexact tested SHA/run/artifactまで辿るにはLab本体が必要です。
+
+### コピーして別リポジトリへ置く場合
+
+Manual本文だけをコピーして「YMM4の公式仕様書」として再配布しないでください。
+
+このManualは:
+
+```text
+official/reference information
++
+ziro-lab Lab evidence
++
+implementation guidance
+```
+
+を区別して使うこと自体が重要です。
+
+Evidenceへのリンク・version boundary・非公式であることを残してください。
 
 ---
 
