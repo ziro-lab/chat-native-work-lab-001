@@ -1,181 +1,178 @@
 # YMM4 Plugin AI Manual
 
-> **AIと一緒に、ゆっくりMovieMaker4（YMM4）のプラグインを作るための配布用マニュアル**
+> **ChatGPT / Codex / Claude などのコーディングAIと、ゆっくりMovieMaker4（YMM4）のプラグインを開発するための非公式マニュアル**
 >
-> This is an unofficial, evidence-aware development guide for AI-assisted YMM4 plugin development.
+> **このMarkdown単体で使えることを目的にしています。**
 >
-> **Last curated:** 2026-09-25  
-> **Current project baseline:** YMM4 v4.47.0.0+ / .NET 10  
-> **Major native evidence currently includes:** YMM4 4.55.1.1 Lite / 4.56.1.0 Lite
-
-## このマニュアルは何？
-
-このマニュアルは、ChatGPT / Codex / Claude などのコーディングAIに **YMM4プラグインを作らせるときの共通土台** です。
-
-目的は「AIに大量のAPI情報を暗記させること」ではありません。
-
-目的は次の4つです。
-
-1. 現在のYMM4向けプロジェクトを正しい土台から始める。
-2. 公開API・公式サンプル・実装例・実機観測を混同しない。
-3. いきなりReflection/Harmonyへ飛ばず、低リスクな実装面から探す。
-4. 分からないYMM4挙動を推測せず、必要なら小さく検証する。
-
-このリポジトリには、そのための **公式資料整理 + 実YMM4での検証Evidence** があります。
+> 最終整理: 2026-09-25  
+> 現行開発基準: YMM4 v4.47.0.0以降 / .NET 10  
+> 実機確認を含む主な対象版: YMM4 4.55.1.1 Lite / 4.56.1.0 Lite
 
 ---
 
-## 配布するときのおすすめ
+## これは何？
 
-### おすすめ: このLabリポジトリごと共有する
+このマニュアルは、YMM4プラグインをAIに実装させるときに起きやすい、
 
-一番おすすめです。
+- 古い.NET向けコードを生成する
+- 存在しないAPIを作る
+- 似た名前のinterfaceを取り違える
+- APIが存在するだけで実行時挙動まで保証されたと思い込む
+- いきなりReflectionやHarmonyへ飛ぶ
+- YMM4内部の挙動を推測で補う
+- 一般的な最適化Tipsを「YMM4必須仕様」として過剰適用する
 
-共有相手には:
+といった事故を減らすための基準資料です。
 
-- この `YMM4_PLUGIN_AI_MANUAL.md`
-- `YMM4_PLUGIN_AI_PROMPT.md`
-- 同じリポジトリ内のP0〜P3 / Knowledge Card / Lab Evidence
+**YMM4公式ドキュメントではありません。**
 
-をまとめて参照してもらえます。
+公式資料・公式サンプル・公開API・実装例・実機確認で得られた知見を、AIが扱いやすい形に整理しています。
 
-AIがGitHubを直接読める環境なら、**LabのリポジトリURL + このManualのパス**を渡すのが最も情報量を保てます。
+---
 
-### 軽量: Manual + Promptだけ共有する
+# まずAIにこれを渡す
 
-この2ファイルだけでも:
-
-- 現在の開発baseline
-- surface選択
-- S1〜S4
-- source conflict rule
-- AIが避けるべき推測
-- Evidenceの読み方
-
-は利用できます。
-
-ただし、Knowledge Cardの根拠やexact tested SHA/run/artifactまで辿るにはLab本体が必要です。
-
-### コピーして別リポジトリへ置く場合
-
-Manual本文だけをコピーして「YMM4の公式仕様書」として再配布しないでください。
-
-このManualは:
+このファイルをAIへ添付したあと、次の指示を最初に渡してください。
 
 ```text
-official/reference information
-+
-ziro-lab Lab evidence
-+
-implementation guidance
+添付した「YMM4 Plugin AI Manual」を、この開発の基準資料として使用してください。
+
+以下を守ってください。
+
+1. 現在のYMM4公開API・公式サンプルを優先する。
+2. 実装面は Public Plugin API → Public Host/WPF → 限定Reflection → Harmony/非公開内部 の順に検討する。
+3. APIが存在することと、期待する実行時挙動が保証されることを混同しない。
+4. undocumentedなYMM4挙動を推測で固定しない。
+5. 公式READMEと公式実装コード/APIが食い違う場合は、不一致を明示する。型名・signatureは現在の実装/APIを優先する。
+6. Reflectionを使う場合は、対象YMM4版・正確な型・正確なmemberを限定し、見つからなければfail closedする。
+7. 似たprivate memberを推測で探して実行しない。
+8. Harmonyや非公開パッチは、公開面で実現できない理由がある場合だけ使う。
+9. 一般的なperformance optimizationはmeasure-firstとし、YMM4必須仕様として扱わない。
+10. build成功だけで完了にせず、機能に必要な実YMM4上の挙動、Undo/Redo、保存/再読込、ユーザー操作を確認する。
+
+このManualに「確認済み」と書かれている挙動は、記載されたYMM4版と条件の範囲だけで利用してください。
+不明点は勝手に一般化せず、必要なら最小の検証コードに分離してください。
 ```
 
-を区別して使うこと自体が重要です。
-
-Evidenceへのリンク・version boundary・非公式であることを残してください。
-
----
-
-## 30秒で使い始める
-
-### 1. AIにこのリポジトリを読ませる
-
-AIがGitHubを参照できる場合は、このリポジトリと本ファイルを指定してください。
-
-最初に読む順番は次です。
-
-1. この `YMM4_PLUGIN_AI_MANUAL.md`
-2. [Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
-3. [Public and Reference Plugin Surfaces](YMM4_AI_P1_PLUGIN_SURFACES.md)
-4. [Official Plugin Surface Map](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
-5. 必要な場合だけ [Evidence-qualified Host Behavior](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md)
-6. 実装時に必要な場合だけ [Implementation Guidance](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
-
-### 2. AIに作りたいものを普通に説明する
+その後に普通に要件を書きます。
 
 例:
 
 ```text
-YMM4で、選択したアイテムの開始位置にテンプレートを配置するTool Pluginを作りたい。
-YMM4 4.56系を対象にしたい。
-できるだけ公開APIを使い、Reflection/Harmonyは必要な場合だけにして。
+YMM4 4.56系向けに、選択したアイテムの開始位置へ登録済みテンプレートを配置するTool Pluginを作りたい。
+できるだけ公開APIだけで実装したい。
+Undo/RedoもYMM4標準挙動へ乗せたい。
 ```
-
-### 3. AIが分からないYMM4挙動を推測し始めたら止める
-
-このLabに既存Evidenceがないか確認してください。
-
-なければ、製品コードへ推測を埋め込む前に **小さい検証** に分離するのが推奨です。
 
 ---
 
-## AIに最初に守らせるルール
+# 1. 現在の開発基準
 
-AIには次を守らせてください。
+## Target Framework
 
-```text
-1. YMM4の現在の公開API・公式サンプルを最初に確認する。
-2. 公開Plugin APIでできるなら、それを優先する。
-3. 次に公開Host/WPF面を検討する。
-4. Reflectionは、必要な正確な型・メンバーだけに限定する。
-5. Harmonyや非公開内部パッチは最後の手段にする。
-6. YMM4の実行時挙動を、API名だけから推測しない。
-7. Lab Evidenceがある場合は、YMM4版・tested SHA・PASS boundaryを守る。
-8. Draft PRでもEvidenceが十分なら利用可能。ただしexact tested SHAを参照する。
-9. 公式READMEと公式実装コードが食い違う場合は、その不一致を隠さない。
-10. 不明な内部挙動はfail closedし、似たprivate memberを推測で呼び出さない。
-```
+YMM4は **v4.47.0.0で.NET 10へ移行**しています。
 
-コピー用の短い版は [YMM4 Plugin AI Prompt](YMM4_PLUGIN_AI_PROMPT.md) にあります。
-
----
-
-# まず知っておくYMM4開発の土台
-
-## 現在のTarget Framework
-
-YMM4 v4.47.0.0以降向けの現在の公式サンプルは:
+現在の公式サンプルでは:
 
 ```xml
-<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-<UseWPF>true</UseWPF>
+<PropertyGroup>
+  <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+  <UseWPF>true</UseWPF>
+  <ImplicitUsings>enable</ImplicitUsings>
+  <Nullable>enable</Nullable>
+</PropertyGroup>
 ```
 
-を使用しています。
+が使われています。
 
-古い.NET 8/9向け記事・コードを、そのまま現在のYMM4向けプロジェクトへ持ち込まないでください。
+古いYMM4記事・サンプルから.NET 8 / .NET 9設定をそのまま持ち込まないでください。
 
-詳細:
-[Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
+公式参考:
 
-## YMM4のDLL参照
+- YMM4公式「プラグインを作成する」  
+  https://manjubox.net/ymm4/faq/plugin/how_to_make/
+- 公式サンプル  
+  https://github.com/manju-summoner/YukkuriMovieMaker4PluginSamples
 
-まず、作りたいPlugin surfaceに実際に必要なDLLだけを参照します。
+---
 
-現在の公式開発資料/サンプルでは主に:
+## YMM4インストール先の参照
+
+公式サンプルは `Directory.Build.props.sample` を使い、ローカルのYMM4パスを:
+
+```xml
+<Project>
+  <PropertyGroup>
+    <YMM4DirPath>D:\YMM4\</YMM4DirPath>
+  </PropertyGroup>
+</Project>
+```
+
+のように外出ししています。
+
+これはかなり使いやすい方法です。
+
+プロジェクト本体へ開発者個人の絶対パスを書かず、
+
+```text
+Directory.Build.props.sample  ← 配布
+Directory.Build.props         ← 各自作成
+```
+
+に分けると扱いやすくなります。
+
+---
+
+## 参照DLL
+
+代表的なYMM4側DLL:
 
 - `YukkuriMovieMaker.Plugin.dll`
 - `YukkuriMovieMaker.Controls.dll`
 
-など、YMM4インストールフォルダ内のDLLを参照します。
+映像/D2D系では必要に応じて:
 
-映像/D2D系ではVortice/SharpGen系の参照が追加で必要になる場合があります。
+- `Vortice.Direct2D1.dll`
+- `Vortice.DirectX.dll`
+- `Vortice.Mathematics.dll`
+- `SharpGen.Runtime.dll`
+- `SharpGen.Runtime.COM.dll`
 
-### `Private=false` について
+などを参照します。
 
-`<Private>false</Private>` は **現在の公式YMM4必須要件としては扱わないでください**。
+**全部のPluginが全部を参照する必要はありません。**
 
-現在の公式サンプルcsprojはYMM4/Vortice/SharpGen参照にこれを設定していません。
-
-プロジェクト側で出力/パッケージ制御のために使う場合は、YMM4仕様ではなく **そのリポジトリのビルド方針** として扱います。
+作る機能で実際に必要な型を基準に追加してください。
 
 ---
 
-# どのPluginを作る？
+## `<Private>false</Private>` はYMM4必須ではない
 
-現在の公式サンプルで確認できる代表的なsurfaceです。
+YMM4のDLL参照に:
 
-| やりたいこと | 主な入口 |
+```xml
+<Private>false</Private>
+```
+
+を付ける構成はあり得ますが、**現在の公式YMM4開発要件として必須とは確認できません**。
+
+現行公式サンプルのcsprojは、YMM4 / Vortice / SharpGen参照に `Private=false` を設定していません。
+
+したがってAIは、
+
+> YMM4では必ずPrivate=falseが必要
+
+とは書かないでください。
+
+使用する場合は、そのリポジトリのbuild/package方針として扱います。
+
+---
+
+# 2. 主なPluginの種類
+
+現在の公式サンプルで確認できる代表的な入口です。
+
+| やりたいこと | 主な型 |
 | --- | --- |
 | 音声エフェクト | `AudioEffectBase` + `[AudioEffect]` |
 | 映像エフェクト | `VideoEffectBase` + `[VideoEffect]` |
@@ -189,180 +186,250 @@ YMM4 v4.47.0.0以降向けの現在の公式サンプルは:
 | テキスト補完 | `ITextCompletionPlugin` |
 | 場面切り替え | `ITransitionPlugin` |
 | 音声合成 | `IVoicePlugin` |
-| Tool / Timeline Tool | `IToolPlugin` / Tool関連public surface |
-| カスタムProperty Editor | `PropertyEditorAttribute2` + `IPropertyEditorControl` |
+| Tool | `IToolPlugin` |
+| Timeline Tool | Tool関連public API + Timeline Tool surface |
+| カスタム設定UI | `PropertyEditorAttribute2` + `IPropertyEditorControl` |
 
-詳しい対応:
-[Official Plugin Surface Map](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
+この一覧を「YMM4に存在する全Plugin型」とは考えないでください。
 
 ---
 
-# 実装面を選ぶ順番
+# 3. 実装面は低リスクなものから選ぶ
 
-YMM4内部へどこまで踏み込むかは、次の順番で考えます。
+YMM4へどこまで踏み込むかは、次の順で検討してください。
 
 ```text
-S1  Plugin-facing public API
+S1  Public Plugin API
  ↓
-S2  public Host / WPF surface
+S2  Public Host / WPF surface
  ↓
-S3  bounded Reflection / adapter
+S3  Bounded Reflection
  ↓
-S4  Harmony / non-public host internals
+S4  Harmony / non-public internals
 ```
 
-## S1 — 公開Plugin API
+## S1 — Public Plugin API
 
-最優先です。
+最優先。
 
 例:
 
 - `IToolPlugin`
 - `ITimelineToolViewModel`
 - public Timeline state
-- public Effect / FileSource interfaces
+- Effect / FileSource / Voice interfaces
 - `SettingsBase<T>`
-- public VoiceItem / AudioEffect / Voice interfaces
+- public `VoiceItem` surface
+- standard command settings
 
-## S2 — 公開Host / WPF surface
+公開面で要件が満たせるなら、そこで止めます。
 
-S1に必要な意味情報がないときに使います。
+---
+
+## S2 — Public Host / WPF surface
+
+Plugin APIだけでは「ユーザーが何をしたか」などの意味情報が足りない場合に検討します。
 
 例:
 
 - public event
 - `INotifyPropertyChanged`
 - routed input
-- public WPF command
-- live DataContext上のpublic member
+- WPF command
+- public DataContext member
 
-ただし、YMM4固有View型やVisual Tree構造を意味解析に使う場合は、バージョン依存性を明記してください。
+ただしYMM4固有のView型・Visual Treeを見て意味判定する場合は、バージョン依存として扱います。
 
-## S3 — 限定Reflection
+---
 
-「Reflectionを使って何か探す」ではなく、
+## S3 — Bounded Reflection
 
-> **このYMM4版の、この正確な型の、この正確なmemberを使う**
+Reflectionを使う場合は:
 
-という形に限定します。
+```text
+「何か使えそうなprivate APIを探す」
+```
 
-必要なもの:
+ではなく、
 
-- exact YMM4 version
-- exact type/member
-- 必要な理由
+```text
+YMM4 4.56.1.0の
+この型の
+このmemberを
+この目的で使う
+```
+
+まで絞ります。
+
+最低限:
+
+- 対象YMM4版
+- exact type
+- exact member
 - signature
-- fail-safe
-- revalidation trigger
+- 公開APIでは不足する理由
+- memberがない場合の挙動
+- 再検証条件
 
-期待したmemberがなければ **別のprivate memberを推測で探して続行しない** でください。
+を記録します。
 
-## S4 — Harmony / 非公開パッチ
+期待するmemberがなければ、**似たprivate memberを探して続行しない**でください。
+
+---
+
+## S4 — Harmony / non-public patch
 
 最後の手段です。
 
-必要なhost behaviorがS1〜S3で表現できないことを確認し、対象となる内部挙動を専用のEvidenceで固定してから使います。
+公開API、public Host/WPF、限定Reflectionのどれでも必要な挙動を作れない場合だけ検討してください。
+
+Harmonyを使うこと自体を目標にしないでください。
 
 ---
 
-# 「APIがある」ことと「その挙動」は別
+# 4. 情報源が食い違った場合
 
-YMM4で一番事故りやすいポイントです。
+「公式資料だから常に文章の方が正しい」という扱いもしません。
 
-例えば:
-
-> `Timeline.CurrentFrame` がpublicで書き換えられる。
-
-これはAPI factです。
-
-しかし、
-
-> 書き換えれば必ずPreviewが見た目上再描画される。
-
-まではAPI factではありません。
-
-実際のLabでは:
-
-- `CurrentFrame` 変更で `PropertyChanged("CurrentFrame")` は観測済み;
-- しかしpixel-level preview repaintまでは、そのEvidenceでは証明していません。
-
-このように、
-
-```text
-public symbol exists
-!=
-desired runtime semantics are guaranteed
-```
-
-として扱ってください。
-
----
-
-# 情報源が食い違ったら？
-
-一律に「公式が最優先」ではありません。
-
-**何を知りたいか**で使う情報源を変えます。
-
-## 型名・signature・コンパイル形
+## 型名・signature
 
 優先:
 
 1. 現在の実装コード
-2. 現在のAPI/assembly情報
-3. README / 解説文
+2. 現在のAPI / assembly情報
+3. README・説明文
 
-実例:
+### 実例: VideoSource
 
-公式VideoSource READMEでは `IVideoSourcePlugin` と書かれている箇所がありますが、同じ公式サンプルの実装コードと現在のAPI indexは:
+公式VideoSource READMEには `IVideoSourcePlugin` と記載された箇所があります。
+
+しかし同じ公式サンプルの現在の実装コードでは:
+
+```csharp
+public class SampleVideoSourcePlugin : IVideoFileSourcePlugin
+```
+
+となっており、現在のAPI情報でも:
 
 ```text
 IVideoFileSourcePlugin
 IVideoFileSource
 ```
 
-を使用しています。
+が確認できます。
 
-この場合、コード生成では実装/API shapeを採用し、READMEとの不一致を記録します。
+**コード生成では `IVideoFileSourcePlugin` を使います。**
 
-## 開発手順・作者が意図する使い方
-
-現在の公式ドキュメント・公式サンプルを優先します。
-
-## undocumented runtime behavior
-
-実YMM4で再現したversion-pinned Evidenceを優先します。
-
-## 製品として問題なく動くか
-
-最終的には、そのPlugin自身のnative acceptanceで確認してください。
+このような不一致を見つけた場合、AIは黙って辻褄を合わせず、不一致を明示してください。
 
 ---
 
-# よくあるAI生成ミス
+## 開発手順・公式の意図
 
-## 1. 存在しない/古いinterfaceを作る
+現在の公式ドキュメント・公式サンプルを優先します。
 
-まず現在のP1/P1Bを確認してください。
+## undocumentedな実行時挙動
 
-名前が似ているinterfaceを推測しないでください。
+実際のYMM4で確認した結果を、確認したバージョンに限定して扱います。
 
-## 2. `VideoEffectProcessorBase` を唯一の作り方だと思う
+---
 
-現在の公式VideoEffectサンプルは `IVideoEffectProcessor` を直接実装します。
+# 5. Tool Plugin
 
-一方、YMM4 Communityでは `VideoEffectProcessorBase` も現役で広く使われています。
+Tool系では公開Surfaceをまず確認してください。
 
-つまり:
+代表的な入口:
 
-- 最小公式route: `IVideoEffectProcessor`
-- 実績ある高度route: `VideoEffectProcessorBase`
+- `IToolPlugin`
+- `IToolViewModel`
+- Timeline系では `ITimelineToolViewModel`
+- `TimelineToolInfo`
+- public `Timeline`
 
-の両方があります。
+## 「memberがある」と「明示実装が必須」は別
 
-## 3. PropertyEditorは必ず `IPropertyEditorControl2`
+現在のinterfaceにはdefault implementationを持つmemberがあります。
 
-現在の公式カスタムPropertyEditorの基本形は:
+たとえば `AllowMultipleInstances` やPlugin metadata系について、
+
+> すべてのPluginが必ず全部明示実装する
+
+と決め打ちしないでください。
+
+現在のinterface定義を確認してください。
+
+---
+
+# 6. Tool状態の保存
+
+## `ToolState.SavedState`
+
+**YMM4 4.56.1.0で実機確認済み:**
+
+project固有のTool状態を `ToolState.SavedState` に保存し、別Project A/Bで別状態を保持して再読込できることを確認しています。
+
+重要な注意:
+
+**既に存在するinner ViewModelへ、Project切替のたびに `LoadState()` が再度呼ばれるとは限りません。**
+
+確認したProject切替同期は概ね:
+
+```text
+YMM4がToolAreaのproject stateを復元
+        ↓
+ProjectFilePath変更
+        ↓
+Pluginが現在のToolArea.SaveState()を読む
+```
+
+という経路でした。
+
+したがってAIは:
+
+> Projectが変わればLoadStateが必ず飛んでくる
+
+とは仮定しないでください。
+
+対象確認版: **YMM4 4.56.1.0**
+
+---
+
+# 7. YMM4標準Commandを呼ぶ
+
+**YMM4 4.55.1.1 / 4.56.1.0で実機確認済み:**
+
+一部の標準操作は:
+
+```text
+CommandSettings.Default[CommandType]
+        ↓
+RoutedUICommandEx
+```
+
+経由でnative commandとして実行できます。
+
+確認した例:
+
+- Undo
+- Redo
+- 次フレーム
+- 前フレーム
+- 現在位置で選択ItemをSplit
+- 現在位置にKeyFrame追加
+
+つまり、標準操作をToolボタンから呼びたい場合に、**最初からCtrl+Z等のsynthetic key inputへ行く必要はありません。**
+
+注意:
+
+- 全 `CommandType` の挙動を保証するものではありません
+- live contextで `CanExecute` を確認してください
+- WPF ButtonのIsEnabled同期まで自動保証されるとは限りません
+
+---
+
+# 8. Custom Property Editor
+
+現在の公式カスタムEditorの基本形は:
 
 ```text
 IPropertyEditorControl
@@ -372,204 +439,938 @@ PropertyEditorAttribute2
 
 です。
 
-より多くのEditor contextが必要な別interfaceを使う場合は、現在のAPIを別途確認してください。
+## 重要
 
-## 4. 値が変わった理由を勝手に推定する
+**`IPropertyEditorControl2` が全カスタムEditorに必須とは扱わないでください。**
+
+現在の公式サンプルは `IPropertyEditorControl` を実装しています。
+
+---
+
+## BeginEdit / EndEdit
+
+公式サンプルは:
+
+```text
+BeginEdit
+ ↓
+値を変更
+ ↓
+EndEdit
+```
+
+の順で編集境界を通知します。
+
+Undo/Redoへ正しく乗せるため、カスタムEditorで値を書き換えるときはこの境界を意識してください。
+
+複数選択については、公式サンプルの:
+
+```text
+ItemProperty[]
+ItemPropertiesBinding.Create(...)
+```
+
+のようなmulti-edit対応パターンをまず確認してください。
+
+---
+
+# 9. Video Effect
+
+現在の公式サンプルでは:
+
+```text
+VideoEffectBase
++
+[VideoEffect]
++
+IVideoEffectProcessor
+```
+
+が基本形です。
+
+## `VideoEffectProcessorBase` も存在する
+
+一方、YMM4 Communityの現在の実装では `VideoEffectProcessorBase` が多数使われています。
+
+したがって:
+
+```text
+公式の最小route
+  -> IVideoEffectProcessorを直接実装
+
+実績ある高度route
+  -> VideoEffectProcessorBaseを利用
+```
+
+の2系統として考えてください。
+
+**VideoEffectProcessorBaseだけが唯一の正解ではありません。**
+
+---
+
+## 現在のCommunity実装で見られるshape
 
 例:
 
-> CurrentFrame changed → user clicked Timeline
+```csharp
+protected override ID2D1Image? CreateEffect(IGraphicsDevicesAndContext devices)
+protected override void setInput(ID2D1Image? input)
+protected override void ClearEffectChain()
+public override DrawDescription Update(EffectDescription effectDescription)
+```
 
-は成立しません。
+nullable `ID2D1Image?` を使う実装や、描画状態だけ変更して `CreateEffect()` がnullを返す実装もあります。
 
-LabではCurrentFrame変更が:
+古いsignatureを決め打ちしないでください。
 
-- Timeline pointer
-- ruler
-- keyboard
+---
+
+## constructor注意
+
+一般的なC#の注意です。
+
+```csharp
+public Processor(..., Effect effect) : base(devices)
+{
+    this.effect = effect;
+}
+```
+
+でbase constructorがoverride可能な `CreateEffect()` 等を呼ぶ設計の場合、overrideはderived constructor bodyより先に実行されます。
+
+したがって `CreateEffect()` 内で、
+
+> constructor bodyで後から代入するfieldは既に初期化済み
+
+と仮定しないでください。
+
+---
+
+# 10. Audio Effect
+
+現在の公式サンプルは:
+
+```text
+AudioEffectBase
++
+[AudioEffect]
++
+AudioEffectProcessorBase
+```
+
+を使います。
+
+Processor例では:
+
+```csharp
+public override int Hz
+public override long Duration
+protected override void seek(long position)
+protected override int read(float[] destBuffer, int offset, int count)
+```
+
+を実装しています。
+
+`seek` / `read` が小文字なのはbase memberの現在のshapeに従ってください。
+
+---
+
+# 11. VoiceItemのAudioEffects
+
+**YMM4 4.56.1.0で実機確認済み:**
+
+public `VoiceItem.AudioEffects` にcustom `AudioEffectBase` を追加し、
+
+- public collectionから列挙
+- add/remove
+- host discovery
+- `IsEnabled`
+- custom property notification
+- Item Editorの「Audio effects」表示
+- typed Property Editor
+- membership Undo/Redo
+- Project save/reload
+- reload後のpublic enumeration
+
+まで動作することを確認しています。
+
+したがって、VoiceItem固有の補助機能や状態をAudioEffectとして持たせたい場合、**private collectionやHarmonyを使う前に `VoiceItem.AudioEffects` を検討してください。**
+
+対象確認版: **YMM4 4.56.1.0**
+
+---
+
+# 12. VoiceItem / 音声合成
+
+**YMM4 4.56.1.0で実機確認済み:**
+
+実Timeline上のVoiceItemについて、public surfaceだけを使って:
+
+```text
+VoiceItem.CreateVoiceFileAsync()
+ ↓
+public IVoiceSpeaker
+ ↓
+Pronounce取得
+ ↓
+Pronounceを変更
+ ↓
+IVoiceSpeaker.CreateVoiceAsync(..., patched Pronounce, ..., VoiceItem.FilePath)
+ ↓
+VoiceItemの実音声ファイルを更新
+ ↓
+VoiceItem.ClearVoiceCache()
+```
+
+という再生成経路を確認しています。
+
+確認したpublic surfaceには:
+
+- `VoiceItem.CreateVoiceFileAsync()`
+- `VoiceItem.Pronounce`
+- `VoiceItem.VoiceParameter`
+- `VoiceItem.VoiceCache`
+- `VoiceItem.ClearVoiceCache()`
+- `Character.Voice`
+- `Character.VoiceParameter`
+- `VoiceDescription(IVoiceSpeaker)`
+- `VoiceDescription.SetSpeaker(IVoiceSpeaker)`
+
+などがあります。
+
+したがって、VOICEVOX等のPronounce補正を行いたい場合、**内部Engineへ行く前にpublic `IVoiceSpeaker` routeを検討してください。**
+
+対象確認版: **YMM4 4.56.1.0**
+
+---
+
+# 13. File Source
+
+## Video
+
+現在の実装/APIで使われている主な型:
+
+```text
+IVideoFileSourcePlugin
+IVideoFileSource
+```
+
+代表的なshape:
+
+```csharp
+IVideoFileSource? CreateVideoFileSource(
+    IGraphicsDevicesAndContext devices,
+    string filePath)
+```
+
+`IVideoFileSource` の公式サンプルでは:
+
+- `Duration`
+- `Output`
+- `Update(TimeSpan)`
+- `GetFrameIndex(TimeSpan)`
+- `Dispose()`
+
+が実装されています。
+
+---
+
+## Audio
+
+```text
+IAudioFileSourcePlugin
+IAudioFileSource
+```
+
+公式サンプルでは:
+
+- `Duration`
+- `Hz`
+- `Read(...)`
+- `Seek(TimeSpan)`
+- `Dispose()`
+
+を使います。
+
+サンプルREADMEでは、読み出し音声は常に2chである必要があると説明されています。
+
+---
+
+## Image
+
+`IImageFileSourcePlugin` を使います。
+
+公式サンプルはWICを使って `ID2D1Bitmap?` を返していますが、**WIC自体が必須という意味ではありません。**
+
+---
+
+# 14. Tachie
+
+現在の公式サンプルでは:
+
+- `ITachiePlugin`
+- `ITachieSource2`
+- `TachieCharacterParameterBase`
+- `TachieItemParameterBase`
+- `TachieFaceParameterBase`
+
+を役割ごとに分けています。
+
+AIは「立ち絵Pluginだから1クラス」と単純化しないでください。
+
+---
+
+# 15. Template / Tachie cloneの注意
+
+**YMM4 4.55.1.1で実機確認済み:**
+
+`TachieFaceItem.GetClone()` は独立Itemを作りますが、確認ケースではsource `Character` object referenceを保持しました。
+
+一方:
+
+```text
+ItemTemplate.CreateItemsAsync(...)
+```
+
+では、同名Characterが登録済みの場合、destination側のcanonical Characterへ結び直される挙動を確認しています。
+
+つまり:
+
+```text
+clone内容の複製
+!=
+destination Characterへのcanonical rebind
+```
+
+です。
+
+Templateから立ち絵表情Item等を配置するPluginでは、この2つを同じ処理だと思わないでください。
+
+対象確認版: **YMM4 4.55.1.1**
+
+---
+
+# 16. ItemTemplateの一意IDに注意
+
+**YMM4 4.55.1.1で実機確認済み:**
+
+`ItemTemplate.SceneId` はrestartを跨ぐ一意なTemplate IDとしては使えません。
+
+同じ:
+
+- Name
+- Path
+- SceneId
+
+を持つ別Templateが共存し、restart後も別レコードとして残るケースを確認しています。
+
+したがってPlugin側で永続的なLibrary IDが必要なら:
+
+- Plugin独自IDを持つ
+- YMM4側metadataはlocatorとして扱う
+- 0件 → missing
+- 1件 → resolved
+- 複数件 → ambiguous
+
+のように扱い、**曖昧時に勝手に最初のTemplateを選ばない**でください。
+
+対象確認版: **YMM4 4.55.1.1**
+
+---
+
+# 17. TimelineのCurrentFrame
+
+`Timeline.CurrentFrame` が変更されたことだけでは、
+
+> ユーザーがTimeline上の時刻をクリックした
+
+とは判断できません。
+
+**YMM4 4.55.1.1で実機確認したCurrentFrame変更経路:**
+
+- blank Timeline click
+- ruler click
+- ruler drag
+- keyboard navigation
 - playback
 
-など複数経路から起こることを確認しています。
-
-## 5. object referenceを永続IDとして使う
-
-VideoItem splitでは元objectが消えることがあります。
-
-逆にtrim/moveでは同じobjectのまま中身/位置が変化します。
-
-さらにcopy/pasteでは同じsource rangeの別Occurrenceが作れます。
-
-「object referenceだから大丈夫」「source rangeが同じだから同じItem」といった単純化を避けてください。
-
-## 6. すぐReflection/Harmonyへ行く
-
-まず現在の公開/standard routeを検索してください。
-
-Labでは、後からpublic Command routeやpublic AudioEffects storageが見つかった例があります。
+したがって、ユーザー操作の種類を判定したいToolでは、必要に応じてpointer origin等の別情報を組み合わせてください。
 
 ---
 
-# Evidence-qualified Knowledge
+## Preview refreshも別問題
 
-このLabでは、mainへmergeされたかどうかをEvidenceの強さとはみなしません。
+同じくYMM4 4.55.1.1で:
 
-Labは実験branch/Draftを長期に残す運用を想定しています。
+- `Timeline.CurrentFrame` write
+- `PropertyChanged("CurrentFrame")`
 
-## 強いEvidenceの目安
+は確認しています。
 
-native observationなら、できるだけ:
+しかし、
 
-- exact YMM4 version
-- host hash
-- exact tested source SHA
-- final PASS marker/assertions
-- workflow run
-- artifact ID/hash
-- PASS boundary / NOT PROVEN
-- 後続結果との矛盾なし
+> そのイベントが起きた = pixel-levelでPreviewが必ず再描画済み
 
-を揃えます。
+までは同じ意味ではありません。
 
-この条件を満たすDraft/stacked branchの結果は **evidence-qualified** として利用できます。
+また確認した範囲では、Timeline Tool向けに「今すぐPreviewを強制再描画する」という専用public commandは確立できませんでした。
 
-ただし、必ずtested SHAを参照してください。
-
-Branch HEADが後から変わっても、tested result自体を曖昧にしないためです。
-
-入口:
-[Evidence-qualified Host Behavior](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md)
-
-索引:
-[YMM4 AI Knowledge Index](YMM4_AI_KNOWLEDGE_INDEX.md)
+`TimelineViewModel.ScrollFrame(int)` をseek/refresh代わりに使わないでください。
 
 ---
 
-# 現在ある便利なEvidence例
+# 18. VideoItemのobject identity
 
-Knowledge Indexには、例えば次のような知見があります。
+VideoItemを追跡するToolでかなり重要です。
 
-- ItemTemplate.SceneIdはrestartを跨ぐ一意IDではない
-- CurrentFrame changeだけではpointer intentを判定できない
-- VideoItem splitは元objectを置き換える
-- trim/move/copy/UndoRedoを考えるとobject identityだけでは追跡できない
-- `VideoItem.ContentLength` は消費source rangeではない
-- `PlaybackRateMap` の定速source-time mapping
-- YMM4同梱FFmpegのpublic locator
-- standard CommandSettings routeでUndo/Redo/Split等を実行可能
-- ToolState.SavedStateによるproject-specific Tool state
-- Fold済みTimelineでnative-safeなnavigation / 補正が必要なrouteの区別
-- public VoiceItem / IVoiceSpeakerによる再生成
-- `VoiceItem.AudioEffects` の保存・UndoRedo・Item Editor surface
+## Split
 
-全てのPluginがこれらを必要とするわけではありません。
+**YMM4 4.56.1.0で実機確認済み:**
 
-必要なものだけ参照してください。
+VideoItemをSplitすると、確認ケースでは:
 
----
+- 元のVideoItem objectはTimelineから消える
+- 左右は両方とも新しいobject
 
-# 自分のPluginで新しいYMM4挙動が必要になったら
+になりました。
 
-既存Evidenceで答えられない場合は、いきなり大きなPluginへ組み込まず、問いを小さくしてください。
+したがって:
 
-悪い問い:
+> object referenceを保存しておけばSplit後も追える
 
-> YMM4のTimelineを自由にいじれる？
-
-良い問い:
-
-> YMM4 4.56.1.0で、Tool Pluginから選択中Itemをpublic APIだけでSplitできるか？
-
-検証には:
-
-1. Question
-2. exact environment
-3. assertions
-4. PASS boundary
-5. NOT PROVEN
-6. reproduction
-7. evidence identity
-
-を残すと、AIが後から結果を再利用しやすくなります。
+とは考えないでください。
 
 ---
 
-# 実装Tipsについて
+## Trim
 
-P3にはD2D/WPF/.NETの実装Tipsもあります。
+同じ4.56.1.0で:
 
-ただし、これらは **YMM4 API仕様ではありません**。
+- head trim
+- tail trim
 
-例えば:
+は、**同じVideoItem objectのまま** Frame / Length / ContentOffset等が変わるケースを確認しています。
+
+つまり逆に:
+
+> object referenceが同じ = source rangeも同じ
+
+でもありません。
+
+---
+
+## Move
+
+Split後のpieceを移動したケースでは:
+
+- 同じobject
+- source coordinatesは維持
+- Timeline Frameだけ変化
+
+を確認しています。
+
+---
+
+## Copy / Paste
+
+同じ:
+
+- FilePath
+- ContentOffset
+- Length
+- PlaybackRate
+
+を持つ別VideoItem occurrenceを、異なるFrame/Layerに作れることを確認しています。
+
+したがって:
+
+> source identity + source range
+
+だけでもTimeline上のOccurrenceを一意に決められません。
+
+---
+
+## まとめ
+
+```text
+object identityだけ
+→ 不十分
+
+source identity + rangeだけ
+→ copy/paste後は不十分
+```
+
+です。
+
+長時間動画解析・レビュー・ナビゲーションTool等では、
+
+```text
+source側の解析データ
++
+現在Timeline上のOccurrence解決
+```
+
+を分けて考える方が安全です。
+
+対象確認版: **YMM4 4.56.1.0**
+
+---
+
+# 19. VideoItem.ContentLengthをsource rangeだと思わない
+
+**YMM4 4.56.1.0で実機確認済み:**
+
+30秒mediaに対して:
+
+- PlaybackRate2 = 50%
+- 100%
+- 200%
+- ContentOffset = 0s / 5s
+
+を組み合わせても、確認ケースでは `ContentLength` は30秒のmedia durationのままでした。
+
+したがって:
+
+> ContentLengthから消費source rangeを計算する
+
+設計は避けてください。
+
+---
+
+# 20. PlaybackRateMap
+
+**YMM4 4.56.1.0で実機確認済み:**
+
+constant positive rate 50 / 100 / 200%では、native `PlaybackRateMap` のsource-time mappingが:
+
+```text
+sourceTime = ContentOffset + itemTime * rate / 100
+```
+
+となることを確認しています。
+
+重要:
+
+`ContentOffset` は既にsource-media側offsetなので、さらにrateを掛けません。
+
+ただし、この確認では `PlaybackRateMap` getter自体はnon-public側の限定Reflectionでした。
+
+また:
+
+- animated
+- non-monotonic
+- reverse
+
+全般をこの単純式で一般化しないでください。
+
+---
+
+# 21. FoldされたTimelineのnavigation
+
+Layer折り畳みのように表示rowとlogical layerがずれる機能では、**全部のnavigationを補正すればいいわけではありません。**
+
+YMM4 4.55.1.1 / 4.56.1.0で確認したno-Harmony folded Timelineでは:
+
+native-safeだったroute:
+
+- `ScrollToLowerLayer`
+- `ScrollToHigherLayer`
+- 実foreground Down/Up layer navigation
+
+fold-awareではなかったroute:
+
+- bare / same-item `TimelineViewModel.ScrollToItem`
+
+という違いがありました。
+
+つまり:
+
+> foldingした → 全navigationを独自補正
+
+ではなく、**壊れているrouteだけを補正する**方が安全です。
+
+---
+
+# 22. YMM4同梱FFmpeg
+
+**YMM4 4.56.1.0 Lite x64で実機確認済み:**
+
+YMM4配布物には:
+
+```text
+Resources\bin\x64\ffmpeg\ffmpeg.exe
+Resources\bin\x64\ffmpeg\ffprobe.exe
+```
+
+が存在しました。
+
+またpublic:
+
+```text
+YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegResourceLocator
+```
+
+から:
+
+- `GetFFmpegDirectory()`
+- `GetFFmpegDllDirectory()`
+- `GetFFmpegExePath()`
+- `GetUserFFmpegDirectory()`
+
+が利用できることを確認しています。
+
+YMM4 Plugin内でFFmpegが必要な場合、ユーザーへ別FFmpegインストールを要求する前に、このpublic locatorを確認してください。
+
+注意:
+
+- future versionで同じ配置とは限りません
+- public `GetFFprobeExePath()` は確認できていません
+- ffprobeを使うならreturned directoryのsiblingを存在確認してください
+- locatorが使えない場合にinstall pathを推測しないでください
+
+---
+
+# 23. Direct2D resource管理
+
+公式VideoEffect / VideoSourceサンプルでも、D2D resourceの明示的なdisposeが行われています。
+
+基本:
+
+- 自分が生成/所有したresourceのownershipを明確にする
+- effect input等のreferenceを必要に応じて切る
+- Output等のowned COM objectをdisposeする
+- effect/resource本体をdisposeする
+- YMM4 Developer Modeで未解放DirectX objectを確認する
+
+**YMM4が所有するobjectまで勝手にdisposeしない**でください。
+
+---
+
+## 動的resource再生成
+
+LUTなどparameter変更で再生成する重いresourceでは:
+
+```text
+parameter change検知
+ ↓
+旧resourceをconsumerからdetach
+ ↓
+旧owned resource dispose
+ ↓
+新resource生成
+ ↓
+attach
+```
+
+という形が扱いやすいです。
+
+ただし具体的なdetach方法はresource/APIごとに違います。
+
+---
+
+# 24. WPF / performance Tips
+
+以下はYMM4 API仕様ではなく一般的な実装Tipsです。
+
+候補:
 
 - `DrawingVisual`
 - `StreamGeometry`
-- `Freeze()`
+- immutable `Freezable.Freeze()`
+- buffer reuse
 - `stackalloc`
 - `MemoryMarshal.Cast`
 - `CollectionsMarshal.AsSpan`
 - JSON source generator
-- reflection caching
 
-などは、必要な場面では有効ですが、AIが自動的に全部投入するものではありません。
+**measure first** で使ってください。
 
-**measure first** を基本にしてください。
+AIに:
 
-[Implementation Guidance](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
+> 高速そうだから全部入れる
+
+をさせないでください。
+
+特に:
+
+- `stackalloc` に万能な安全要素数はありません
+- `CollectionsMarshal.AsSpan` は通常コードの標準選択ではありません
+- `DrawingVisual` は単純UIにも必須ではありません
+- Freeze後に変更するresourceには使えません
 
 ---
 
-# 配布パッケージについて
+# 25. Timerよりevent-drivenを優先
 
-現在の公式資料では、Pluginをzipにして拡張子を `.ymme` に変更する配布方法が案内されています。
+Tool Pluginで状態監視するとき、`DispatcherTimer` で常時pollingする前に:
+
+1. public event
+2. PropertyChanged / CollectionChanged
+3. UndoRedo event
+4. debounce/coalesced rescan
+
+で解けないか確認してください。
+
+Timerが必要なら:
+
+- Dispose時に停止
+- event detach
+- UI threadで重い処理をしない
+
+を守ります。
+
+---
+
+# 26. `.ymme` 配布
+
+現在の公式資料では:
+
+1. Plugin配布物をzip化
+2. 拡張子を `.ymme` に変更
+3. 配布
+
+という方法が案内されています。
 
 ただし:
 
 ```text
-.ymmeとしてインストールできる
+.ymmeでinstall可能
 !=
-同一Pluginのupdate時に任意のファイルがどう保持されるかまで保証される
+同一Plugin update時の全ファイル保持/上書き規則が保証済み
 ```
 
-update/overwrite/preservationのようなruntime behaviorは、別Evidenceとして扱ってください。
+です。
+
+update/migrationに依存するPluginでは、必要な挙動を別途実YMM4で確認してください。
 
 ---
 
-# この資料の立場
+# 27. AIがやりがちな危険な推論
 
-- YMM4公式ドキュメントではありません。
-- YMM4本体や第三者Pluginの権利を取得/再配布するものではありません。
-- 外部資料は可能な限りリンク/commitを参照し、大量コピーしません。
-- 実YMM4 behaviorは、検証したversion/boundaryを超えて一般化しません。
-- YMM4更新時は、影響するsubsystemだけ再検証する設計を想定しています。
+## 「public setterがあるからUIも完全更新される」
 
-このLabのoriginal code / workflow / documentationのライセンスは、リポジトリの `LICENSE` を確認してください。
+しない。
 
-第三者のコード・バイナリ・商標・資料は、それぞれ元の権利条件に従います。
+状態変更とvisible refreshは別問題です。
+
+## 「同じobjectだから同じ意味のItem」
+
+しない。
+
+Trim等でsame objectの内部rangeが変わります。
+
+## 「objectが変わったから別source」
+
+しない。
+
+Splitで新objectになります。
+
+## 「同じsource rangeなら同じTimeline occurrence」
+
+しない。
+
+Copy/Pasteで複数作れます。
+
+## 「公式READMEに書いてある型名なら実装も同じ」
+
+必ずしも一致しません。
+
+current code/APIを確認してください。
+
+## 「CommunityがReflection/Harmonyを使っているから自分も使う」
+
+しない。
+
+まず公開routeを確認します。
+
+## 「最適化Tipsは全部入れた方が良い」
+
+しない。
+
+必要なhot pathだけ測って最適化します。
 
 ---
 
-# AI開発者向け最終チェック
+# 28. 不明なYMM4挙動を検証するとき
+
+良い検証は問いが狭いです。
+
+悪い例:
+
+> Timelineを自由に操作できるか？
+
+良い例:
+
+> YMM4 4.56.1.0で、Tool Pluginから選択中Itemをpublic commandで現在Frame位置にSplitできるか？
+
+最低限:
+
+```text
+Question
+Environment / YMM4 version
+Host identity
+Assertions
+PASS boundary
+NOT PROVEN
+Reproduction
+Evidence identity
+```
+
+を残してください。
+
+AIが後から結果を一般化しすぎる事故を減らせます。
+
+---
+
+# 29. Buildだけで完成扱いしない
+
+Pluginでは:
+
+```text
+compile PASS
+!=
+YMM4上で正しく動く
+```
+
+です。
+
+機能に応じて確認してください。
+
+例:
+
+- Pluginが実際にloadされる
+- menu/editorへ表示される
+- target Itemが正しい
+- Timeline selectionが正しい
+- Previewが期待どおり
+- Undo/Redo
+- save/reload
+- YMM4 restart
+- Project switch
+- keyboard/mouse route
+- .ymme install/update
+- YMM4 version difference
+
+全部を毎回やる必要はありません。
+
+**その機能が依存する挙動だけ**確認します。
+
+---
+
+# 30. AI向け要件テンプレート
+
+Manualを添付したうえで、これを埋めると依頼しやすいです。
+
+```text
+作りたいもの:
+-
+
+対象YMM4:
+- 例: 4.56系
+
+Plugin種別:
+- Tool / Timeline Tool / VideoEffect / AudioEffect / Voice / FileSource / 不明
+
+主な操作:
+-
+
+保存が必要な状態:
+-
+
+Undo/Redo:
+- 必要 / 不要 / 不明
+
+Project save/reload:
+- 必要 / 不要 / 不明
+
+Reflection/Harmony:
+- 可能なら避けたい / 必要なら可 / 制約あり
+
+配布:
+- .ymme / DLL / 未定
+
+今回、実YMM4で確認すべき挙動:
+-
+```
+
+---
+
+# 31. 参考資料
+
+## 公式
+
+YMM4 プラグイン作成:
+https://manjubox.net/ymm4/faq/plugin/how_to_make/
+
+公式Plugin Samples:
+https://github.com/manju-summoner/YukkuriMovieMaker4PluginSamples
+
+YMM4 Community Plugin Source:
+https://github.com/manju-summoner/YukkuriMovieMaker.Plugin.Community
+
+## 非公式API Reference
+
+YMM API Docs:
+https://ymm-api-docs.vercel.app/
+
+YMM4Plugin Scrapbox:
+https://scrapbox.io/ymm4plugin/
+
+これらは便利ですが、非公式資料や実装例をruntime guaranteeとして扱わないでください。
+
+---
+
+# 32. このManualの更新方針
+
+YMM4は更新されます。
+
+このManualでは:
+
+- 公開API変更
+- 公式sample変更
+- .NET/TargetFramework変更
+- Plugin surface変更
+- version-sensitiveな実機挙動
+
+が変わったとき、影響箇所だけ更新する前提です。
+
+確認済み挙動には対象YMM4版を残します。
+
+将来版で再確認していないものを「現在も必ず同じ」とは書き換えません。
+
+---
+
+# 最終チェック
 
 実装前:
 
-- [ ] 現在のYMM4 target frameworkを確認した
-- [ ] 作りたいPlugin surfaceをP1/P1Bで確認した
-- [ ] S1から順に実装面を検討した
-- [ ] 似たAPI名を推測で作っていない
-- [ ] runtime behaviorが必要なら既存Evidenceを検索した
+- [ ] TargetFrameworkは現在のYMM4に合っている
+- [ ] 作りたいPluginのpublic surfaceを確認した
+- [ ] S1 → S4の順に検討した
+- [ ] 似た名前のAPIを推測で作っていない
+- [ ] API存在とruntime behaviorを分けた
 
 実装中:
 
-- [ ] undocumented behaviorを推測で固定していない
-- [ ] Reflectionはexact targetだけに限定した
+- [ ] undocumented behaviorを勝手に一般化していない
+- [ ] Reflectionはexact targetだけ
 - [ ] fail closedになっている
 - [ ] host-owned / plugin-owned resourceを区別した
-- [ ] Undo/Redo・保存・再読込が関係するなら必要なLifecycleを確認した
+- [ ] Undo/Redoやsave/reloadの必要な境界を確認した
+- [ ] performance optimizationを過剰適用していない
 
 完成前:
 
 - [ ] 実YMM4でPlugin loadを確認した
-- [ ] 実際のユーザー操作経路を確認した
-- [ ] 配布物に不要/host-owned DLLを混ぜていないか確認した
+- [ ] 必要なユーザー操作routeを確認した
+- [ ] save/reloadやUndo/Redoが必要なら確認した
 - [ ] version-sensitiveな依存を記録した
-- [ ] Evidenceで証明していないことを「保証」と書いていない
+- [ ] 確認していない挙動を「保証」と書いていない
+
+---
+
+## 一言でいうと
+
+**公開APIから始める。挙動は推測しない。内部へ踏み込むほど対象を狭くする。Buildだけで終わらせず、必要なYMM4挙動を確認する。**
+
+この4つを守れば、AI生成のYMM4 Pluginはかなり事故りにくくなります。
