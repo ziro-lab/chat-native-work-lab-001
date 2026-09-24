@@ -1,8 +1,8 @@
-# YMM4 AI P2 — Canonical Host Behavior
+# YMM4 AI P2 — Evidence-qualified Host Behavior
 
 This document is the middle layer between public/reference API discovery and implementation guidance.
 
-It points coding agents to **version-pinned YMM4 host behavior that has already been accepted into the Lab's main branch**.
+It points coding agents to **version-pinned YMM4 host behavior whose evidence chain is strong enough for reuse**. Merge-to-main is not required.
 
 The full experiment remains the evidence authority. The compact knowledge cards are the AI-consumption layer.
 
@@ -91,9 +91,9 @@ All claims remain bounded by their exact cards/experiments.
 - Host: YMM4 4.56.1.0 Lite x64
 - Key fact: the tested host bundled ffmpeg/ffprobe and exposed a public in-host FFmpeg locator.
 
-## Other canonical experiment families
+## Other evidence-qualified experiment families
 
-The Lab main branch contains additional accepted YMM4 experiments that are not all carded yet.
+The Lab contains additional evidence-qualified YMM4 experiments that are not all carded yet, across main and long-lived/open Lab branches.
 
 Examples include:
 
@@ -116,20 +116,20 @@ Create a card when the fact is:
 - narrow enough to state with a clean PASS boundary;
 - supported by a stable main-branch evidence record.
 
-## Candidate-only work
+## Draft / stacked evidence
 
-The Lab also contains open/Draft experiments.
+Open/Draft/stacked work is allowed in P2 when the **claim itself** is evidence-qualified.
 
-At the time of this curation pass, high-value Candidate areas include:
+Repository state must be recorded on the card, and mutable branches must be pinned by exact tested source SHA.
 
-- standard command execution routes (Undo/Redo/split/frame seek);
-- no-Harmony Timeline folding/navigation;
-- ToolState project persistence/lifecycle;
-- VoiceItem / VOICEVOX correction and synthesis surfaces.
+Examples promoted from intentional Draft/stacked Lab work include:
 
-A Draft reporting GREEN is not enough to enter this P2 canonical layer.
+- standard CommandSettings/CommandType command routing;
+- no-Harmony fold-aware navigation boundaries;
+- ToolState project roundtrip/switch synchronization;
+- public VoiceItem / VOICEVOX regeneration and AudioEffect surfaces.
 
-Promote only after the result is accepted into the Lab's canonical main-branch record.
+Exploratory Drafts without a final PASS marker, artifact/evidence identity or stable claim boundary remain Candidate.
 
 ## AI use rule
 
