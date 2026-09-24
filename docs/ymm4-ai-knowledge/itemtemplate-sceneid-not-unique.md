@@ -1,6 +1,7 @@
 # ItemTemplate SceneId is not a durable unique identity
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: NEGATIVE-FINDING + LAB-NATIVE
 - Surface: S1
 - YMM4 version: 4.55.1.1 Lite
