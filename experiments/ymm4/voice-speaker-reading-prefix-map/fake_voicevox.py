@@ -67,7 +67,7 @@ def phrases_for(text):
 
 def default_query(text="トウキョウダイガク"):
     return {
-        "accent_phrases": phrases_for(text),
+        "accent_phrases": [],
         "speedScale": 1.0,
         "pitchScale": 0.0,
         "intonationScale": 1.0,
