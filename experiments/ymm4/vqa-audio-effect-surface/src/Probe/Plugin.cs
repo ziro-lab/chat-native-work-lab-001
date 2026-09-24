@@ -540,10 +540,11 @@ internal static class Probe
 
             open.Invoke(main, [projectA]);
             await WaitUntil("project A reopen",
-                () => FindCurrentVoice(Remark) is not null,
+                () => FindVoiceFromActiveTimeline(Remark) is { } loaded
+                    && !ReferenceEquals(loaded, voice),
                 15000);
 
-            var reloaded = FindCurrentVoice(Remark)
+            var reloaded = FindVoiceFromActiveTimeline(Remark)
                 ?? throw new InvalidOperationException("Reloaded VoiceItem not found.");
             var reloadProperty = FindAudioEffectCollectionProperty(reloaded);
             var restoredEffects = reloadProperty is null
@@ -864,6 +865,26 @@ internal static class Probe
                                 }
                                 catch { }
                             }
+
+                            if (typeof(ICommand).IsAssignableFrom(property.PropertyType))
+                            {
+                                try
+                                {
+                                    if (property.GetValue(vm) is ICommand command)
+                                    {
+                                        foreach (var parameter in new object?[] { null, vm, voice })
+                                        {
+                                            if (command.CanExecute(parameter))
+                                            {
+                                                command.Execute(parameter);
+                                                selectionAttempted = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
                         }
 
                         foreach (var method in active.GetType()
@@ -1043,6 +1064,59 @@ internal static class Probe
         var timeline = latestInfo?.Timeline;
         return timeline?.Items.OfType<VoiceItem>()
             .FirstOrDefault(x => x.Remark == remark);
+    }
+
+    static VoiceItem? FindVoiceFromActiveTimeline(string remark)
+    {
+        var main = FindMainViewModel();
+        if (main is null)
+            return null;
+
+        var active = main.GetType().GetProperty(
+            "ActiveTimelineViewModel",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(main);
+
+        var timeline = active is null ? null : FindTimeline(active);
+        return timeline?.Items.OfType<VoiceItem>()
+            .FirstOrDefault(x => x.Remark == remark);
+    }
+
+    static Timeline? FindTimeline(object active)
+    {
+        for (var type = active.GetType();
+             type is not null;
+             type = type.BaseType)
+        {
+            foreach (var field in type.GetFields(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (typeof(Timeline).IsAssignableFrom(field.FieldType)
+                    && field.GetValue(active) is Timeline timeline)
+                {
+                    return timeline;
+                }
+            }
+
+            foreach (var property in type.GetProperties(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (property.GetIndexParameters().Length != 0
+                    || !typeof(Timeline).IsAssignableFrom(property.PropertyType))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (property.GetValue(active) is Timeline timeline)
+                        return timeline;
+                }
+                catch { }
+            }
+        }
+
+        return null;
     }
 
     static async Task WaitUntil(
