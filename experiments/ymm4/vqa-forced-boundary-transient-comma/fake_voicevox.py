@@ -21,7 +21,20 @@ def log(obj):
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 def reading_for(text):
-    return (text or "").replace("。", "")
+    # Mirror the stable reading shape that YMM4's built-in VOICEVOX path
+    # supplies to /accent_phrases for this fixed Japanese fixture.
+    # Keeping this mapping in the deterministic fake avoids testing an
+    # unrelated kanji-to-yomi implementation here.
+    value = text or ""
+    replacements = [
+        ("これは", "コレハ"),
+        ("です", "デス"),
+        ("のために", "ノタメニ"),
+        ("しました", "シマシタ"),
+    ]
+    for source, reading in replacements:
+        value = value.replace(source, reading)
+    return value
 
 def mora(text):
     return {
