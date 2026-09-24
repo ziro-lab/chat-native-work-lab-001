@@ -10,6 +10,13 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - **Candidate** entries may exist in open/Draft work but are not promoted here as reusable facts.
 - All undocumented host behavior is version-sensitive unless the underlying evidence explicitly says otherwise.
 
+## Current official development baseline
+
+- Status: **Canonical public/reference baseline**
+- Class: OFFICIAL-CONTRACT + OFFICIAL-SAMPLE
+- Covers: current .NET 10 target, WPF project baseline, official assembly-reference setup, official `YMM4DirPath` sample pattern, Developer Mode, `.ymme` packaging, and explicit non-contract treatment of `Private=false`.
+- Source: [YMM4 AI P0 — Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
+
 ## Development and reference discovery
 
 ### Reference-first discovery
