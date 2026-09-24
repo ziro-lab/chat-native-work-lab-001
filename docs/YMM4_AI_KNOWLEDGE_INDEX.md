@@ -55,6 +55,7 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Class: NEGATIVE-FINDING + LAB-NATIVE
 - Reusable fact: `SceneId` is not a unique restart-persistent ItemTemplate identity in the tested behavior.
 - Safe use: do not design durable template identity around `SceneId` alone.
+- Knowledge card: [ItemTemplate SceneId is not a durable unique identity](ymm4-ai-knowledge/itemtemplate-sceneid-not-unique.md)
 - Evidence: [template-identity](../experiments/ymm4/template-identity/)
 
 ### Tool group localization
@@ -112,6 +113,7 @@ The recording-archive chain contains several reusable facts. Read the individual
 - Status: **Canonical**
 - Class: NEGATIVE-FINDING + LAB-NATIVE
 - Reusable fact: in tested 50/100/200% + ContentOffset cases, `ContentLength` remained media duration and was not suitable as source-range planning data.
+- Knowledge card: [VideoItem ContentLength is not consumed source range](ymm4-ai-knowledge/videoitem-contentlength-not-source-range.md)
 - Evidence index: [YMM4 experiments](../experiments/ymm4/README.md#recording-archive-investigation--ymm4-v45610)
 
 ### PlaybackRateMap participates in source-time mapping
@@ -119,7 +121,16 @@ The recording-archive chain contains several reusable facts. Read the individual
 - Status: **Canonical**
 - Class: LAB-STATIC + LAB-NATIVE
 - Reusable fact: the tested native video path routes source-time calculation through `PlaybackRateMap`; constant positive rates were proven with forward/inverse mapping inside the experiment's interval boundary.
+- Knowledge card: [PlaybackRateMap constant positive source-time mapping](ymm4-ai-knowledge/playbackratemap-constant-source-time.md)
 - Evidence index: [YMM4 experiments](../experiments/ymm4/README.md#recording-archive-investigation--ymm4-v45610)
+
+## Seed-guide migration
+
+The current long-form YMM4 plugin-development guide has been triaged before import:
+
+- [YMM4 Long-form Plugin Guide Triage](YMM4_AI_SEED_GUIDE_TRIAGE.md)
+
+The guide is not treated as one authority level. Current/runtime setup, sample patterns, Lab behavior and implementation guidance are promoted separately.
 
 ## Candidate knowledge not yet promoted
 
