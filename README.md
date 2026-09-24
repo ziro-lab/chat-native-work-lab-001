@@ -2,15 +2,16 @@
 
 ## YMM4 Plugin AI Manual
 
-YMM4プラグインをChatGPT / Codex / ClaudeなどのコーディングAIと一緒に開発する人向けに、配布用の入口を用意しています。
+YMM4プラグインをChatGPT / Codex / ClaudeなどのコーディングAIと一緒に開発する人向けに、配布用マニュアルを用意しています。
 
-- **[YMM4 Plugin AI Manual](docs/YMM4_PLUGIN_AI_MANUAL.md)** — まず読む本体
-- **[YMM4 Plugin AI Prompt](docs/YMM4_PLUGIN_AI_PROMPT.md)** — AIへそのまま渡せる初期指示
-- **[YMM4 AI Knowledge Index](docs/YMM4_AI_KNOWLEDGE_INDEX.md)** — 実機検証済み知見を探す索引
+- **[YMM4 Plugin AI Manual](docs/YMM4_PLUGIN_AI_MANUAL.md)** — **この1ファイルだけで使える配布用本体**
+- **[YMM4 Plugin AI Prompt](docs/YMM4_PLUGIN_AI_PROMPT.md)** — 任意のコピペ用初期指示
 
-このLab自体がEvidence倉庫です。実験結果はmainへのmerge有無ではなく、tested SHA / YMM4 version / PASS assertions / run / artifact / boundaryで評価します。
+ManualはこのLabを知らない利用者でも単体で機能するように、必要な開発基準・API選択・実装上の注意・バージョン付き確認済み挙動を本文へ直接まとめています。
 
-> この資料は非公式です。YMM4公式ドキュメント・公式サンプルを置き換えるものではなく、AI開発時にそれらと実機Evidenceを混同しないための補助資料です。
+このLabの実験群や内部Referenceは、Manualを更新・検証するための裏側の資料であり、Manual利用者が読むことは前提にしていません。
+
+> このManualは非公式です。YMM4公式ドキュメント・公式サンプルを置き換えるものではありません。
 
 ---
 
