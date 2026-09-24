@@ -6,8 +6,9 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 
 ## How to read this index
 
-- **Canonical** entries are backed by material already recorded on the Lab's main branch.
-- **Candidate** entries may exist in open/Draft work but are not promoted here as reusable facts.
+- **Evidence-qualified** entries have a reusable evidence chain regardless of merge state.
+- **Repository state** (main / Draft / stacked / closed-unmerged) is recorded separately from evidence maturity.
+- **Candidate** entries are leads whose evidence chain or boundary is not yet strong enough for reuse.
 - All undocumented host behavior is version-sensitive unless the underlying evidence explicitly says otherwise.
 
 ## Reference layers
@@ -16,7 +17,7 @@ Use these in order:
 
 1. **P0 — Official baseline:** [YMM4_AI_P0_OFFICIAL_BASELINE.md](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 2. **P1/P1B — Public/reference surfaces:** [YMM4_AI_P1_PLUGIN_SURFACES.md](YMM4_AI_P1_PLUGIN_SURFACES.md) / [YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
-3. **P2 — Canonical host behavior:** [YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md)
+3. **P2 — Evidence-qualified host behavior:** [YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md)
 4. **P3 — Implementation guidance:** [YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
 
 A coding agent should not skip directly from a desired feature to P3 optimization/internal techniques before resolving P0/P1/P2.
@@ -111,6 +112,32 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 - Knowledge card: [CurrentFrame change alone is not user time-click intent](ymm4-ai-knowledge/currentframe-is-not-user-click-intent.md)
 - Evidence: [timeline-input-intent](../experiments/ymm4/timeline-input-intent/)
 
+## Standard commands and Tool persistence
+
+### Native standard command route
+
+- Status: **Evidence-qualified**
+- Repository state: Draft PR #139
+- Class: LAB-NATIVE
+- Reusable fact: validated CommandSettings / CommandType routed commands can execute Undo, Redo, frame seek, selected-item split and keyframe addition without synthetic keyboard input on the tested hosts.
+- Knowledge card: [Standard YMM4 commands can be routed through CommandSettings](ymm4-ai-knowledge/standard-commandsettings-route.md)
+
+### Project ToolState roundtrip / switch synchronization
+
+- Status: **Evidence-qualified**
+- Repository state: stacked Draft PR #87
+- Class: LAB-NATIVE
+- Reusable fact: project-specific ToolState.SavedState roundtrips and switches correctly on YMM4 4.56.1.0; an existing inner ViewModel did not receive another LoadState on project switch.
+- Knowledge card: [ToolState SavedState can carry project-specific Tool data across reopen/switch](ymm4-ai-knowledge/toolstate-project-roundtrip-switch.md)
+
+### No-Harmony folded navigation boundary
+
+- Status: **Evidence-qualified**
+- Repository state: stacked Draft PR #84
+- Class: LAB-NATIVE + NEGATIVE-FINDING
+- Reusable fact: some folded navigation routes are already display-row-safe while bare ScrollToItem is not fold-aware; correction should be route-specific rather than global.
+- Knowledge card: [Folded Timeline navigation has mixed native-safe and fold-unaware routes](ymm4-ai-knowledge/no-harmony-fold-navigation-boundary.md)
+
 ## VideoItem edit lifecycle
 
 ### Split replaces the original object
@@ -182,6 +209,24 @@ The recording-archive chain contains several reusable facts. Read the individual
 - Knowledge card: [PlaybackRateMap constant positive source-time mapping](ymm4-ai-knowledge/playbackratemap-constant-source-time.md)
 - Evidence index: [YMM4 experiments](../experiments/ymm4/README.md#recording-archive-investigation--ymm4-v45610)
 
+## VoiceItem / voice synthesis
+
+### Public VoiceItem regeneration route
+
+- Status: **Evidence-qualified**
+- Repository state: Draft PR #128
+- Class: LAB-NATIVE
+- Reusable fact: a real Timeline VoiceItem can be regenerated through public VoiceItem / IVoiceSpeaker surfaces using a patched pronunciation graph, without the internal VOICEVOXEngine route.
+- Knowledge card: [Real VoiceItem corrected synthesis can use the public speaker route](ymm4-ai-knowledge/voiceitem-public-regeneration-route.md)
+
+### VoiceItem AudioEffects persistent storage surface
+
+- Status: **Evidence-qualified**
+- Repository state: Draft PR #142
+- Class: LAB-NATIVE
+- Reusable fact: public VoiceItem.AudioEffects supports host discovery, edit UI, membership Undo/Redo and real save/reload persistence on the tested host.
+- Knowledge card: [VoiceItem AudioEffects is a public persistent effect-storage surface](ymm4-ai-knowledge/voiceitem-audioeffects-public-storage.md)
+
 ## Seed-guide migration
 
 The current long-form YMM4 plugin-development guide has been triaged before import:
@@ -192,26 +237,25 @@ The guide is not treated as one authority level. Current/runtime setup, sample p
 
 ## Candidate knowledge not yet promoted
 
-Open/Draft Lab work currently contains additional potentially high-value findings, including areas such as:
+Draft/open state alone is no longer a reason to keep a result here.
 
-- standard command execution routes (Undo/Redo, split, frame seek);
-- no-Harmony fold-aware Timeline behavior;
-- ToolState project persistence/lifecycle;
-- VoiceItem/VOICEVOX reading, synthesis, cache and correction surfaces.
+Keep work as Candidate when the **claim itself** still lacks a stable final evidence chain, for example:
 
-These are intentionally **not copied into the canonical index here merely because a Draft PR reports GREEN**.
+- no final PASS marker/assertion set yet;
+- missing tested source identity;
+- missing PASS/NOT-PROVEN boundary;
+- unresolved contradictory or superseding runs;
+- a later gate is explicitly intended to change the same claim.
 
-Promote them only after their evidence is accepted into the Lab's canonical main-branch record.
+Examples of remaining Voice/VOICEVOX work should be reviewed individually rather than bulk-promoted merely because neighboring PRs are GREEN.
 
 ## Backlog for this index
 
 High-value next curation targets:
 
-1. ToolState and SettingsBase persistence once canonical.
-2. Standard YMM4 command execution once canonical.
-3. Item/template clone fidelity.
-4. `.ymme` install/update preservation behavior.
-5. No-Harmony Timeline structural/navigation facts.
-6. VoiceItem / VOICEVOX public mechanisms.
+1. SettingsBase persistence lifecycle.
+2. `.ymme` install/update preservation behavior.
+3. Remaining no-Harmony structural/persistence/release facts that are reusable outside that product.
+4. Remaining VoiceItem / VOICEVOX findings with strong final evidence.
 7. PropertyEditor, AudioEffect and VideoEffect implementation facts from official/current sources.
 8. Reusable negative findings from all completed experiments.
