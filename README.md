@@ -72,6 +72,8 @@ See [`docs/YMM4_OBSERVATION_POLICY.md`](docs/YMM4_OBSERVATION_POLICY.md) and [`d
 
 Before opening a new YMM4 probe, consult [`docs/YMM4_REFERENCE_SOURCES.md`](docs/YMM4_REFERENCE_SOURCES.md) and [`docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](docs/YMM4_PLUGIN_SURFACE_GUIDE.md). The registry defines the external-source search order; the surface guide keeps the public-API -> WPF/public-host -> bounded-reflection -> Harmony/internal escalation ladder.
 
+For coding-agent consumption, start from [`docs/YMM4_AI_DEVELOPMENT_REFERENCE.md`](docs/YMM4_AI_DEVELOPMENT_REFERENCE.md) and its compact [`docs/YMM4_AI_KNOWLEDGE_INDEX.md`](docs/YMM4_AI_KNOWLEDGE_INDEX.md). These keep official/reference material, version-pinned Lab evidence, negative findings and candidate knowledge at different authority levels.
+
 Small plugin prototypes consume those observations in [`ziro-lab/ymm4-plugin-garage`](https://github.com/ziro-lab/ymm4-plugin-garage) rather than duplicating host-behavior research there.
 
 These experiments also informed a larger downstream YMM4 Template Placer implementation. The product re-ran integrated native acceptance rather than treating lab PASS results as product acceptance. The lessons fed back into this repository are recorded in [`docs/DOWNSTREAM_FEEDBACK.md`](docs/DOWNSTREAM_FEEDBACK.md).
