@@ -1,6 +1,7 @@
 # CurrentFrame change alone is not user time-click intent
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: LAB-NATIVE + NEGATIVE-FINDING
 - Surface: S2 with version-sensitive host structure for pointer classification
 - YMM4 version: 4.55.1.1 Lite
