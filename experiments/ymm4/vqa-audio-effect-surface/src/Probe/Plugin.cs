@@ -999,6 +999,12 @@ internal static class Probe
             Path.Combine(output, "ui-text.txt"),
             string.Join(Environment.NewLine, texts));
 
+        File.WriteAllText(
+            Path.Combine(output, "audio-ui-shape.json"),
+            JsonSerializer.Serialize(
+                DescribeAudioUiShape(),
+                new JsonSerializerOptions { WriteIndented = true }));
+
         var effectVisible = texts.Any(x =>
             x.Contains(ProbeAudioEffect.DisplayLabel, StringComparison.Ordinal));
         var audioSection = texts.Any(x =>
@@ -1026,6 +1032,114 @@ internal static class Probe
                     || x.Contains("モード", StringComparison.Ordinal))
                 .Take(100)
                 .ToArray());
+    }
+
+    static object DescribeAudioUiShape()
+    {
+        var windows = Application.Current.Windows.Cast<Window>().ToArray();
+        var visible = windows
+            .SelectMany(EnumerateVisual)
+            .OfType<FrameworkElement>()
+            .Where(x => x.IsVisible)
+            .ToArray();
+
+        var anchors = visible
+            .Where(x =>
+                string.Equals(GetText(x), "Audio effects", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(GetText(x), "音声エフェクト", StringComparison.Ordinal))
+            .ToArray();
+
+        object DescribeElement(FrameworkElement element) => new
+        {
+            type = element.GetType().FullName,
+            element.Name,
+            text = GetText(element),
+            dataContextType = element.DataContext?.GetType().FullName,
+            element.ActualWidth,
+            element.ActualHeight,
+            commands = element.GetType()
+                .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(p => p.GetIndexParameters().Length == 0
+                    && typeof(ICommand).IsAssignableFrom(p.PropertyType))
+                .Select(p => new
+                {
+                    p.Name,
+                    type = p.PropertyType.FullName,
+                    valueType = SafeGet(p, element)?.GetType().FullName
+                })
+                .ToArray()
+        };
+
+        var neighborhoods = new List<object>();
+        foreach (var anchor in anchors)
+        {
+            var ancestors = new List<object>();
+            DependencyObject? current = anchor;
+            for (int depth = 0; depth < 10 && current is not null; depth++)
+            {
+                if (current is FrameworkElement fe)
+                    ancestors.Add(DescribeElement(fe));
+                try { current = VisualTreeHelper.GetParent(current); }
+                catch { current = null; }
+            }
+
+            FrameworkElement? parent = null;
+            try { parent = VisualTreeHelper.GetParent(anchor) as FrameworkElement; }
+            catch { }
+
+            var siblings = parent is null
+                ? []
+                : EnumerateVisual(parent)
+                    .OfType<FrameworkElement>()
+                    .Where(x => x.IsVisible)
+                    .Take(120)
+                    .Select(DescribeElement)
+                    .ToArray();
+
+            neighborhoods.Add(new
+            {
+                anchor = DescribeElement(anchor),
+                ancestors = ancestors.ToArray(),
+                descendantsAndSiblings = siblings
+            });
+        }
+
+        var audioEffectNamed = visible
+            .Where(x =>
+            {
+                var type = x.GetType().FullName ?? "";
+                var dc = x.DataContext?.GetType().FullName ?? "";
+                var text = GetText(x) ?? "";
+                return type.Contains("Audio", StringComparison.OrdinalIgnoreCase)
+                    || type.Contains("Effect", StringComparison.OrdinalIgnoreCase)
+                    || dc.Contains("Audio", StringComparison.OrdinalIgnoreCase)
+                    || dc.Contains("Effect", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("Audio", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("音声エフェクト", StringComparison.Ordinal);
+            })
+            .Take(200)
+            .Select(DescribeElement)
+            .ToArray();
+
+        var audioProperty = typeof(VoiceItem).GetProperty(
+            "AudioEffects",
+            BindingFlags.Instance | BindingFlags.Public);
+
+        return new
+        {
+            anchorCount = anchors.Length,
+            neighborhoods,
+            audioEffectNamed,
+            audioEffectsProperty = audioProperty is null ? null : new
+            {
+                type = audioProperty.PropertyType.FullName,
+                publicGet = audioProperty.GetMethod?.IsPublic == true,
+                publicSet = audioProperty.SetMethod?.IsPublic == true,
+                attributes = audioProperty.GetCustomAttributes(false)
+                    .Select(x => x.GetType().FullName)
+                    .ToArray()
+            }
+        };
     }
 
     static IEnumerable<DependencyObject> EnumerateVisual(DependencyObject root)
