@@ -150,7 +150,7 @@ These belong behind an observed hot path or explicit profiling goal.
 - **P0 extraction:** first official baseline complete — see [YMM4_AI_P0_OFFICIAL_BASELINE.md](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 - **P1 extraction:** public/reference effect/editor pass complete — see [YMM4_AI_P1_PLUGIN_SURFACES.md](YMM4_AI_P1_PLUGIN_SURFACES.md)
 - **P1B surface map:** official sample category/interface map complete — see [YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
-- **P2 canonical Lab card extraction:** started
+- **P2 canonical Lab card extraction:** first pass complete — see [YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md) and `docs/ymm4-ai-knowledge/`
 - **P3 guidance rewrite:** first pass complete — see [YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
 
 The next pass should verify P0/P1 against current official documentation/samples and then replace generic index entries with narrow knowledge cards.
