@@ -730,6 +730,7 @@ internal static class Probe
             .SelectMany(EnumerateVisual)
             .Where(x => x is FrameworkElement fe && fe.IsVisible)
             .Select(GetText)
+            .OfType<string>()
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
