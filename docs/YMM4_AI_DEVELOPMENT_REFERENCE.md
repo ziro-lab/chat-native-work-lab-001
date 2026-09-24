@@ -52,9 +52,37 @@ Every reusable claim should fit one of these classes.
 | **LAB-NATIVE** | Version-pinned automated real-host observation | Reproducible host behavior inside the stated PASS boundary |
 | **LAB-MANUAL** | Version-pinned interactive human observation | UI/perceptual behavior inside the stated manual boundary |
 | **NEGATIVE-FINDING** | A plausible route was tested and found insufficient / unsafe / ambiguous | A route to avoid under the tested conditions |
-| **CANDIDATE** | Useful lead that is not yet canonical evidence | Investigation input only |
+| **CANDIDATE** | Useful lead whose evidence chain or boundary is not yet sufficient for reuse | Investigation input only |
 
 Do not silently promote OFFICIAL-SAMPLE, REFERENCE-IMPLEMENTATION or CANDIDATE into a host guarantee.
+
+## Evidence maturity is separate from Git state
+
+Repository state is provenance, not evidence quality.
+
+A YMM4 Lab result may be **Evidence-qualified** even when it lives in an open/Draft PR, provided the reusable claim has a strong enough evidence chain.
+
+For native automated observations, prefer all of:
+
+- exact YMM4 version / host identity;
+- pinned source commit or accepted source SHA;
+- reproducible workflow/run identity;
+- machine-checkable PASS marker/assertions;
+- artifact identity and digest when available;
+- explicit PASS boundary / nearby NOT PROVEN claims;
+- no known later result in the Lab that supersedes or contradicts the claim.
+
+Record the repository state separately:
+
+- main;
+- closed/unmerged PR;
+- open PR;
+- Draft PR;
+- stacked branch.
+
+Do not upgrade a weak result merely because it was merged, and do not discard a strong result merely because the Lab intentionally keeps it in Draft.
+
+If the evidence is strong but the branch is mutable, pin the exact tested source SHA in the knowledge card.
 
 ## Dependency-risk surface
 
@@ -231,6 +259,6 @@ Current next steps:
 
 1. keep the verified P0 baseline current as official docs/samples change;
 2. keep the P1/P1B surface maps current as official samples/API shapes evolve;
-3. continue promoting canonical Lab negative findings and edit-lifecycle facts into cards;
+3. promote evidence-qualified Lab findings into cards regardless of merge state, while recording PR/branch provenance;
 4. keep implementation/performance advice in the Guidance layer instead of promoting it into API contracts;
-5. keep open/Draft PR results out of the canonical index until their evidence is accepted.
+5. keep weak/incomplete Draft work as Candidate, but do not require merge-to-main as an evidence gate.
