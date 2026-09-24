@@ -156,6 +156,26 @@ Plugin種別:
 
 ---
 
+## Starter Recipe Routing — コードを書き始めるときだけ読む
+
+設計方針が決まったあと、最初の骨格が欲しい場合だけ **33章** の該当Recipeを追加で読んでください。
+
+| 作りたいもの | Recipe |
+| --- | --- |
+| 新規Plugin project | **33.1** |
+| Tool Plugin | **33.2** |
+| Timeline Tool | **33.3** |
+| Custom Property Editor | **33.4** |
+| VideoEffect — 公式最小route | **33.5** |
+| VideoEffect — `VideoEffectProcessorBase` route | **33.6** |
+| AudioEffect | **33.7** |
+| Video / Audio FileSource | **33.8** |
+
+Recipeは完成品ではなく**最初の足場**です。  
+要件にない機能をRecipeから勝手に増やさないでください。
+
+---
+
 ## Lazy Readの停止条件
 
 必要章を読んだ時点で、以下が分かればそれ以上の章は読まなくて構いません。
@@ -1472,6 +1492,750 @@ YMM4は更新されます。
 確認済み挙動には対象YMM4版を残します。
 
 将来版で再確認していないものを「現在も必ず同じ」とは書き換えません。
+
+---
+
+# 33. Starter Recipes — 最初の1ファイル目を迷わないための骨格
+
+この章は**必要なRecipeだけ読む**ことを前提にしています。
+
+目的は「完成コードを配ること」ではなく、
+
+> 空プロジェクトから、YMM4 Pluginとして正しい方向へ最初の一歩を出す
+
+ことです。
+
+## Recipe共通ルール
+
+- 現在のtargetは `net10.0-windows10.0.19041.0`
+- `UseWPF=true`
+- 不要なYMM4 DLLを最初から全部参照しない
+- `Private=false` をYMM4必須仕様として追加しない
+- Recipeの型/signatureを現在のYMM4/APIと照合する
+- compile後は実YMM4 loadを確認する
+- Recipeから始めても、runtime behaviorは必要に応じて確認する
+
+---
+
+## 33.1 最小Plugin Project
+
+### `Directory.Build.props.sample`
+
+```xml
+<Project>
+  <PropertyGroup>
+    <YMM4DirPath>D:\YMM4\</YMM4DirPath>
+  </PropertyGroup>
+</Project>
+```
+
+これをコピーして `Directory.Build.props` を作り、自分のYMM4 install pathへ変更します。
+
+### 最小 `.csproj`
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="YukkuriMovieMaker.Plugin">
+      <HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath>
+    </Reference>
+
+    <Reference Include="YukkuriMovieMaker.Controls">
+      <HintPath>$(YMM4DirPath)YukkuriMovieMaker.Controls.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent"
+          Condition="Exists('$(YMM4DirPath)')">
+    <Exec Command="if not exist &quot;$(YMM4DirPath)user\plugin\$(ProjectName)&quot; mkdir &quot;$(YMM4DirPath)user\plugin\$(ProjectName)&quot;" />
+    <Exec Command="copy /Y &quot;$(TargetPath)&quot; &quot;$(YMM4DirPath)user\plugin\$(ProjectName)\&quot;" />
+  </Target>
+
+</Project>
+```
+
+追加のYMM4 / Vortice / SharpGen DLLが必要になったら、**実際に使う型に応じて追加**してください。
+
+### 最初の確認
+
+1. build
+2. DLLが `user\plugin\<ProjectName>\` にコピーされたか確認
+3. YMM4起動
+4. 設定 → Plugin一覧でloadされたか確認
+
+---
+
+## 33.2 最小Tool Plugin
+
+Toolは「Plugin定義」「ViewModel」「View」の3つに分けると始めやすいです。
+
+### Plugin定義
+
+```csharp
+using YukkuriMovieMaker.Plugin;
+
+namespace MyYmm4Tool;
+
+public sealed class MyToolPlugin : IToolPlugin
+{
+    public string Name => "My Tool";
+    public Type ViewModelType => typeof(MyToolViewModel);
+    public Type ViewType => typeof(MyToolView);
+
+    public bool AllowMultipleInstances => false;
+    public string DefaultGroupName => "My Tools";
+    public int DefaultOrder => 0;
+}
+```
+
+既存のYMM4組み込みUtilitiesグループへ入れたい場合は、hard-codeした日本語/英語名ではなく、確認したhost localization resourceを使う方が安全です。
+
+### ViewModel
+
+```csharp
+using YukkuriMovieMaker.Plugin;
+
+namespace MyYmm4Tool;
+
+public sealed class MyToolViewModel : IToolViewModel
+{
+    public string Title => "My Tool";
+    public bool CanSuspend => true;
+
+#pragma warning disable CS0067
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>?
+        CreateNewToolViewRequested;
+#pragma warning restore CS0067
+
+    public ToolState SaveState()
+        => new()
+        {
+            Title = Title,
+            SavedState = ""
+        };
+
+    public void LoadState(ToolState state)
+    {
+    }
+}
+```
+
+### View
+
+```xml
+<UserControl
+    x:Class="MyYmm4Tool.MyToolView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="12">
+        <TextBlock Text="Hello YMM4 Tool" />
+    </Grid>
+</UserControl>
+```
+
+```csharp
+using System.Windows.Controls;
+
+namespace MyYmm4Tool;
+
+public partial class MyToolView : UserControl
+{
+    public MyToolView()
+    {
+        InitializeComponent();
+    }
+}
+```
+
+### 次に足すもの
+
+必要になったものだけ追加します。
+
+- Projectごとの状態 → 6章
+- Timeline接続 → 33.3
+- Undo/Redo / YMM4 command → 7章
+- polling回避 → 25章
+
+---
+
+## 33.3 最小Timeline Tool
+
+Timeline Toolは通常のTool ViewModelへ `ITimelineToolViewModel` を追加し、YMM4から渡される `TimelineToolInfo` を保持します。
+
+```csharp
+using YukkuriMovieMaker.Plugin;
+
+namespace MyTimelineTool;
+
+public sealed class MyTimelineToolViewModel
+    : IToolViewModel, ITimelineToolViewModel
+{
+    TimelineToolInfo? timelineInfo;
+
+    public string Title => "My Timeline Tool";
+    public bool CanSuspend => true;
+
+#pragma warning disable CS0067
+    public event EventHandler<CreateNewToolViewRequestedEventArgs>?
+        CreateNewToolViewRequested;
+#pragma warning restore CS0067
+
+    public void SetTimelineToolInfo(TimelineToolInfo info)
+    {
+        timelineInfo = info;
+    }
+
+    public int GetCurrentFrame()
+        => timelineInfo?.Timeline.CurrentFrame ?? 0;
+
+    public int GetSelectedCount()
+        => timelineInfo?.Timeline.SelectedItems.Count ?? 0;
+
+    public ToolState SaveState()
+        => new() { Title = Title };
+
+    public void LoadState(ToolState state)
+    {
+    }
+}
+```
+
+### ここでやらないこと
+
+- `MainWindow.DataContext` をいきなりReflectionする
+- CurrentFrame changeだけで「user clicked」と判定する
+- synthetic key inputでUndo/Redoする
+
+まずpublic Timeline / standard command surfaceを確認してください。
+
+---
+
+## 33.4 最小Custom Property Editor
+
+現在の公式sample baselineは:
+
+```text
+IPropertyEditorControl
++
+PropertyEditorAttribute2
+```
+
+です。
+
+XAMLなしの最小例:
+
+```csharp
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Views.Converters;
+
+namespace MyPlugin;
+
+public sealed class StepEditor : UserControl, IPropertyEditorControl
+{
+    public static readonly DependencyProperty ValueProperty =
+        DependencyProperty.Register(
+            nameof(Value),
+            typeof(int),
+            typeof(StepEditor),
+            new FrameworkPropertyMetadata(
+                0,
+                FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+
+    public int Value
+    {
+        get => (int)GetValue(ValueProperty);
+        set => SetValue(ValueProperty, value);
+    }
+
+    public event EventHandler? BeginEdit;
+    public event EventHandler? EndEdit;
+
+    public StepEditor()
+    {
+        var button = new Button { Content = "+1" };
+
+        button.Click += (_, _) =>
+        {
+            BeginEdit?.Invoke(this, EventArgs.Empty);
+            Value++;
+            EndEdit?.Invoke(this, EventArgs.Empty);
+        };
+
+        Content = button;
+    }
+}
+
+public sealed class StepEditorAttribute : PropertyEditorAttribute2
+{
+    public override FrameworkElement Create()
+        => new StepEditor();
+
+    public override void SetBindings(
+        FrameworkElement control,
+        ItemProperty[] itemProperties)
+    {
+        var editor = (StepEditor)control;
+
+        editor.SetBinding(
+            StepEditor.ValueProperty,
+            ItemPropertiesBinding.Create(itemProperties));
+    }
+
+    public override void ClearBindings(FrameworkElement control)
+    {
+        BindingOperations.ClearBinding(
+            control,
+            StepEditor.ValueProperty);
+    }
+}
+```
+
+使うproperty側:
+
+```csharp
+[Display(Name = "回数")]
+[StepEditor]
+public int Count { get; set; }
+```
+
+### ポイント
+
+- edit前に `BeginEdit`
+- edit後に `EndEdit`
+- 複数編集は `ItemProperty[]` を捨てずに扱う
+- `IPropertyEditorControl2` を全Editor必須だと思わない
+
+---
+
+## 33.5 最小VideoEffect — `IVideoEffectProcessor` 直実装
+
+「画像effectを新規生成せず、DrawDescriptionだけ変える」最小構成です。
+
+### Effect
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Controls;
+using YukkuriMovieMaker.Exo;
+using YukkuriMovieMaker.Player.Video;
+using YukkuriMovieMaker.Plugin.Effects;
+
+namespace MyPlugin;
+
+[VideoEffect("X移動", ["サンプル"], [])]
+public sealed class MoveXEffect : VideoEffectBase
+{
+    public override string Label => "X移動";
+
+    [Display(Name = "X")]
+    [AnimationSlider("F0", "px", -100, 100)]
+    public Animation X { get; }
+        = new(0, -10000, 10000);
+
+    public override IVideoEffectProcessor CreateVideoEffect(
+        IGraphicsDevicesAndContext devices)
+        => new MoveXProcessor(this);
+
+    public override IEnumerable<string> CreateExoVideoFilters(
+        int keyFrameIndex,
+        ExoOutputDescription exoOutputDescription)
+        => [];
+
+    protected override IEnumerable<IAnimatable> GetAnimatables()
+        => [X];
+}
+```
+
+### Processor
+
+```csharp
+using Vortice.Direct2D1;
+using YukkuriMovieMaker.Player.Video;
+
+namespace MyPlugin;
+
+public sealed class MoveXProcessor : IVideoEffectProcessor
+{
+    readonly MoveXEffect item;
+    ID2D1Image? input;
+
+    public MoveXProcessor(MoveXEffect item)
+    {
+        this.item = item;
+    }
+
+    public ID2D1Image Output
+        => input ?? throw new InvalidOperationException(
+            "VideoEffect input is not set.");
+
+    public void SetInput(ID2D1Image? input)
+        => this.input = input;
+
+    public void ClearInput()
+        => input = null;
+
+    public DrawDescription Update(
+        EffectDescription effectDescription)
+    {
+        var frame = effectDescription.ItemPosition.Frame;
+        var length = effectDescription.ItemDuration.Frame;
+        var fps = effectDescription.FPS;
+
+        var x = item.X.GetValue(frame, length, fps);
+
+        var draw = effectDescription.DrawDescription;
+
+        return draw with
+        {
+            Draw = new(
+                draw.Draw.X + (float)x,
+                draw.Draw.Y,
+                draw.Draw.Z)
+        };
+    }
+
+    public void Dispose()
+    {
+    }
+}
+```
+
+これは**現在の公式sample系統に近い最小route**です。
+
+---
+
+## 33.6 `VideoEffectProcessorBase` を使うRecipe
+
+D2D effect chainを持つ場合、現在のYMM4 Communityでは `VideoEffectProcessorBase` を使う実装も多数あります。
+
+Effect側:
+
+```csharp
+public override IVideoEffectProcessor CreateVideoEffect(
+    IGraphicsDevicesAndContext devices)
+    => new BlurProcessor(devices, this);
+```
+
+Processor例:
+
+```csharp
+using Vortice.Direct2D1;
+using Vortice.Direct2D1.Effects;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Player.Video;
+using YukkuriMovieMaker.Player.Video.Effects;
+
+namespace MyPlugin;
+
+public sealed class BlurProcessor(
+    IGraphicsDevicesAndContext devices,
+    BlurEffect item)
+    : VideoEffectProcessorBase(devices)
+{
+    GaussianBlur? effect;
+
+    protected override ID2D1Image? CreateEffect(
+        IGraphicsDevicesAndContext devices)
+    {
+        effect = new GaussianBlur(devices.DeviceContext);
+        disposer.Collect(effect);
+
+        var output = effect.Output;
+        disposer.Collect(output);
+
+        return output;
+    }
+
+    protected override void setInput(ID2D1Image? input)
+    {
+        effect?.SetInput(0, input, true);
+    }
+
+    protected override void ClearEffectChain()
+    {
+        effect?.SetInput(0, null, true);
+    }
+
+    public override DrawDescription Update(
+        EffectDescription effectDescription)
+    {
+        if (effect is null)
+            return effectDescription.DrawDescription;
+
+        var frame = effectDescription.ItemPosition.Frame;
+        var length = effectDescription.ItemDuration.Frame;
+        var fps = effectDescription.FPS;
+
+        effect.StandardDeviation =
+            (float)item.Blur.GetValue(frame, length, fps);
+
+        return effectDescription.DrawDescription;
+    }
+}
+```
+
+### 重要
+
+`CreateEffect()` がbase constructor中に呼ばれる設計では、derived constructor bodyで後から代入するfieldへ依存しないでください。
+
+上の例では `CreateEffect()` は `devices` だけでresourceを作り、`item` は通常の `Update()` で使っています。
+
+---
+
+## 33.7 最小AudioEffect
+
+### Effect
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Controls;
+using YukkuriMovieMaker.Exo;
+using YukkuriMovieMaker.Player.Audio.Effects;
+using YukkuriMovieMaker.Plugin.Effects;
+
+namespace MyPlugin;
+
+[AudioEffect("音量サンプル", ["サンプル"], [])]
+public sealed class GainEffect : AudioEffectBase
+{
+    public override string Label => "音量サンプル";
+
+    [Display(Name = "音量")]
+    [AnimationSlider("F0", "%", 0, 100)]
+    public Animation Volume { get; }
+        = new(100, 0, 100);
+
+    public override IAudioEffectProcessor CreateAudioEffect(
+        TimeSpan duration)
+        => new GainProcessor(this, duration);
+
+    public override IEnumerable<string> CreateExoAudioFilters(
+        int keyFrameIndex,
+        ExoOutputDescription exoOutputDescription)
+        => [];
+
+    protected override IEnumerable<IAnimatable> GetAnimatables()
+        => [Volume];
+}
+```
+
+### Processor
+
+```csharp
+using YukkuriMovieMaker.Player.Audio.Effects;
+
+namespace MyPlugin;
+
+public sealed class GainProcessor : AudioEffectProcessorBase
+{
+    readonly GainEffect item;
+    readonly TimeSpan duration;
+
+    public GainProcessor(
+        GainEffect item,
+        TimeSpan duration)
+    {
+        this.item = item;
+        this.duration = duration;
+    }
+
+    public override int Hz => Input?.Hz ?? 0;
+
+    public override long Duration
+        => (long)(duration.TotalSeconds * Hz) * 2;
+
+    protected override void seek(long position)
+    {
+        Input?.Seek(position);
+    }
+
+    protected override int read(
+        float[] destBuffer,
+        int offset,
+        int count)
+    {
+        var read = Input?.Read(
+            destBuffer,
+            offset,
+            count) ?? 0;
+
+        for (var i = 0; i + 1 < read; i += 2)
+        {
+            var volume = (float)item.Volume.GetValue(
+                (Position + i) / 2,
+                Duration / 2,
+                Hz) / 100f;
+
+            destBuffer[offset + i] *= volume;
+            destBuffer[offset + i + 1] *= volume;
+        }
+
+        return read;
+    }
+}
+```
+
+### 最初の注意
+
+公式sampleはstereo interleaved dataを前提にしています。
+
+別channel構成やresamplingを扱うなら、ここから先は別設計です。
+
+---
+
+## 33.8 最小FileSource
+
+### Video FileSource Plugin
+
+```csharp
+using System.IO;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Plugin.FileSource;
+
+namespace MyPlugin;
+
+public sealed class MyVideoSourcePlugin
+    : IVideoFileSourcePlugin
+{
+    public string Name => "My Video Source";
+
+    public IVideoFileSource? CreateVideoFileSource(
+        IGraphicsDevicesAndContext devices,
+        string filePath)
+    {
+        if (Path.GetExtension(filePath)
+            .Equals(".myvideo",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return new MyVideoSource(devices);
+        }
+
+        return null;
+    }
+}
+```
+
+Sourceの最低shape:
+
+```csharp
+using Vortice.Direct2D1;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Plugin.FileSource;
+
+namespace MyPlugin;
+
+public sealed class MyVideoSource
+    : IVideoFileSource
+{
+    readonly ID2D1Bitmap bitmap;
+
+    public MyVideoSource(
+        IGraphicsDevicesAndContext devices)
+    {
+        bitmap = devices.DeviceContext
+            .CreateEmptyBitmap(1920, 1080);
+    }
+
+    public TimeSpan Duration
+        => TimeSpan.FromSeconds(1);
+
+    public ID2D1Image Output => bitmap;
+
+    public void Update(TimeSpan time)
+    {
+    }
+
+    public int GetFrameIndex(TimeSpan time)
+        => 0;
+
+    public void Dispose()
+    {
+        bitmap.Dispose();
+    }
+}
+```
+
+### Audio FileSource Plugin
+
+Plugin側の入口は:
+
+```csharp
+public sealed class MyAudioSourcePlugin
+    : IAudioFileSourcePlugin
+{
+    public string Name => "My Audio Source";
+
+    public IAudioFileSource? CreateAudioFileSource(
+        string filePath,
+        int audioTrackIndex)
+    {
+        // 対応fileならIAudioFileSourceを返す
+        return null;
+    }
+}
+```
+
+`IAudioFileSource` では主に:
+
+- `Duration`
+- `Hz`
+- `Read(...)`
+- `Seek(TimeSpan)`
+- `Dispose()`
+
+を実装します。
+
+### FileSource共通の考え方
+
+```text
+Plugin/factory
+  -> このfileを自分が読めるか判断
+  -> 読めるならSourceを返す
+  -> 読めないならnull
+
+Source
+  -> 実際のmedia read / render
+  -> resource ownership
+  -> Dispose
+```
+
+と分けると整理しやすいです。
+
+---
+
+## RecipeをAIへ渡すときのおすすめ指示
+
+```text
+Manualの該当Starter Recipeを最小骨格として使ってください。
+
+Recipeを完成仕様だとは扱わず、
+今回の要件に必要な部分だけ変更してください。
+
+不要なReflection/Harmony、独自永続化、最適化、追加dependencyは入れないでください。
+
+まず最小構成でbuild/loadを通し、
+その後に機能を1つずつ追加してください。
+```
+
+Plugin制作の最初の目標は、
+
+> **高機能にすることではなく、正しいsurfaceでYMM4にloadされる最小Pluginを作ること**
+
+です。
+
 
 ---
 
