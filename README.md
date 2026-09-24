@@ -1,5 +1,19 @@
 # Chat Native Work Lab
 
+## YMM4 Plugin AI Manual
+
+YMM4プラグインをChatGPT / Codex / ClaudeなどのコーディングAIと一緒に開発する人向けに、配布用の入口を用意しています。
+
+- **[YMM4 Plugin AI Manual](docs/YMM4_PLUGIN_AI_MANUAL.md)** — まず読む本体
+- **[YMM4 Plugin AI Prompt](docs/YMM4_PLUGIN_AI_PROMPT.md)** — AIへそのまま渡せる初期指示
+- **[YMM4 AI Knowledge Index](docs/YMM4_AI_KNOWLEDGE_INDEX.md)** — 実機検証済み知見を探す索引
+
+このLab自体がEvidence倉庫です。実験結果はmainへのmerge有無ではなく、tested SHA / YMM4 version / PASS assertions / run / artifact / boundaryで評価します。
+
+> この資料は非公式です。YMM4公式ドキュメント・公式サンプルを置き換えるものではなく、AI開発時にそれらと実機Evidenceを混同しないための補助資料です。
+
+---
+
 Public experiment lab for testing how far chat-driven development can go when GitHub Actions is used as a target-native validation environment.
 
 The main question is not merely whether code builds. The lab asks whether a chat-driven workflow can:
