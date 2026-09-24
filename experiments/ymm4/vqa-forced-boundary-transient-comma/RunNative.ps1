@@ -88,7 +88,9 @@ try {
 
     $forcedText='これは、テスト音声です実、験のために生成しました。'
     $audioQuery=@($requests|Where-Object {
-      $_.method-eq'POST' -and $_.path-eq'/audio_query' -and $_.query.text[0]-eq$forcedText
+      if($_.method-ne'POST' -or $_.path-ne'/audio_query'){ return $false }
+      $textValues=@($_.query.text)
+      return $textValues.Count-gt0 -and $textValues[0]-eq$forcedText
     })
     if($audioQuery.Count-lt1){throw 'Transient forced-boundary text never reached /audio_query'}
 
