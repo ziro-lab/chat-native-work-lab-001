@@ -255,12 +255,11 @@ internal static class CommandProof
             bool seekWorked = seekNextCan && seekPrevCan && seekNext == seekStart + 1 && seekBack == seekStart;
 
             // C. A selected-item editing command (split) through the same route.
-            var splitFixture = new VoiceItem(new Character { Name = "CNWL_CommandSplit" })
+            var splitFixture = new TachieFaceItem(new Character { Name = "CNWL_CommandSplit" })
             {
                 Frame = 300,
                 Length = 100,
                 Layer = 5,
-                Serif = "command tile split fixture",
                 Remark = "CNWL_SPLIT_FIXTURE"
             };
             undo.Record();
