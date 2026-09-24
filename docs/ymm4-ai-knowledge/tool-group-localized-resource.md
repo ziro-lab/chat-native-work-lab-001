@@ -1,6 +1,7 @@
 # Tool Plugin existing Utilities group should use the localized resource
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: LAB-NATIVE + REFERENCE-IMPLEMENTATION
 - Surface: S1
 - YMM4 version: 4.55.1.1 Lite
