@@ -7,7 +7,8 @@ A knowledge card is an index/summary layer. The original official source, refere
 ```md
 # <short claim name>
 
-- Status: canonical / candidate / deprecated
+- Status: evidence-qualified / candidate / deprecated
+- Repository state: main / closed-unmerged PR / open PR / Draft PR / stacked branch
 - Knowledge class: OFFICIAL-CONTRACT / OFFICIAL-SAMPLE / REFERENCE-IMPLEMENTATION / LAB-STATIC / LAB-NATIVE / LAB-MANUAL / NEGATIVE-FINDING / CANDIDATE
 - Surface: S1 / S2 / S3 / S4 / n/a
 - YMM4 version: <exact version, range, or "current public contract">
@@ -91,6 +92,10 @@ Examples:
 
 Do not ask an agent to guess a replacement private member.
 
-### Keep open PRs non-canonical
+### Treat merge state as provenance, not an evidence gate
 
-A Draft/open experiment may be listed as a candidate, but do not write it as a canonical fact until its evidence is accepted into the Lab's canonical record.
+A Draft/open experiment may be written as **evidence-qualified** when its exact tested source, host, assertions, PASS boundary and evidence identity are strong enough for reuse.
+
+Always record the PR/branch state and exact tested source SHA.
+
+Keep it as **candidate** when the result is still exploratory, lacks a final PASS boundary/evidence identity, has unresolved contradictory runs, or is explicitly awaiting a later gate that changes the same claim.
