@@ -78,6 +78,7 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Class: LAB-NATIVE
 - Reusable fact: the Lab records YMM4 4.55.1.1 Tool Plugin group-key behavior and the existing Utilities-group route.
 - Important negative finding: a literal language-specific group label is not equivalent to joining the host's localized existing group.
+- Knowledge card: [Tool Plugin existing Utilities group should use the localized resource](ymm4-ai-knowledge/tool-group-localized-resource.md)
 - Evidence: [tool-group-resolution](../experiments/ymm4/tool-group-resolution/)
 
 ### Preview refresh surface
@@ -86,6 +87,7 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Class: LAB-NATIVE
 - Reusable fact: the Lab records YMM4 4.55.1.1 plugin-facing preview-refresh surface plus `CurrentFrame` / `ScrollFrame` event observations.
 - Boundary: do not generalize this into a universal "set CurrentFrame = force preview refresh" guarantee without reading the experiment.
+- Knowledge card: [Timeline CurrentFrame change is not proof of visible preview repaint](ymm4-ai-knowledge/preview-refresh-public-boundary.md)
 - Evidence: [preview-refresh-surface](../experiments/ymm4/preview-refresh-surface/)
 
 ### Timeline input intent
@@ -93,6 +95,7 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Status: **Canonical**
 - Class: LAB-NATIVE
 - Reusable fact: the Lab records real input-route ordering for item click, re-click, blank, ruler, drag, keyboard and playback-style actions on YMM4 4.55.1.1.
+- Knowledge card: [CurrentFrame change alone is not user time-click intent](ymm4-ai-knowledge/currentframe-is-not-user-click-intent.md)
 - Evidence: [timeline-input-intent](../experiments/ymm4/timeline-input-intent/)
 
 ## Preview playback
