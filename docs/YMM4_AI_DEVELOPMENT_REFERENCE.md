@@ -19,6 +19,7 @@ Use this document together with:
 - [Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 - [Public and Reference Plugin Surfaces](YMM4_AI_P1_PLUGIN_SURFACES.md)
 - [Official Plugin Surface Map](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
+- [Canonical Host Behavior](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md)
 - [Implementation Guidance](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
 - [YMM4 AI Knowledge Card Template](YMM4_AI_KNOWLEDGE_CARD_TEMPLATE.md)
 - [Long-form Plugin Guide Triage](YMM4_AI_SEED_GUIDE_TRIAGE.md)
