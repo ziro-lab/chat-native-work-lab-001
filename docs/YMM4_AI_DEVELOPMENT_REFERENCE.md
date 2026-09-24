@@ -17,6 +17,7 @@ Use this document together with:
 - [YMM4 Observation Policy](YMM4_OBSERVATION_POLICY.md)
 - [YMM4 AI Knowledge Index](YMM4_AI_KNOWLEDGE_INDEX.md)
 - [YMM4 AI Knowledge Card Template](YMM4_AI_KNOWLEDGE_CARD_TEMPLATE.md)
+- [Long-form Plugin Guide Triage](YMM4_AI_SEED_GUIDE_TRIAGE.md)
 
 ## Why this exists
 
@@ -202,13 +203,13 @@ For current public contracts and samples, record the inspected date/commit when 
 
 ## Current status
 
-**v0 scaffold**
+**v0 curation in progress**
 
-This first version establishes the knowledge model and index structure. It intentionally does not copy every existing Lab observation or every line of a long-form plugin guide.
+The knowledge model and index structure are established. The long-form plugin guide now has a section-by-section triage in [YMM4_AI_SEED_GUIDE_TRIAGE.md](YMM4_AI_SEED_GUIDE_TRIAGE.md), and the first canonical Lab findings have been extracted into narrow knowledge cards under `docs/ymm4-ai-knowledge/`.
 
-Next useful work is incremental:
+Current next steps:
 
-1. curate high-value existing Lab observations into knowledge cards/index entries;
-2. import the plugin-development guide section-by-section with provenance labels;
-3. add negative findings from completed experiments;
+1. verify and extract the P0 development baseline against current official documentation/samples;
+2. extract the high-value public Tool / PropertyEditor / Effect surfaces without widening lifecycle claims;
+3. continue promoting canonical Lab negative findings into cards;
 4. keep open/Draft PR results out of the canonical index until their evidence is accepted.
