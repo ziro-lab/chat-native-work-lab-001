@@ -10,6 +10,17 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - **Candidate** entries may exist in open/Draft work but are not promoted here as reusable facts.
 - All undocumented host behavior is version-sensitive unless the underlying evidence explicitly says otherwise.
 
+## Reference layers
+
+Use these in order:
+
+1. **P0 — Official baseline:** [YMM4_AI_P0_OFFICIAL_BASELINE.md](YMM4_AI_P0_OFFICIAL_BASELINE.md)
+2. **P1/P1B — Public/reference surfaces:** [YMM4_AI_P1_PLUGIN_SURFACES.md](YMM4_AI_P1_PLUGIN_SURFACES.md) / [YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
+3. **P2 — Canonical host behavior:** [YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md](YMM4_AI_P2_CANONICAL_HOST_BEHAVIOR.md)
+4. **P3 — Implementation guidance:** [YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
+
+A coding agent should not skip directly from a desired feature to P3 optimization/internal techniques before resolving P0/P1/P2.
+
 ## Current official development baseline
 
 - Status: **Canonical public/reference baseline**
