@@ -1,6 +1,7 @@
 # Template clone fidelity and Character rebinding are separate concerns
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: LAB-NATIVE
 - Surface: S1
 - YMM4 version: 4.55.1.1 Lite
