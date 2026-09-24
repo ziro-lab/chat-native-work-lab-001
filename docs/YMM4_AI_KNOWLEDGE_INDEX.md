@@ -41,14 +41,14 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Reference-first discovery
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: policy / reference discovery
 - Use: before creating a new native-host probe, check official docs, official samples, shipped/community source, API index, notes and existing implementations.
 - Source: [YMM4 Reference Sources](YMM4_REFERENCE_SOURCES.md)
 
 ### Dependency-risk ladder
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: integration policy
 - Rule: `S1 public plugin API -> S2 public host/WPF -> S3 bounded reflection -> S4 Harmony/non-public internals`.
 - Source: [YMM4 Plugin Surface Guide](YMM4_PLUGIN_SURFACE_GUIDE.md)
@@ -57,14 +57,14 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Timeline selection context
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE / version-pinned observation
 - Reusable fact: the Lab contains a real-host proof for public Timeline selection state, Character context and selection-change observation.
 - Evidence: [timeline-selection-context](../experiments/ymm4/timeline-selection-context/)
 
 ### Playhead quick drop
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE / version-pinned observation
 - Reusable fact: the Lab contains proof for public playhead access, independent Template cloning and intrinsic-length placement.
 - Related clone card: [Template clone fidelity and Character rebinding are separate concerns](ymm4-ai-knowledge/template-clone-character-rebind.md)
@@ -72,14 +72,14 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Character-relative layer placement
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE / version-pinned observation
 - Reusable fact: the Lab records same-Character Front/Back baselines and full-span Layer collision behavior.
 - Evidence: [character-layer-placement](../experiments/ymm4/character-layer-placement/)
 
 ### ItemTemplate identity
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: NEGATIVE-FINDING + LAB-NATIVE
 - Reusable fact: `SceneId` is not a unique restart-persistent ItemTemplate identity in the tested behavior.
 - Safe use: do not design durable template identity around `SceneId` alone.
@@ -88,7 +88,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Tool group localization
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE
 - Reusable fact: the Lab records YMM4 4.55.1.1 Tool Plugin group-key behavior and the existing Utilities-group route.
 - Important negative finding: a literal language-specific group label is not equivalent to joining the host's localized existing group.
@@ -97,7 +97,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Preview refresh surface
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE
 - Reusable fact: the Lab records YMM4 4.55.1.1 plugin-facing preview-refresh surface plus `CurrentFrame` / `ScrollFrame` event observations.
 - Boundary: do not generalize this into a universal "set CurrentFrame = force preview refresh" guarantee without reading the experiment.
@@ -106,7 +106,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Timeline input intent
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE
 - Reusable fact: the Lab records real input-route ordering for item click, re-click, blank, ruler, drag, keyboard and playback-style actions on YMM4 4.55.1.1.
 - Knowledge card: [CurrentFrame change alone is not user time-click intent](ymm4-ai-knowledge/currentframe-is-not-user-click-intent.md)
@@ -142,7 +142,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Split replaces the original object
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE + NEGATIVE-FINDING
 - Reusable fact: on YMM4 4.56.1.0 Lite, public Timeline split replaced the original VideoItem with two new objects while preserving tested metadata/source semantics.
 - Knowledge card: [VideoItem split replaces the original object](ymm4-ai-knowledge/videoitem-split-replaces-original.md)
@@ -150,7 +150,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Edit rebinding is not object identity or source range alone
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE + NEGATIVE-FINDING
 - Reusable fact: trim/move/split/UndoRedo/copy-paste observations show that neither object identity alone nor source identity + source range alone is a universal durable Timeline occurrence locator.
 - Knowledge card: [VideoItem edit rebinding cannot rely on object identity or source range alone](ymm4-ai-knowledge/videoitem-edit-rebind-not-object-or-source-alone.md)
@@ -160,7 +160,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Preview playback-rate surface
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-STATIC / native observations as recorded by experiment
 - Reusable fact: the v4.56.1.0 inspected preview PlaybackRate path is not statically capped at 8x; the experiment defines the remaining public-Lab reproduction boundary.
 - Evidence: [preview-playback-rate](../experiments/ymm4/preview-playback-rate/)
@@ -169,7 +169,7 @@ A coding agent should not skip directly from a desired feature to P3 optimizatio
 
 ### Bundled FFmpeg public locator
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE + LAB-STATIC
 - Reusable fact: YMM4 4.56.1.0 Lite x64 bundled ffmpeg/ffprobe, and an in-host Plugin resolved FFmpeg through the public `FFmpegResourceLocator`.
 - Knowledge card: [YMM4 bundled FFmpeg has a public in-host locator on the tested host](ymm4-ai-knowledge/ffmpeg-bundled-public-locator.md)
@@ -181,21 +181,21 @@ The recording-archive chain contains several reusable facts. Read the individual
 
 ### Live project should remain read-only during archive generation
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE
 - Reusable fact: the tested live `SaveProject(archive)` route changes live project/path state; the accepted archive spine uses detached project loading/mutation/serialization instead.
 - Evidence index: [YMM4 experiments](../experiments/ymm4/README.md#recording-archive-investigation--ymm4-v45610)
 
 ### PlaybackRate2 is the authoritative speed surface in the tested archive path
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-NATIVE / LAB-STATIC chain
 - Reusable fact: the recording-archive evidence treats `PlaybackRate2` as authoritative and legacy `BaseItem.PlaybackRate` as obsolete.
 - Evidence index: [YMM4 experiments](../experiments/ymm4/README.md#recording-archive-investigation--ymm4-v45610)
 
 ### ContentLength is not consumed source range
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: NEGATIVE-FINDING + LAB-NATIVE
 - Reusable fact: in tested 50/100/200% + ContentOffset cases, `ContentLength` remained media duration and was not suitable as source-range planning data.
 - Knowledge card: [VideoItem ContentLength is not consumed source range](ymm4-ai-knowledge/videoitem-contentlength-not-source-range.md)
@@ -203,7 +203,7 @@ The recording-archive chain contains several reusable facts. Read the individual
 
 ### PlaybackRateMap participates in source-time mapping
 
-- Status: **Canonical**
+- Status: **Evidence-qualified**
 - Class: LAB-STATIC + LAB-NATIVE
 - Reusable fact: the tested native video path routes source-time calculation through `PlaybackRateMap`; constant positive rates were proven with forward/inverse mapping inside the experiment's interval boundary.
 - Knowledge card: [PlaybackRateMap constant positive source-time mapping](ymm4-ai-knowledge/playbackratemap-constant-source-time.md)
