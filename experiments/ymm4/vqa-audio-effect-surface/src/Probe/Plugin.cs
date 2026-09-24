@@ -568,6 +568,10 @@ internal static class Probe
                 reloadPublicEnumerable
                 && restoredEffects.Length == 1);
 
+            var reloadedSerifBeforeRemove = reloaded.Serif;
+            var reloadedHatsuonBeforeRemove = reloaded.Hatsuon;
+            var reloadedFileBeforeRemove = reloaded.FilePath;
+
             string? removeError = null;
             var removed = restored is not null
                 && reloadProperty is not null
@@ -581,9 +585,9 @@ internal static class Probe
                     .OfType<ProbeAudioEffect>().Any());
 
             Check("remove_preserves_ordinary_voice_source",
-                reloaded.Serif == beforeSerif
-                && reloaded.Hatsuon == beforeHatsuon
-                && reloaded.FilePath == beforeFile);
+                reloaded.Serif == reloadedSerifBeforeRemove
+                && reloaded.Hatsuon == reloadedHatsuonBeforeRemove
+                && reloaded.FilePath == reloadedFileBeforeRemove);
 
             var legacy = DescribeLegacySubtitleSurface(reloaded);
 
@@ -923,16 +927,59 @@ internal static class Probe
 
         await Task.Delay(500);
 
+        // The Item Editor is scrollable and lower groups can remain unrealized
+        // until they enter the viewport. Use only public WPF surfaces here:
+        // force visible ScrollViewers to their end, then expand audio/effect groups.
+        foreach (Window window in Application.Current.Windows)
+        {
+            foreach (var viewer in EnumerateVisual(window).OfType<ScrollViewer>())
+            {
+                try
+                {
+                    if (viewer.IsVisible && viewer.ScrollableHeight > 0)
+                    {
+                        viewer.ScrollToVerticalOffset(viewer.ScrollableHeight);
+                        viewer.UpdateLayout();
+                    }
+                }
+                catch { }
+            }
+        }
+
+        await Task.Delay(250);
+
         foreach (Window window in Application.Current.Windows)
         {
             foreach (var expander in EnumerateVisual(window).OfType<Expander>())
             {
                 var header = expander.Header?.ToString() ?? "";
                 if (header.Contains(ProbeAudioEffect.DisplayLabel, StringComparison.Ordinal)
-                    || header.Contains("音声エフェクト", StringComparison.Ordinal))
+                    || header.Contains("音声", StringComparison.Ordinal)
+                    || header.Contains("Audio", StringComparison.OrdinalIgnoreCase)
+                    || header.Contains("エフェクト", StringComparison.Ordinal)
+                    || header.Contains("Effect", StringComparison.OrdinalIgnoreCase))
                 {
                     expander.IsExpanded = true;
+                    try { expander.UpdateLayout(); } catch { }
                 }
+            }
+        }
+
+        await Task.Delay(250);
+
+        foreach (Window window in Application.Current.Windows)
+        {
+            foreach (var viewer in EnumerateVisual(window).OfType<ScrollViewer>())
+            {
+                try
+                {
+                    if (viewer.IsVisible && viewer.ScrollableHeight > 0)
+                    {
+                        viewer.ScrollToVerticalOffset(viewer.ScrollableHeight);
+                        viewer.UpdateLayout();
+                    }
+                }
+                catch { }
             }
         }
 
