@@ -18,6 +18,7 @@ Use this document together with:
 - [YMM4 AI Knowledge Index](YMM4_AI_KNOWLEDGE_INDEX.md)
 - [Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 - [Public and Reference Plugin Surfaces](YMM4_AI_P1_PLUGIN_SURFACES.md)
+- [Official Plugin Surface Map](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
 - [YMM4 AI Knowledge Card Template](YMM4_AI_KNOWLEDGE_CARD_TEMPLATE.md)
 - [Long-form Plugin Guide Triage](YMM4_AI_SEED_GUIDE_TRIAGE.md)
 
@@ -80,6 +81,21 @@ A coding agent using this repository should follow this order:
 8. Preserve negative findings; do not retry disproved routes without a new reason.
 9. When behavior is ambiguous or a version-sensitive route cannot be resolved, fail closed rather than inventing host semantics.
 10. Product integration must still run its own acceptance when failure matters.
+
+## Source-conflict rule
+
+Do not flatten every “official” or “community” source into one authority level.
+
+Choose evidence by the question being answered:
+
+- **exact symbol/signature/compile shape** -> current implementation/API/assembly evidence;
+- **intended setup/workflow** -> current official documentation/sample guidance;
+- **undocumented runtime behavior** -> version-pinned Lab evidence;
+- **product behavior** -> downstream product acceptance.
+
+When sources disagree, keep the disagreement visible. Do not silently rewrite one source to make the set look consistent.
+
+A concrete current example is the official VideoSource sample: its README says `IVideoSourcePlugin`, while the implementation and current API index use `IVideoFileSourcePlugin`.
 
 ## Language for claims
 
