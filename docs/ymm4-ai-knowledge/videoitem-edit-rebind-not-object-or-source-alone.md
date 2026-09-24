@@ -1,6 +1,7 @@
 # VideoItem edit rebinding cannot rely on object identity or source range alone
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: LAB-NATIVE + NEGATIVE-FINDING
 - Surface: S1
 - YMM4 version: 4.56.1.0 Lite
