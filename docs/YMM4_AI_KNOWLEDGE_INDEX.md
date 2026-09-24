@@ -23,6 +23,7 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Class: OFFICIAL-SAMPLE + public/API-index + REFERENCE-IMPLEMENTATION
 - Covers: Tool member requirements/defaults, custom PropertyEditor baseline, official `IVideoEffectProcessor` route, shipped/community `VideoEffectProcessorBase` route, AudioEffect processor shape, Animation evaluation boundaries.
 - Source: [YMM4 AI P1 — Public and Reference Plugin Surfaces](YMM4_AI_P1_PLUGIN_SURFACES.md)
+- Official category/interface map: [YMM4 AI P1B — Official Plugin Surface Map](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
 
 ## Development and reference discovery
 
@@ -54,6 +55,7 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Status: **Canonical**
 - Class: LAB-NATIVE / version-pinned observation
 - Reusable fact: the Lab contains proof for public playhead access, independent Template cloning and intrinsic-length placement.
+- Related clone card: [Template clone fidelity and Character rebinding are separate concerns](ymm4-ai-knowledge/template-clone-character-rebind.md)
 - Evidence: [playhead-quick-drop](../experiments/ymm4/playhead-quick-drop/)
 
 ### Character-relative layer placement
@@ -98,6 +100,24 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Knowledge card: [CurrentFrame change alone is not user time-click intent](ymm4-ai-knowledge/currentframe-is-not-user-click-intent.md)
 - Evidence: [timeline-input-intent](../experiments/ymm4/timeline-input-intent/)
 
+## VideoItem edit lifecycle
+
+### Split replaces the original object
+
+- Status: **Canonical**
+- Class: LAB-NATIVE + NEGATIVE-FINDING
+- Reusable fact: on YMM4 4.56.1.0 Lite, public Timeline split replaced the original VideoItem with two new objects while preserving tested metadata/source semantics.
+- Knowledge card: [VideoItem split replaces the original object](ymm4-ai-knowledge/videoitem-split-replaces-original.md)
+- Evidence: [videoitem-split-lifecycle](../experiments/ymm4/videoitem-split-lifecycle/)
+
+### Edit rebinding is not object identity or source range alone
+
+- Status: **Canonical**
+- Class: LAB-NATIVE + NEGATIVE-FINDING
+- Reusable fact: trim/move/split/UndoRedo/copy-paste observations show that neither object identity alone nor source identity + source range alone is a universal durable Timeline occurrence locator.
+- Knowledge card: [VideoItem edit rebinding cannot rely on object identity or source range alone](ymm4-ai-knowledge/videoitem-edit-rebind-not-object-or-source-alone.md)
+- Evidence: [videoitem-edit-rebinding](../experiments/ymm4/videoitem-edit-rebinding/)
+
 ## Preview playback
 
 ### Preview playback-rate surface
@@ -106,6 +126,16 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Class: LAB-STATIC / native observations as recorded by experiment
 - Reusable fact: the v4.56.1.0 inspected preview PlaybackRate path is not statically capped at 8x; the experiment defines the remaining public-Lab reproduction boundary.
 - Evidence: [preview-playback-rate](../experiments/ymm4/preview-playback-rate/)
+
+## Host-bundled resources
+
+### Bundled FFmpeg public locator
+
+- Status: **Canonical**
+- Class: LAB-NATIVE + LAB-STATIC
+- Reusable fact: YMM4 4.56.1.0 Lite x64 bundled ffmpeg/ffprobe, and an in-host Plugin resolved FFmpeg through the public `FFmpegResourceLocator`.
+- Knowledge card: [YMM4 bundled FFmpeg has a public in-host locator on the tested host](ymm4-ai-knowledge/ffmpeg-bundled-public-locator.md)
+- Evidence: [ffmpeg-bundle-surface](../experiments/ymm4/ffmpeg-bundle-surface/)
 
 ## Recording/archive and source-time mapping
 
