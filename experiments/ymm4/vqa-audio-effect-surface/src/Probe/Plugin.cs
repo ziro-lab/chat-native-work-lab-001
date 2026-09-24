@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using YukkuriMovieMaker.Commons;
@@ -174,8 +175,199 @@ internal static class Probe
 
         scheduled = true;
         Application.Current.Dispatcher.BeginInvoke(
-            new Action(() => Log("fallback bootstrap active")),
+            new Action(Start),
             DispatcherPriority.ApplicationIdle);
+    }
+
+    static void Start()
+    {
+        Log("fallback bootstrap active");
+
+        var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle)
+        {
+            Interval = TimeSpan.FromMilliseconds(400)
+        };
+
+        int ticks = 0;
+        bool created = false;
+        bool openAttempted = false;
+
+        timer.Tick += (_, _) =>
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(output, "result.json")))
+                {
+                    timer.Stop();
+                    return;
+                }
+
+                ticks++;
+
+                foreach (Window window in Application.Current.Windows)
+                {
+                    var main = window.DataContext;
+                    if (main?.GetType().FullName
+                        != "YukkuriMovieMaker.ViewModels.MainViewModel")
+                    {
+                        continue;
+                    }
+
+                    var active = main.GetType().GetProperty(
+                        "ActiveTimelineViewModel",
+                        BindingFlags.Instance
+                        | BindingFlags.Public
+                        | BindingFlags.NonPublic)
+                        ?.GetValue(main);
+
+                    if (active is null && !created)
+                    {
+                        created = true;
+                        main.GetType().GetMethod(
+                            "CreateProject",
+                            Type.EmptyTypes)
+                            ?.Invoke(main, null);
+                        continue;
+                    }
+
+                    if (active is null)
+                        continue;
+
+                    var prop = main.GetType().GetProperty(
+                        "ToolMenuItems",
+                        BindingFlags.Instance
+                        | BindingFlags.Public
+                        | BindingFlags.NonPublic);
+
+                    if (prop?.GetValue(main) is not IEnumerable items)
+                        continue;
+
+                    var found = new Dictionary<string, object>();
+                    foreach (var item in items.Cast<object>())
+                        VisitToolMenu(item, found, 0);
+
+                    if (!found.TryGetValue(
+                        "CNWL VQA Audio Effect Gate",
+                        out var target))
+                    {
+                        continue;
+                    }
+
+                    Log("target tool menu item observed");
+
+                    if (!openAttempted)
+                    {
+                        openAttempted = true;
+                        Log("target invoke=" + TryInvokeTool(target));
+                    }
+                }
+
+                if (ticks >= 100)
+                {
+                    timer.Stop();
+                    Write(
+                        "FAIL_VQA_AUDIO_EFFECT_SURFACE",
+                        "Host did not deliver TimelineToolInfo before timeout.");
+                }
+            }
+            catch (Exception ex)
+            {
+                timer.Stop();
+                Write(
+                    "FAIL_VQA_AUDIO_EFFECT_SURFACE",
+                    ex.ToString());
+            }
+        };
+
+        timer.Start();
+    }
+
+    static void VisitToolMenu(
+        object item,
+        Dictionary<string, object> found,
+        int depth)
+    {
+        if (depth > 8)
+            return;
+
+        var type = item.GetType();
+        string? label = null;
+
+        foreach (var name in new[] { "Header", "Title", "Name" })
+        {
+            try
+            {
+                var value = type.GetProperty(name)
+                    ?.GetValue(item)
+                    ?.ToString();
+
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    label = value;
+                    break;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (label == "CNWL VQA Audio Effect Gate")
+            found[label] = item;
+
+        foreach (var childName in new[] { "Children", "Items" })
+        {
+            try
+            {
+                if (type.GetProperty(childName)?.GetValue(item)
+                    is IEnumerable children)
+                {
+                    foreach (var child in children.Cast<object>())
+                        VisitToolMenu(child, found, depth + 1);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    static bool TryInvokeTool(object item)
+    {
+        if (item is ICommand direct
+            && direct.CanExecute(null))
+        {
+            direct.Execute(null);
+            return true;
+        }
+
+        foreach (var property in item.GetType()
+            .GetProperties(
+                BindingFlags.Instance
+                | BindingFlags.Public
+                | BindingFlags.NonPublic))
+        {
+            try
+            {
+                if (property.GetIndexParameters().Length == 0
+                    && property.GetValue(item) is ICommand command)
+                {
+                    foreach (var parameter in new object?[] { null, item })
+                    {
+                        if (command.CanExecute(parameter))
+                        {
+                            command.Execute(parameter);
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
     }
 
     internal static void Accept(TimelineToolInfo info)
