@@ -1,6 +1,7 @@
 # Timeline CurrentFrame change is not proof of visible preview repaint
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: LAB-NATIVE + NEGATIVE-FINDING
 - Surface: S1 / S2 observation boundary
 - YMM4 version: 4.55.1.1 Lite
