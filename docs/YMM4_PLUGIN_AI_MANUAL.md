@@ -30,28 +30,143 @@
 
 ---
 
-# まずAIにこれを渡す
+# 0. AI Lazy Read Protocol — 最初にここだけ読む
 
-このファイルをAIへ添付したあと、次の指示を最初に渡してください。
+このManualは**最初から最後まで通読する前提ではありません。**
 
-```text
-添付した「YMM4 Plugin AI Manual」を、この開発の基準資料として使用してください。
+AIはまずこの章だけを読み、ユーザー要件から必要な章を選んでください。  
+**関係ない章を先読みしない**ことを推奨します。
 
-以下を守ってください。
+## Core Rules — 常時適用
+
+以下だけは全タスクで適用してください。
 
 1. 現在のYMM4公開API・公式サンプルを優先する。
-2. 実装面は Public Plugin API → Public Host/WPF → 限定Reflection → Harmony/非公開内部 の順に検討する。
-3. APIが存在することと、期待する実行時挙動が保証されることを混同しない。
+2. 実装面は **Public Plugin API → Public Host/WPF → 限定Reflection → Harmony/非公開内部** の順に検討する。
+3. APIが存在することと、期待するruntime behaviorが保証されることを混同しない。
 4. undocumentedなYMM4挙動を推測で固定しない。
-5. 公式READMEと公式実装コード/APIが食い違う場合は、不一致を明示する。型名・signatureは現在の実装/APIを優先する。
-6. Reflectionを使う場合は、対象YMM4版・正確な型・正確なmemberを限定し、見つからなければfail closedする。
+5. 公式READMEと公式実装/APIが食い違う場合は不一致を明示し、型名・signatureはcurrent implementation/APIを優先する。
+6. Reflectionはtarget YMM4 version・exact type・exact memberを限定し、見つからなければfail closedする。
 7. 似たprivate memberを推測で探して実行しない。
-8. Harmonyや非公開パッチは、公開面で実現できない理由がある場合だけ使う。
-9. 一般的なperformance optimizationはmeasure-firstとし、YMM4必須仕様として扱わない。
-10. build成功だけで完了にせず、機能に必要な実YMM4上の挙動、Undo/Redo、保存/再読込、ユーザー操作を確認する。
+8. Harmony/non-public patchは公開面で実現できない理由がある場合だけ使う。
+9. performance optimizationはmeasure-first。
+10. build成功だけで完了にせず、機能に必要な実YMM4 acceptanceを確認する。
+11. 「確認済み」と書かれた挙動は、記載されたYMM4版・条件の範囲だけで使う。
+12. 必要のない章は読まず、依存が発生した時点で追加ロードする。
 
-このManualに「確認済み」と書かれている挙動は、記載されたYMM4版と条件の範囲だけで利用してください。
-不明点は勝手に一般化せず、必要なら最小の検証コードに分離してください。
+---
+
+## 最初のRouting手順
+
+AIはユーザー要件を受けたら、実装前に短く次を決めてください。
+
+```text
+Plugin種別:
+必要なManual章:
+追加条件:
+- 保存/Project switch?
+- Undo/Redo/標準Command?
+- Timeline input/Preview?
+- Media source-time?
+- Reflection/Harmony?
+- FFmpeg?
+- D2D resource?
+- Performance hot path?
+- .ymme配布?
+```
+
+そのあと、下のRouting Tableで必要章だけ読んでください。
+
+---
+
+## Routing Table — 作るもの別
+
+| 作りたいもの | 最初に読む章 | 条件付きで追加 |
+| --- | --- | --- |
+| 新規project / build土台 | **1, 2, 3, 4** | 26, 29 |
+| Tool Plugin | **5** | 6, 7, 17, 21, 25, 29 |
+| Timeline Tool | **5, 17** | 6, 7, 18-21, 25, 29 |
+| Custom Property Editor | **8** | 7, 29 |
+| Video Effect | **9, 23** | 24, 29 |
+| Audio Effect | **10** | 11, 23, 29 |
+| VoiceItem補助 / AudioEffect保存 | **11** | 7, 12, 29 |
+| Voice / VOICEVOX系 | **12** | 11, 29 |
+| Video File Source | **13, 23** | 19, 20, 22, 24, 29 |
+| Audio File Source | **13** | 22, 24, 29 |
+| Image File Source | **13, 23** | 24, 29 |
+| Tachie Plugin | **14** | 15, 16, 23, 29 |
+| Template / Tachie配置 | **15, 16** | 5-7, 29 |
+| 長時間動画解析 / Navigator | **18, 19, 20** | 17, 22, 29 |
+| Layer折り畳み / 表示row変換 | **21** | 5, 17, 29 |
+| FFmpeg利用 | **22** | 13, 29 |
+| Direct2D / GPU resource | **23** | 9, 13, 24, 29 |
+| 性能改善だけが目的 | **24** | 対象機能章 |
+| 状態監視 / polling削減 | **25** | 5, 17 |
+| .ymme配布 | **26** | 29 |
+| AI生成コードのレビュー | **27** | 対象機能章, 29 |
+| 未確認YMM4挙動の調査 | **28** | 対象機能章 |
+| 完成前acceptance | **29** | 対象機能章 |
+| AIへ要件を渡す | **30** | 対象機能章 |
+| 出典確認 / Manual更新 | **31, 32** | 必要箇所のみ |
+
+---
+
+## Cross-cutting Trigger — 条件が出たら追加で読む
+
+タスク途中で次の条件が出た場合だけ追加章を読んでください。
+
+| 条件 | 追加章 |
+| --- | --- |
+| Projectごとに状態を保存したい | **6** |
+| Undo/Redo / Split / 標準操作を呼びたい | **7** |
+| 独自設定UIを作る | **8** |
+| VoiceItemに永続設定を持たせたい | **11** |
+| Pronounce / VOICEVOX再生成 | **12** |
+| Template/Characterのidentityが必要 | **15, 16** |
+| CurrentFrame / pointer intent / Preview同期 | **17** |
+| VideoItemのSplit/Trim/Move/Copy追跡 | **18** |
+| source rangeを計算する | **19, 20** |
+| Layer fold / display row | **21** |
+| FFmpeg/ffprobe | **22** |
+| D2D leak / resource再生成 | **23** |
+| 実測で性能問題が出た | **24** |
+| Timer/pollingを入れそう | **25** |
+| 配布installer/update | **26** |
+| AIの推論が怪しい | **27** |
+| YMM4挙動が未確認 | **28** |
+| 完成判定 | **29** |
+
+---
+
+## Lazy Readの停止条件
+
+必要章を読んだ時点で、以下が分かればそれ以上の章は読まなくて構いません。
+
+- 使用するPlugin/public surface
+- 必要なYMM4挙動
+- S1〜S4の依存レベル
+- 保存/UndoRedo/lifecycle要件
+- version-sensitiveな注意
+- 完成時に確認すべきacceptance
+
+逆に、実装中に新しい依存が発生したら、その時点で該当章だけ追加で読んでください。
+
+---
+
+## AIへ最初に渡す指示
+
+このファイルをAIへ添付したあと、次を渡してください。
+
+```text
+添付した「YMM4 Plugin AI Manual」を開発基準として使用してください。
+
+最初にManual全体を通読しないでください。
+まず「0. AI Lazy Read Protocol」だけを読み、要件から必要章をRoutingしてください。
+実装前に「参照予定章」を短く列挙し、その章だけ読んでください。
+途中で新しい依存条件が出た場合のみ、Cross-cutting Triggerに従って追加章を読んでください。
+
+Core Rulesは常時適用してください。
+Manualにないundocumented YMM4 behaviorは推測せず、必要なら最小の検証へ分離してください。
 ```
 
 その後に普通に要件を書きます。
@@ -63,6 +178,8 @@ YMM4 4.56系向けに、選択したアイテムの開始位置へ登録済み�
 できるだけ公開APIだけで実装したい。
 Undo/RedoもYMM4標準挙動へ乗せたい。
 ```
+
+この例なら、まず **5, 7** を読み、保存が必要になった時点で **6**、Timeline inputまで必要なら **17** を追加します。
 
 ---
 
