@@ -983,6 +983,75 @@ internal static class Probe
             }
         }
 
+        bool selectorListItemSelected = false;
+        bool selectorListItemVisible = false;
+
+        foreach (Window window in Application.Current.Windows)
+        {
+            foreach (var listBox in EnumerateVisual(window).OfType<ListBox>())
+            {
+                try
+                {
+                    var target = listBox.Items.Cast<object>()
+                        .FirstOrDefault(x => x is ProbeAudioEffect);
+                    if (target is null)
+                        continue;
+
+                    selectorListItemVisible =
+                        listBox.ItemContainerGenerator.ContainerFromItem(target)
+                            is ListBoxItem container
+                        && container.IsVisible;
+
+                    listBox.SelectedItem = target;
+                    listBox.UpdateLayout();
+
+                    if (listBox.ItemContainerGenerator.ContainerFromItem(target)
+                        is ListBoxItem selectedContainer)
+                    {
+                        selectedContainer.IsSelected = true;
+                        selectedContainer.Focus();
+                        selectedContainer.BringIntoView();
+                        selectedContainer.UpdateLayout();
+                        selectorListItemSelected = selectedContainer.IsSelected;
+                    }
+                    else
+                    {
+                        selectorListItemSelected =
+                            ReferenceEquals(listBox.SelectedItem, target);
+                    }
+                }
+                catch { }
+            }
+        }
+
+        await Task.Delay(350);
+
+        // Selecting an AudioEffect should materialize its own PropertiesEditor.
+        // Realize any newly-created detail groups before collecting text evidence.
+        foreach (Window window in Application.Current.Windows)
+        {
+            foreach (var viewer in EnumerateVisual(window).OfType<ScrollViewer>())
+            {
+                try
+                {
+                    if (viewer.IsVisible)
+                        viewer.UpdateLayout();
+                }
+                catch { }
+            }
+
+            foreach (var expander in EnumerateVisual(window).OfType<Expander>())
+            {
+                var header = expander.Header?.ToString() ?? "";
+                if (header.Contains("発音補助", StringComparison.Ordinal)
+                    || header.Contains(ProbeAudioEffect.DisplayLabel, StringComparison.Ordinal))
+                {
+                    expander.IsExpanded = true;
+                    try { expander.UpdateLayout(); } catch { }
+                }
+            }
+        }
+
         await Task.Delay(300);
 
         var texts = Application.Current.Windows
@@ -1005,8 +1074,9 @@ internal static class Probe
                 DescribeAudioUiShape(),
                 new JsonSerializerOptions { WriteIndented = true }));
 
-        var effectVisible = texts.Any(x =>
-            x.Contains(ProbeAudioEffect.DisplayLabel, StringComparison.Ordinal));
+        var effectVisible =
+            selectorListItemVisible
+            && selectorListItemSelected;
         var audioSection = texts.Any(x =>
             x.Contains("音声エフェクト", StringComparison.Ordinal)
             || x.Contains("オーディオエフェクト", StringComparison.OrdinalIgnoreCase)
@@ -1019,6 +1089,8 @@ internal static class Probe
         return new UiObservation(
             selectionAttempted,
             selectionMembers.ToArray(),
+            selectorListItemVisible,
+            selectorListItemSelected,
             effectVisible,
             audioSection,
             token,
@@ -1345,6 +1417,8 @@ internal static class Probe
     sealed record UiObservation(
         bool SelectionAttempted,
         object[] SelectionMembers,
+        bool SelectorListItemVisible,
+        bool SelectorListItemSelected,
         bool EffectLabelVisible,
         bool AudioSectionVisible,
         bool TokenLabelVisible,
