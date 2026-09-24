@@ -11,6 +11,11 @@
 ```text
 添付した「YMM4 Plugin AI Manual」を、このYMM4プラグイン開発の基準資料として使用してください。
 
+Manual全体を最初に通読しないでください。
+まず「0. AI Lazy Read Protocol」だけを読み、要件から必要章を選び、「参照予定章」を短く示してください。
+その章だけを参照し、途中で新しい依存が出た場合だけCross-cutting Triggerから追加章を読んでください。
+添付全体が自動的にcontextへ入る環境でも、Routingされていない章を設計根拠へ混ぜないでください。
+
 開発時は以下を守ってください。
 
 1. 現在のYMM4公開API・公式サンプルを優先する。
@@ -35,6 +40,7 @@ Manualに載っていないYMM4内部挙動については、一般知識だけ�
 
 ```text
 添付のYMM4 Plugin AI Manualを基準に実装してください。
+最初は章0だけ読み、必要章をRoutingしてから対象章だけ参照してください。
 公開API優先で、Public Plugin API → Public Host/WPF → 限定Reflection → Harmony/internalの順に検討してください。
 APIの存在とruntime semanticsを混同せず、Manualにないundocumented behaviorは推測しないでください。
 Reflectionはexact targetのみ・fail closed、Harmonyは最後の手段です。
