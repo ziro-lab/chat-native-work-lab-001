@@ -24,7 +24,7 @@ This document summarizes and classifies the source. It does not copy the guide v
 | **2. Technical requirements and development environment** | A / C / D / E | Import selectively | Current .NET 10 target is Contract. `Directory.Build.props` is an OFFICIAL-SAMPLE pattern. The seed guide's mandatory `Private=false` claim is **not** present in the current official page/sample and must not be promoted as Contract. Exact assembly-to-namespace ownership claims still require current assembly/source verification. |
 | **3. Plugin categories and interfaces** | B / E | Rewrite as "common official/sample surfaces" | Official samples cover more categories than the current table, so the table must not imply exhaustiveness. Separate actual interface requirements from convenience/default members. |
 | **4. Tool Plugin details** | B / C | Import surface, verify lifecycle | `IToolPlugin`, `IToolViewModel`, Tool state and Timeline Tool entry points are high-value. Sample signatures belong in Sample/reference. Exact lifecycle timing, auto-binding semantics and persistence boundaries require evidence when product-sensitive. |
-| **5. Media-source internal structure** | B / D | Import as implementation pattern | Factory/source split and disposal patterns are useful examples. Do not turn one sample architecture into a mandatory design for every source plugin. |
+| **5. Media-source internal structure** | B / D | Import as implementation pattern | Factory/source split matches current official implementation for video/audio file sources. Current implementation/API confirm `IVideoFileSourcePlugin` + `IVideoFileSource`; note that the official VideoSource README itself contains the stale/mismatched `IVideoSourcePlugin` label. |
 | **6. UI and parameter system** | B / C / D / E | High-priority import | Current official custom-editor baseline is `IPropertyEditorControl` + `PropertyEditorAttribute2`, with BeginEdit/EndEdit around edits. The seed guide's claim that `IPropertyEditorControl2` is mandatory is too broad; treat editor-info extensions separately. |
 | **6.5. VideoEffect implementation** | B / C / E | Split into two routes | Current official sample uses `IVideoEffectProcessor` directly. Current shipped/community source actively uses `VideoEffectProcessorBase`. Preserve both as different evidence/routes; do not present the base as mandatory. Current Community overrides also use nullable `ID2D1Image?` signatures. |
 | **7. Resource management** | D / B | Keep as Guidance | Disposal, event unsubscription and DirectX lifetime rules are useful. Wording such as "must" should be reserved for actual API/lifetime requirements, not general optimization preferences. |
@@ -148,7 +148,8 @@ These belong behind an observed hot path or explicit profiling goal.
 
 - **Structure triage:** complete
 - **P0 extraction:** first official baseline complete — see [YMM4_AI_P0_OFFICIAL_BASELINE.md](YMM4_AI_P0_OFFICIAL_BASELINE.md)
-- **P1 extraction:** first public/reference surface pass complete — see [YMM4_AI_P1_PLUGIN_SURFACES.md](YMM4_AI_P1_PLUGIN_SURFACES.md)
+- **P1 extraction:** public/reference effect/editor pass complete — see [YMM4_AI_P1_PLUGIN_SURFACES.md](YMM4_AI_P1_PLUGIN_SURFACES.md)
+- **P1B surface map:** official sample category/interface map complete — see [YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
 - **P2 canonical Lab card extraction:** started
 - **P3 guidance rewrite:** not yet complete
 
