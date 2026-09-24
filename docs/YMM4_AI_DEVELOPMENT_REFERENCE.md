@@ -228,6 +228,6 @@ The knowledge model and index structure are established. The long-form plugin gu
 Current next steps:
 
 1. keep the verified P0 baseline current as official docs/samples change;
-2. extend the P1 surface pass to remaining file-source/Shape/Tachie/Voice/Transition surfaces as needed;
-3. continue promoting canonical Lab negative findings into cards;
+2. keep the P1/P1B surface maps current as official samples/API shapes evolve;
+3. continue promoting canonical Lab negative findings and edit-lifecycle facts into cards;
 4. keep open/Draft PR results out of the canonical index until their evidence is accepted.
