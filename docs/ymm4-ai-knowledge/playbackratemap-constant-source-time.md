@@ -1,6 +1,7 @@
 # PlaybackRateMap constant positive source-time mapping
 
-- Status: canonical
+- Status: evidence-qualified
+- Repository state: main
 - Knowledge class: LAB-NATIVE + LAB-STATIC
 - Surface: S3
 - YMM4 version: 4.56.1.0
