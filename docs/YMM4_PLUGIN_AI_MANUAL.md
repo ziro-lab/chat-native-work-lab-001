@@ -1471,6 +1471,9 @@ https://ymm-api-docs.vercel.app/
 YMM4Plugin Scrapbox:
 https://scrapbox.io/ymm4plugin/
 
+YMM4 plugin template（Tool / Timeline Tool等の参考実装）:
+https://github.com/leftcontroller0518/YMM4plugin_template
+
 これらは便利ですが、非公式資料や実装例をruntime guaranteeとして扱わないでください。
 
 ---
@@ -2013,10 +2016,10 @@ public sealed class GainEffect : AudioEffectBase
 {
     public override string Label => "音量サンプル";
 
-    [Display(Name = "音量")]
-    [AnimationSlider("F0", "%", 0, 100)]
-    public Animation Volume { get; }
-        = new(100, 0, 100);
+    [Display(Name = "倍率")]
+    [AnimationSlider("F2", "x", 0, 2)]
+    public Animation Gain { get; }
+        = new(1, 0, 2);
 
     public override IAudioEffectProcessor CreateAudioEffect(
         TimeSpan duration)
@@ -2028,7 +2031,7 @@ public sealed class GainEffect : AudioEffectBase
         => [];
 
     protected override IEnumerable<IAnimatable> GetAnimatables()
-        => [Volume];
+        => [Gain];
 }
 ```
 
@@ -2074,13 +2077,13 @@ public sealed class GainProcessor : AudioEffectProcessorBase
 
         for (var i = 0; i + 1 < read; i += 2)
         {
-            var volume = (float)item.Volume.GetValue(
+            var gain = (float)item.Gain.GetValue(
                 (Position + i) / 2,
                 Duration / 2,
-                Hz) / 100f;
+                Hz);
 
-            destBuffer[offset + i] *= volume;
-            destBuffer[offset + i + 1] *= volume;
+            destBuffer[offset + i] *= gain;
+            destBuffer[offset + i + 1] *= gain;
         }
 
         return read;
