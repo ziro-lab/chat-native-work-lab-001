@@ -54,6 +54,29 @@ All claims remain bounded by their exact cards/experiments.
 - Host: YMM4 4.55.1.1 Lite
 - Key fact: cloned content state and destination canonical Character binding are separate operations.
 
+## Standard commands / Tool persistence / folded navigation
+
+### Standard routed commands
+
+- Card: [Standard YMM4 commands can be routed through CommandSettings](ymm4-ai-knowledge/standard-commandsettings-route.md)
+- Repository state: Draft PR #139
+- Hosts: YMM4 4.55.1.1 Lite and 4.56.1.0 Lite
+- Key fact: tested standard commands resolve and execute through CommandSettings/CommandType/RoutedUICommandEx without synthetic key input.
+
+### ToolState project roundtrip
+
+- Card: [ToolState SavedState can carry project-specific Tool data across reopen/switch](ymm4-ai-knowledge/toolstate-project-roundtrip-switch.md)
+- Repository state: stacked Draft PR #87
+- Host: YMM4 4.56.1.0
+- Key fact: host-owned ToolState is restored per project, but an existing inner ViewModel does not receive another LoadState during switch.
+
+### Fold-aware navigation boundary
+
+- Card: [Folded Timeline navigation has mixed native-safe and fold-unaware routes](ymm4-ai-knowledge/no-harmony-fold-navigation-boundary.md)
+- Repository state: stacked Draft PR #84
+- Hosts: YMM4 4.55.1.1 Lite and 4.56.1.0 Lite
+- Key fact: native Lower/Higher and foreground Down/Up were display-row-safe; bare ScrollToItem was not fold-aware.
+
 ## VideoItem edit lifecycle
 
 ### Split object replacement
@@ -82,6 +105,22 @@ All claims remain bounded by their exact cards/experiments.
 - Host: YMM4 4.56.1.0
 - Surface: S3 for the map getter
 - Key fact: the tested native map uses `sourceTime = ContentOffset + itemTime * rate / 100` for constant positive 50/100/200%.
+
+## VoiceItem / synthesis
+
+### Public VoiceItem regeneration
+
+- Card: [Real VoiceItem corrected synthesis can use the public speaker route](ymm4-ai-knowledge/voiceitem-public-regeneration-route.md)
+- Repository state: Draft PR #128
+- Host: YMM4 4.56.1.0 Lite
+- Key fact: public VoiceItem/IVoiceSpeaker APIs can synthesize a patched Pronounce into the real VoiceItem audio file and clear its public cache.
+
+### VoiceItem AudioEffects storage
+
+- Card: [VoiceItem AudioEffects is a public persistent effect-storage surface](ymm4-ai-knowledge/voiceitem-audioeffects-public-storage.md)
+- Repository state: Draft PR #142
+- Host: YMM4 4.56.1.0 Lite
+- Key fact: public VoiceItem.AudioEffects participates in host discovery, Item Editor UI, membership Undo/Redo and real project save/reload.
 
 ## Host-bundled resources
 
