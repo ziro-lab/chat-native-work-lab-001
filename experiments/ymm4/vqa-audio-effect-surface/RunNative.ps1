@@ -5,12 +5,52 @@ param(
 $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Force $OutputDir|Out-Null
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class CnwlVqaAudioWin32 {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+}
+'@
+
+function Get-CnwlWindows {
+  $script:rows=@()
+  $callback=[CnwlVqaAudioWin32+EnumWindowsProc]{
+    param([IntPtr]$hWnd,[IntPtr]$lParam)
+    if([CnwlVqaAudioWin32]::IsWindowVisible($hWnd)){
+      $sb=New-Object System.Text.StringBuilder 1024
+      [void][CnwlVqaAudioWin32]::GetWindowText($hWnd,$sb,$sb.Capacity)
+      $title=$sb.ToString()
+      if(-not [string]::IsNullOrWhiteSpace($title)){
+        $script:rows += [pscustomobject]@{Handle=$hWnd;Title=$title}
+      }
+    }
+    return $true
+  }
+  [void][CnwlVqaAudioWin32]::EnumWindows($callback,[IntPtr]::Zero)
+  return $script:rows
+}
+
 $env:CNWL_VQA_AUDIO_EFFECT_OUTPUT=$OutputDir
 $process=Start-Process (Join-Path $Ymm4Dir 'YukkuriMovieMaker.exe') -WorkingDirectory $Ymm4Dir -PassThru
 try {
   $result=Join-Path $OutputDir 'result.json'
   $limit=[DateTime]::UtcNow.AddSeconds(180)
   while([DateTime]::UtcNow-lt$limit -and -not$process.HasExited -and -not(Test-Path $result)){
+    foreach($w in (Get-CnwlWindows)){
+      "$([DateTime]::UtcNow.ToString('O')) title=$($w.Title)" | Add-Content (Join-Path $OutputDir 'host-windows.txt')
+      if($w.Title -like '*Check for updates*' -or $w.Title -like '*About YukkuriMovieMaker*'){
+        [void][CnwlVqaAudioWin32]::PostMessage($w.Handle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
+      } elseif($w.Title -eq 'Confirm'){
+        [void][CnwlVqaAudioWin32]::PostMessage($w.Handle,0x0100,[IntPtr]0x0D,[IntPtr]::Zero)
+        [void][CnwlVqaAudioWin32]::PostMessage($w.Handle,0x0101,[IntPtr]0x0D,[IntPtr]::Zero)
+      }
+    }
     Start-Sleep -Milliseconds 350
   }
 
@@ -19,7 +59,7 @@ try {
   $r=Get-Content -Raw $result|ConvertFrom-Json
   Get-Content $result
 
-  foreach($name in @('progress.txt','observation.json','ui-text.txt')){
+  foreach($name in @('progress.txt','host-windows.txt','observation.json','ui-text.txt')){
     $path=Join-Path $OutputDir $name
     if(Test-Path $path){
       Write-Output "--- $name ---"
