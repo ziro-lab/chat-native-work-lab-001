@@ -21,7 +21,7 @@ This document summarizes and classifies the source. It does not copy the guide v
 | Source section | Primary class | Decision | Notes |
 | --- | --- | --- | --- |
 | **1. Overview and architecture** | C / E | Rewrite | DLL/plugin-interface concept is useful. Exact internal loader class names and loader sequence are implementation details and should be version-pinned before being treated as facts. |
-| **2. Technical requirements and development environment** | A / C / D | Import selectively | Current .NET 10 target belongs in Contract. Host-owned assembly `Private=false` belongs in the official development baseline when confirmed. Exact assembly-to-namespace ownership claims require current assembly/source verification. `Directory.Build.props` is a strong repository pattern, but Guidance rather than YMM4 contract. |
+| **2. Technical requirements and development environment** | A / C / D / E | Import selectively | Current .NET 10 target is Contract. `Directory.Build.props` is an OFFICIAL-SAMPLE pattern. The seed guide's mandatory `Private=false` claim is **not** present in the current official page/sample and must not be promoted as Contract. Exact assembly-to-namespace ownership claims still require current assembly/source verification. |
 | **3. Plugin categories and interfaces** | B / E | Rewrite as "common official/sample surfaces" | Official samples cover more categories than the current table, so the table must not imply exhaustiveness. Separate actual interface requirements from convenience/default members. |
 | **4. Tool Plugin details** | B / C | Import surface, verify lifecycle | `IToolPlugin`, `IToolViewModel`, Tool state and Timeline Tool entry points are high-value. Sample signatures belong in Sample/reference. Exact lifecycle timing, auto-binding semantics and persistence boundaries require evidence when product-sensitive. |
 | **5. Media-source internal structure** | B / D | Import as implementation pattern | Factory/source split and disposal patterns are useful examples. Do not turn one sample architecture into a mandatory design for every source plugin. |
@@ -147,7 +147,7 @@ These belong behind an observed hot path or explicit profiling goal.
 ## Source-to-reference migration state
 
 - **Structure triage:** complete
-- **P0 extraction:** not yet complete
+- **P0 extraction:** first official baseline complete — see [YMM4_AI_P0_OFFICIAL_BASELINE.md](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 - **P1 extraction:** not yet complete
 - **P2 canonical Lab card extraction:** started
 - **P3 guidance rewrite:** not yet complete
