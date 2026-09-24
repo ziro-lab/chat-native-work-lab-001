@@ -17,6 +17,13 @@ It points to reusable YMM4 facts already recorded in the Lab. It does not replac
 - Covers: current .NET 10 target, WPF project baseline, official assembly-reference setup, official `YMM4DirPath` sample pattern, Developer Mode, `.ymme` packaging, and explicit non-contract treatment of `Private=false`.
 - Source: [YMM4 AI P0 — Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 
+## Public and reference plugin surfaces
+
+- Status: **Curated reference layer**
+- Class: OFFICIAL-SAMPLE + public/API-index + REFERENCE-IMPLEMENTATION
+- Covers: Tool member requirements/defaults, custom PropertyEditor baseline, official `IVideoEffectProcessor` route, shipped/community `VideoEffectProcessorBase` route, AudioEffect processor shape, Animation evaluation boundaries.
+- Source: [YMM4 AI P1 — Public and Reference Plugin Surfaces](YMM4_AI_P1_PLUGIN_SURFACES.md)
+
 ## Development and reference discovery
 
 ### Reference-first discovery
