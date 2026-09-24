@@ -19,6 +19,7 @@ Use this document together with:
 - [Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 - [Public and Reference Plugin Surfaces](YMM4_AI_P1_PLUGIN_SURFACES.md)
 - [Official Plugin Surface Map](YMM4_AI_P1B_OFFICIAL_PLUGIN_SURFACE_MAP.md)
+- [Implementation Guidance](YMM4_AI_P3_IMPLEMENTATION_GUIDANCE.md)
 - [YMM4 AI Knowledge Card Template](YMM4_AI_KNOWLEDGE_CARD_TEMPLATE.md)
 - [Long-form Plugin Guide Triage](YMM4_AI_SEED_GUIDE_TRIAGE.md)
 
@@ -230,4 +231,5 @@ Current next steps:
 1. keep the verified P0 baseline current as official docs/samples change;
 2. keep the P1/P1B surface maps current as official samples/API shapes evolve;
 3. continue promoting canonical Lab negative findings and edit-lifecycle facts into cards;
-4. keep open/Draft PR results out of the canonical index until their evidence is accepted.
+4. keep implementation/performance advice in the Guidance layer instead of promoting it into API contracts;
+5. keep open/Draft PR results out of the canonical index until their evidence is accepted.
