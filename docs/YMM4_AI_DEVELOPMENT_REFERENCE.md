@@ -16,6 +16,7 @@ Use this document together with:
 - [YMM4 Plugin Surface Guide](YMM4_PLUGIN_SURFACE_GUIDE.md)
 - [YMM4 Observation Policy](YMM4_OBSERVATION_POLICY.md)
 - [YMM4 AI Knowledge Index](YMM4_AI_KNOWLEDGE_INDEX.md)
+- [Current Official Development Baseline](YMM4_AI_P0_OFFICIAL_BASELINE.md)
 - [YMM4 AI Knowledge Card Template](YMM4_AI_KNOWLEDGE_CARD_TEMPLATE.md)
 - [Long-form Plugin Guide Triage](YMM4_AI_SEED_GUIDE_TRIAGE.md)
 
@@ -209,7 +210,7 @@ The knowledge model and index structure are established. The long-form plugin gu
 
 Current next steps:
 
-1. verify and extract the P0 development baseline against current official documentation/samples;
+1. keep the verified P0 baseline current as official docs/samples change;
 2. extract the high-value public Tool / PropertyEditor / Effect surfaces without widening lifecycle claims;
 3. continue promoting canonical Lab negative findings into cards;
 4. keep open/Draft PR results out of the canonical index until their evidence is accepted.
