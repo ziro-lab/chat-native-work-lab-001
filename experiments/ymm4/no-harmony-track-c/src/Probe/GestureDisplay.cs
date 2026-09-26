@@ -264,8 +264,8 @@ internal sealed class DirectDisplay : IDisposable
 
         GestureSamples++;
         ScheduleRenderAudit(gestureItems.Select(x => (Item: x, Layer: x.Layer)).ToArray());
-        if (GestureSamples > 2000)
-            throw new InvalidOperationException("Gesture visual update budget exceeded");
+        // GestureSamples is lifetime telemetry. A long editing session must not
+        // turn a successful native drag path into a product-visible exception.
     }
 
     private void ScheduleRenderAudit((IItem Item, int Layer)[] expected)
@@ -506,8 +506,17 @@ internal sealed class DirectDisplay : IDisposable
             windowApplications = 0;
         }
 
-        if (++windowApplications > 40 || ++Applications > 1000)
-            throw new InvalidOperationException("Direct layout update budget exceeded");
+        windowApplications++;
+        Applications++;
+
+        // These counters started as Lab runaway guards. In the installable
+        // candidate they are diagnostics only: ordinary scrolling, editing and
+        // long sessions can legitimately exceed both the burst and lifetime
+        // proof budgets. Keep the real reentrancy/gesture invariants above,
+        // but never fail the host solely because an arbitrary usage count was
+        // reached.
+        if (windowApplications == 41)
+            log($"display_apply_rate_high phase={Phase} total={Applications}");
 
         applying = true;
         try
