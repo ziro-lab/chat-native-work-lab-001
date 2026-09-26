@@ -5,6 +5,23 @@ on:
   pull_request:
     paths:
       - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
+      # Plugin.csproj links these product runtime sources from sibling experiments.
+      # Changes here alter the shipped DLL and must rebuild the canonical package.
+      - 'experiments/ymm4/no-harmony-track-a/src/Probe/Host.cs'
+      - 'experiments/ymm4/no-harmony-folder-layout-generalization/src/Probe/FolderLayout.cs'
+      - 'experiments/ymm4/no-harmony-track-c/src/Probe/GestureDisplay.cs'
+      - 'experiments/ymm4/no-harmony-track-c/src/Probe/InputMapAdapter.cs'
+      - 'experiments/ymm4/no-harmony-track-c/src/Probe/FileDropAdapter.cs'
+      - 'experiments/ymm4/no-harmony-p3-persistence/src/FolderDocument.cs'
+      - 'experiments/ymm4/no-harmony-p3-persistence/src/FolderDocumentCodec.cs'
+      - 'experiments/ymm4/no-harmony-folder-range-tracker/src/FolderRangeTracker.cs'
+      - 'experiments/ymm4/no-harmony-p4-ux-policy/src/FolderUxCommands.cs'
+      - 'experiments/ymm4/no-harmony-s2-extended-state/src/FolderProductState.cs'
+      - 'experiments/ymm4/no-harmony-s2-extended-state/src/FolderProductStateCodec.cs'
+      - 'experiments/ymm4/no-harmony-s3-structural-convenience/src/StructuralConvenienceRules.cs'
+      - 'experiments/ymm4/no-harmony-s4-panel/src/PanelProjection.cs'
+      - 'experiments/ymm4/no-harmony-s4-panel/src/PanelMoveRules.cs'
+      - 'experiments/ymm4/no-harmony-s5-visual-summary/src/VisualSummaryRules.cs'
       - 'docs/YMM4_NO_HARMONY_P7_RELEASE_PLAN.md'
       - '.github/workflows/ymm4-no-harmony-p4-ymme-package.yml'
       - '.github/workflows/ymm4-no-harmony-p7-release.yml'
