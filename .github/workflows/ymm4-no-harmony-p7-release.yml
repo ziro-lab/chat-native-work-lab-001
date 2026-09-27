@@ -5,6 +5,23 @@ on:
   pull_request:
     paths:
       - 'experiments/ymm4/no-harmony-p4-hands-on-candidate/**'
+      # Plugin.csproj links these product runtime sources from sibling experiments.
+      # Changes here alter the shipped DLL and must rebuild the canonical package.
+      - 'experiments/ymm4/no-harmony-track-a/src/Probe/Host.cs'
+      - 'experiments/ymm4/no-harmony-folder-layout-generalization/src/Probe/FolderLayout.cs'
+      - 'experiments/ymm4/no-harmony-track-c/src/Probe/GestureDisplay.cs'
+      - 'experiments/ymm4/no-harmony-track-c/src/Probe/InputMapAdapter.cs'
+      - 'experiments/ymm4/no-harmony-track-c/src/Probe/FileDropAdapter.cs'
+      - 'experiments/ymm4/no-harmony-p3-persistence/src/FolderDocument.cs'
+      - 'experiments/ymm4/no-harmony-p3-persistence/src/FolderDocumentCodec.cs'
+      - 'experiments/ymm4/no-harmony-folder-range-tracker/src/FolderRangeTracker.cs'
+      - 'experiments/ymm4/no-harmony-p4-ux-policy/src/FolderUxCommands.cs'
+      - 'experiments/ymm4/no-harmony-s2-extended-state/src/FolderProductState.cs'
+      - 'experiments/ymm4/no-harmony-s2-extended-state/src/FolderProductStateCodec.cs'
+      - 'experiments/ymm4/no-harmony-s3-structural-convenience/src/StructuralConvenienceRules.cs'
+      - 'experiments/ymm4/no-harmony-s4-panel/src/PanelProjection.cs'
+      - 'experiments/ymm4/no-harmony-s4-panel/src/PanelMoveRules.cs'
+      - 'experiments/ymm4/no-harmony-s5-visual-summary/src/VisualSummaryRules.cs'
       - 'docs/YMM4_NO_HARMONY_P7_RELEASE_PLAN.md'
       - '.github/workflows/ymm4-no-harmony-p4-ymme-package.yml'
       - '.github/workflows/ymm4-no-harmony-p7-release.yml'
@@ -37,11 +54,16 @@ jobs:
         shell: pwsh
         run: |
           $project='experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.csproj'
+          $plugin='experiments/ymm4/no-harmony-p4-hands-on-candidate/src/Plugin/Plugin.cs'
           $readme='experiments/ymm4/no-harmony-p4-hands-on-candidate/README.md'
           $notice='experiments/ymm4/no-harmony-p4-hands-on-candidate/THIRD_PARTY_NOTICES.md'
 
           $projectText=Get-Content $project -Raw
           if($projectText -notmatch '<Version>0\.1\.0</Version>'){throw 'Release version is not 0.1.0'}
+
+          $pluginText=Get-Content $plugin -Raw
+          if($pluginText -match '\bILocalizePlugin\b'){throw 'Release plugin exposes duplicate ILocalizePlugin entry'}
+          if($pluginText -notmatch 'public\s+FolderToolPlugin\(\)\s*=>\s*HandsOnRuntime\.Start\(\)'){throw 'Single tool entry no longer starts the runtime'}
           if($projectText -notmatch '<AssemblyName>Ymm4NoHarmonyFolderHandsOn</AssemblyName>'){throw 'Internal assembly identity changed'}
           if($projectText -notmatch 'YMM4_LayerFolder_noHarmony_v\$\(Version\)\.ymme'){throw 'Release package name is not canonical'}
           if($projectText -match 'YMM4_NO_HARMONY_P4_HANDS_ON'){throw 'P4 HANDS_ON is still packaged'}
@@ -104,6 +126,11 @@ jobs:
 
           $binaryText=[Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Resolve-Path $dll)))
           foreach($forbidden in @(
+            'Direct layout update budget exceeded',
+            'Visual tree budget exceeded',
+            'Fixture slot budget exceeded',
+            'Fixture layer budget exceeded',
+            'Gesture visual update budget exceeded',
             'PASS_P6_',
             'CNWL_P6_DENSITY_STRESS_SMOKE',
             'CNWL_P6_HISTORY_STRESS_SMOKE',

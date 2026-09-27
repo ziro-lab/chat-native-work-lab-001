@@ -11,14 +11,10 @@ using YukkuriMovieMaker.Project.Items;
 
 namespace Ymm4NoHarmonyFolderLayoutProbe;
 
-public sealed class HandsOnEntry : ILocalizePlugin
-{
-    public string Name => "レイヤーフォルダ (no-Harmony)";
-    public void SetCulture(CultureInfo cultureInfo) => HandsOnRuntime.Start();
-}
-
 public sealed class FolderToolPlugin : IToolPlugin
 {
+    public FolderToolPlugin() => HandsOnRuntime.Start();
+
     public Type ViewModelType => typeof(FolderToolViewModel);
     public Type ViewType => typeof(FolderToolView);
     public string Name => FolderToolViewModel.DisplayTitle;

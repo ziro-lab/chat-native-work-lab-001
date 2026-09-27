@@ -26,10 +26,8 @@ internal sealed record Host(Window Window, Timeline Timeline, object Vm, Framewo
     internal static IEnumerable<FrameworkElement> Elements(DependencyObject root)
     {
         var stack = new Stack<DependencyObject>(); stack.Push(root);
-        var count = 0;
         while (stack.Count > 0)
         {
-            if (++count > 20000) throw new InvalidOperationException("Visual tree budget exceeded");
             var current = stack.Pop();
             if (current is FrameworkElement fe) yield return fe;
             for (var i = VisualTreeHelper.GetChildrenCount(current) - 1; i >= 0; i--)

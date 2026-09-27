@@ -40,7 +40,7 @@ internal sealed class InputMapAdapter : IDisposable
 
     private void Down(object sender, MouseButtonEventArgs e)
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         display.ThrowIfFailed();
@@ -95,6 +95,148 @@ internal sealed class InputMapAdapter : IDisposable
         Math.Abs(p.X - down.X) >= SystemParameters.MinimumHorizontalDragDistance ||
         Math.Abs(p.Y - down.Y) >= SystemParameters.MinimumVerticalDragDistance;
 
+    private static bool TimeRangesOverlap(IItem a, IItem b)
+    {
+        var aStart = (long)a.Frame;
+        var bStart = (long)b.Frame;
+        var aEnd = aStart + Math.Max(0, (long)a.Length);
+        var bEnd = bStart + Math.Max(0, (long)b.Length);
+        return aStart < bEnd && bStart < aEnd;
+    }
+
+    private bool LayerWouldOverlap(
+        IItem item,
+        int layer,
+        HashSet<IItem> moving)
+    {
+        foreach (var other in host.Timeline.Items)
+        {
+            if (moving.Contains(other) || other.Layer != layer)
+                continue;
+
+            if (TimeRangesOverlap(item, other))
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool GroupTargetsAreValid(
+        IReadOnlyDictionary<IItem, int> requestedTargets,
+        int offset,
+        HashSet<IItem> moving)
+    {
+        foreach (var (item, requestedLayer) in requestedTargets)
+        {
+            var layer = requestedLayer + offset;
+            if (layer < 0 || layer > display.Layout.MaxLayer)
+                return false;
+
+            if (display.Layout.IsHidden(layer)
+                || LayerWouldOverlap(item, layer, moving))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool ApplyHostCollisionPolicy(
+        Dictionary<IItem, int> targets)
+    {
+        var moving = new HashSet<IItem>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var member in group.Keys)
+            moving.Add(member);
+
+        var evidence = targets
+            .Where(pair =>
+                pair.Key.Layer != pair.Value
+                && LayerWouldOverlap(
+                    pair.Key,
+                    pair.Value,
+                    moving))
+            .Select(pair => new
+            {
+                Item = pair.Key,
+                Requested = pair.Value,
+                HostOffset = pair.Key.Layer - pair.Value
+            })
+            .ToArray();
+
+        if (evidence.Length == 0)
+            return false;
+
+        // Native YMM4 moves a selected group as one unit when one member would
+        // collide. Preserve that group-level escape instead of resolving each
+        // member independently.
+        var firstOffset = evidence
+            .Select(x => x.HostOffset)
+            .FirstOrDefault(offset => offset != 0);
+        var direction = Math.Sign(firstOffset);
+        if (direction == 0)
+            direction = 1;
+
+        var startDistance = Math.Max(1, Math.Abs(firstOffset));
+
+        for (var distance = startDistance;
+             distance <= display.Layout.MaxLayer + 1;
+             distance++)
+        {
+            var offset = direction * distance;
+            if (!GroupTargetsAreValid(
+                    targets,
+                    offset,
+                    moving))
+            {
+                continue;
+            }
+
+            foreach (var item in targets.Keys.ToArray())
+                targets[item] += offset;
+
+            log(
+                $"move_group_collision_escape offset={offset} " +
+                $"direction={direction} members={targets.Count} " +
+                $"evidence={string.Join("|", evidence.Select(x => $"{x.Item.Remark}:hostL{x.Item.Layer}:requestedL{x.Requested}"))}");
+            return true;
+        }
+
+        // A ceiling/floor can exhaust the host-selected direction. Try the
+        // opposite visible direction before falling back to raw native layers.
+        for (var distance = 1;
+             distance <= display.Layout.MaxLayer + 1;
+             distance++)
+        {
+            var offset = -direction * distance;
+            if (!GroupTargetsAreValid(
+                    targets,
+                    offset,
+                    moving))
+            {
+                continue;
+            }
+
+            foreach (var item in targets.Keys.ToArray())
+                targets[item] += offset;
+
+            log(
+                $"move_group_collision_escape_reverse offset={offset} " +
+                $"members={targets.Count}");
+            return true;
+        }
+
+        // No visible collision-free group position exists. Preserve the host
+        // group's current native layers rather than forcing a colliding target.
+        foreach (var item in targets.Keys.ToArray())
+            targets[item] = item.Layer;
+
+        log(
+            $"move_group_collision_escape_unresolved members={targets.Count}");
+        return true;
+    }
+
     private void PreviewMove(object sender, MouseEventArgs e)
     {
         // Only marquee replaces preview input. Native item drag must reach its normal
@@ -107,6 +249,14 @@ internal sealed class InputMapAdapter : IDisposable
     {
         if (e.ChangedButton != MouseButton.Left || !marquee)
             return;
+
+        if (!display.IsOperational)
+        {
+            marquee = false;
+            if (ReferenceEquals(Mouse.Captured, host.Source))
+                Mouse.Capture(null);
+            return;
+        }
 
         var rect = new Rect(
             host.Source.PointToScreen(down),
@@ -135,7 +285,8 @@ internal sealed class InputMapAdapter : IDisposable
 
     private void Move(object sender, MouseEventArgs e)
     {
-        if (disposed || anchor is null || e.LeftButton != MouseButtonState.Pressed)
+        var activeAnchor = anchor;
+        if (disposed || !display.IsOperational || activeAnchor is null || e.LeftButton != MouseButtonState.Pressed)
             return;
 
         BubbleMoves++;
@@ -150,7 +301,7 @@ internal sealed class InputMapAdapter : IDisposable
             // this MouseMove has already run. From now until MouseUp, freeze direct
             // geometry writes so native Layer/Top updates cannot cause a refresh loop.
             dragging = true;
-            log($"gesture_transition_after_native_move anchor=L{anchor.Layer}:F{anchor.Frame} p={p}");
+            log($"gesture_transition_after_native_move anchor=L{activeAnchor.Layer}:F{activeAnchor.Frame} p={p}");
             try
             {
                 display.BeginGesture(group.Keys);
@@ -186,6 +337,13 @@ internal sealed class InputMapAdapter : IDisposable
         var targets = new Dictionary<IItem, int>(ReferenceEqualityComparer.Instance);
         foreach (var (item, layer) in group)
             targets[item] = layer + delta;
+
+        // YMM4 can intentionally keep a dragged item on another native layer
+        // when returning to the requested layer would overlap an existing item.
+        // Preserve that collision-avoidance intent. If the raw native escape
+        // layer is hidden by a collapsed folder, translate it to the next
+        // collision-free visible logical layer in the same direction.
+        ApplyHostCollisionPolicy(targets);
 
         // Put the folded visual compensation in place BEFORE changing Layer.
         // If the host immediately moves Top to the native logical row, the selected
