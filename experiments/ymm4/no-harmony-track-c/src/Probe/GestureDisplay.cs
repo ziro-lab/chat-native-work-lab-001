@@ -24,6 +24,8 @@ internal sealed class DirectDisplay : IDisposable
     private readonly Host host;
     private readonly TimelineViewModel vm;
     private readonly Action<string> log;
+    private readonly bool strictValidation;
+    private readonly bool enableRenderAudits;
     private readonly Dictionary<object, Slot> slots = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<INotifyPropertyChanged> watched = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<INotifyPropertyChanged> permanentWatched = new(ReferenceEqualityComparer.Instance);
@@ -62,6 +64,8 @@ internal sealed class DirectDisplay : IDisposable
     {
         this.host = host;
         this.log = log;
+        this.strictValidation = strictValidation;
+        this.enableRenderAudits = enableRenderAudits;
         vm = (TimelineViewModel)host.Vm;
         oldMaxHeight = host.Source.ReadLocalValue(FrameworkElement.MaxHeightProperty);
         WatchPermanent(vm);
@@ -263,7 +267,9 @@ internal sealed class DirectDisplay : IDisposable
         }
 
         GestureSamples++;
-        ScheduleRenderAudit(gestureItems.Select(x => (Item: x, Layer: x.Layer)).ToArray());
+        if (enableRenderAudits)
+            ScheduleRenderAudit(gestureItems.Select(x => (Item: x, Layer: x.Layer)).ToArray());
+
         // GestureSamples is lifetime telemetry. A long editing session must not
         // turn a successful native drag path into a product-visible exception.
     }
@@ -370,7 +376,7 @@ internal sealed class DirectDisplay : IDisposable
 
     internal void ThrowIfFailed()
     {
-        if (Failure is not null)
+        if (strictValidation && Failure is not null)
             throw new InvalidOperationException("Display adapter failed", Failure);
     }
 
@@ -391,7 +397,7 @@ internal sealed class DirectDisplay : IDisposable
             throw new InvalidOperationException("Invalid native height");
 
         slots.Add(target, new Slot(target, layer, item, ratio, top, height));
-        if (slots.Count > 2048)
+        if (strictValidation && slots.Count > 2048)
             throw new InvalidOperationException("Fixture slot budget exceeded");
     }
 
@@ -524,10 +530,16 @@ internal sealed class DirectDisplay : IDisposable
             RefreshSlots();
             var count = vm.LayerLabels.Count;
             if (count != vm.LayerLines.Count || count == 0)
-                throw new InvalidOperationException("Row collections inconsistent");
+            {
+                if (strictValidation)
+                    throw new InvalidOperationException("Row collections inconsistent");
+
+                log($"apply_skipped_rows_inconsistent labels={count} lines={vm.LayerLines.Count}");
+                return;
+            }
 
             var maximum = Math.Max(count, Math.Max(host.Timeline.MaxLayer, spans.Length == 0 ? 0 : spans.Max(x => x.End))) + 8;
-            if (maximum > 1024)
+            if (strictValidation && maximum > 1024)
                 throw new InvalidOperationException("Fixture layer budget exceeded");
 
             Layout = FolderLayout.Create(maximum, spans);
