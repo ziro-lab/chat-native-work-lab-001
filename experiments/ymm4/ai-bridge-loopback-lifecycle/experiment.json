@@ -1,0 +1,30 @@
+{
+  "schema": "chat-native-work-lab.experiment.v1",
+  "id": "ymm4-ai-bridge-loopback-lifecycle",
+  "goal": "Prove that real YMM4 4.56.1.0 Lite can host one idempotently-started loopback service inside a normal plugin, answer an external request, and stop it during graceful host shutdown.",
+  "host": {
+    "name": "YukkuriMovieMaker4 Lite",
+    "version": "4.56.1.0",
+    "archive_sha256": "49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a"
+  },
+  "runtime": ".NET 10",
+  "pass_assertions": [
+    "probe build succeeds with warnings as errors",
+    "real YMM4 invokes ILocalizePlugin.SetCulture",
+    "loopback listener starts exactly once",
+    "listener binds to 127.0.0.1",
+    "external PING receives PONG",
+    "YMM4 closes through its normal window-close path",
+    "shutdown handler runs and listener is stopped",
+    "old port rejects connection after shutdown"
+  ],
+  "not_proven": [
+    "MCP or HTTP compatibility",
+    "timeline access",
+    "project access",
+    "mutation or Undo",
+    "Tool ViewModel lifecycle",
+    "other YMM4 versions",
+    "product packaging"
+  ]
+}

@@ -1,0 +1,104 @@
+name: YMM4 AI bridge loopback lifecycle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/ymm4/ai-bridge-loopback-lifecycle/**'
+      - '.github/workflows/ymm4-ai-bridge-loopback-lifecycle.yml'
+  pull_request:
+    paths:
+      - 'experiments/ymm4/ai-bridge-loopback-lifecycle/**'
+      - '.github/workflows/ymm4-ai-bridge-loopback-lifecycle.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ymm4-ai-bridge-loopback-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-proof:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Confirm .NET 10 SDK
+        shell: pwsh
+        run: |
+          dotnet --list-sdks | Tee-Object -FilePath dotnet-sdks.txt
+          if (-not (Select-String -Path dotnet-sdks.txt -Pattern '^10\.')) { throw '.NET 10 SDK is not present.' }
+
+      - name: Download and verify exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash = (Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a") { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe = Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YMM4 executable not found.' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build lifecycle probe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/probe | Out-Null
+          dotnet build experiments/ymm4/ai-bridge-loopback-lifecycle/src/Ymm4AiBridgeLoopbackProbe/Ymm4AiBridgeLoopbackProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Probe build failed.' }
+          if (-not (Test-Path out/probe/Ymm4AiBridgeLoopbackProbe.dll)) { throw 'Probe DLL was not produced.' }
+
+      - name: Install probe into temporary YMM4
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:YMM4_DIR 'user\plugin\Ymm4AiBridgeLoopbackProbe'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item out/probe/Ymm4AiBridgeLoopbackProbe.dll (Join-Path $dest 'Ymm4AiBridgeLoopbackProbe.dll')
+
+      - name: Launch real YMM4 and verify loopback lifecycle
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/ai-bridge-loopback-lifecycle/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+
+      - name: Record provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/evidence | Out-Null
+          $event = Get-Content -Raw $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+          $sourceHead = if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $event.pull_request.head.sha } else { $env:GITHUB_SHA }
+          $probeHash = if (Test-Path out/probe/Ymm4AiBridgeLoopbackProbe.dll) { (Get-FileHash out/probe/Ymm4AiBridgeLoopbackProbe.dll -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+          $result = if (Test-Path out/evidence/result.txt) { (Get-Content -Raw out/evidence/result.txt).Trim() } else { 'NO_RESULT' }
+          [ordered]@{
+            schema = 'chat-native-work-lab.provenance.v1'
+            experiment = 'ymm4-ai-bridge-loopback-lifecycle'
+            repository = $env:GITHUB_REPOSITORY
+            source_head = $sourceHead
+            checkout_sha = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_url = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            ymm4_version = '4.56.1.0 Lite'
+            ymm4_zip_sha256 = '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+            probe_dll_sha256 = $probeHash
+            result = $result
+          } | ConvertTo-Json -Depth 4 | Set-Content out/evidence/provenance.json
+
+      - name: Upload compact evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-ai-bridge-loopback-lifecycle
+          path: |
+            out/evidence/
+            out/build.txt
+            out/probe/Ymm4AiBridgeLoopbackProbe.dll
+            dotnet-sdks.txt
+          if-no-files-found: warn
+          retention-days: 14

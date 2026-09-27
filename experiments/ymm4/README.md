@@ -11,6 +11,7 @@ Before creating a new probe, check [`../../docs/YMM4_REFERENCE_SOURCES.md`](../.
 ## Current experiments
 
 - [`plugin-host-validation/`](plugin-host-validation/) — minimal real-host plugin-load proof.
+- [`ai-bridge-loopback-lifecycle/`](ai-bridge-loopback-lifecycle/) — YMM4 4.56.1.0 embedded loopback-service bootstrap, external PING/PONG, and graceful shutdown lifecycle proof for the YMM4 AI Support direction.
 - [`timeline-selection-context/`](timeline-selection-context/) — public Timeline selection state, Character context and selection-change observation.
 - [`playhead-quick-drop/`](playhead-quick-drop/) — public playhead access, independent Template clone and intrinsic-length placement.
 - [`character-layer-placement/`](character-layer-placement/) — same-Character Front/Back baselines and full-span Layer collision behavior.
