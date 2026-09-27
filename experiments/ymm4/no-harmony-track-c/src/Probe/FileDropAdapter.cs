@@ -71,7 +71,7 @@ internal sealed class FileDropMapAdapter : IDisposable
 
     private void DragEnter(object sender, DragEventArgs e)
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         DragEnterCount++;
@@ -83,7 +83,7 @@ internal sealed class FileDropMapAdapter : IDisposable
 
     private void DragOver(object sender, DragEventArgs e)
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         DragOverCount++;
@@ -93,7 +93,7 @@ internal sealed class FileDropMapAdapter : IDisposable
 
     private void Drop(object sender, DragEventArgs e)
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         DropCount++;
