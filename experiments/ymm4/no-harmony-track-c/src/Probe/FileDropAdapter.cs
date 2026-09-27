@@ -27,6 +27,7 @@ internal sealed class FileDropMapAdapter : IDisposable
     private readonly INotifyPropertyChanged vmNotify;
 
     private int pendingLogicalLayer = -1;
+    private int pendingDisplayRow = -1;
     private HashSet<IItem>? pendingBefore;
     private bool disposed;
 
@@ -106,8 +107,13 @@ internal sealed class FileDropMapAdapter : IDisposable
             return;
         }
 
-        var mapped = Map(e);
+        var raw = e.GetPosition(host.Source);
+        var mapped = display.Layout.MapDisplayPointToLogical(raw, display.Height);
+        log($"filedrop_map raw={raw} mapped={mapped} visible={display.Layout.VisibleCsv}");
         SetCursor(mapped, true);
+        pendingDisplayRow = Math.Max(
+            0,
+            (int)Math.Floor(raw.Y / display.Height));
         pendingLogicalLayer = (int)Math.Floor(mapped.Y / display.Height);
         LastLogicalLayer = pendingLogicalLayer;
         pendingBefore = new HashSet<IItem>(vm.Items.Select(x => (IItem)x.Item), ReferenceEqualityComparer.Instance);
@@ -175,43 +181,101 @@ internal sealed class FileDropMapAdapter : IDisposable
         return false;
     }
 
-    private int ResolveVisibleCollisionEscape(
+    private int ResolveFoldedDropLayer(
         IItem item,
         int requestedLayer,
         HashSet<IItem> addedSet)
     {
-        var hostLayer = item.Layer;
-        if (!display.Layout.IsHidden(hostLayer)
-            && !LayerWouldOverlap(item, hostLayer, addedSet))
+        var requestedRow =
+            display.Layout.VisualRowOfLogical(requestedLayer);
+        var rawHostLayer = item.Layer;
+
+        // YMM4 evaluates the drop against uncompressed physical rows. Translate
+        // any host row offset back into folded display-row space before deciding
+        // the logical layer. A zero offset means the host simply used the raw
+        // display row and had no knowledge of collisions on the logical target.
+        var hostRowDelta =
+            pendingDisplayRow < 0
+                ? 0
+                : rawHostLayer - pendingDisplayRow;
+
+        var candidateRow = requestedRow + hostRowDelta;
+        if (candidateRow >= 0
+            && candidateRow < display.Layout.VisibleLayers.Count)
         {
-            return hostLayer;
+            var candidate =
+                display.Layout.DisplayRowToLogical(candidateRow);
+            if (!LayerWouldOverlap(item, candidate, addedSet))
+            {
+                log(
+                    $"filedrop_folded_host_map item={item.GetType().Name} " +
+                    $"raw_host_layer={rawHostLayer} raw_drop_row={pendingDisplayRow} " +
+                    $"requested_layer={requestedLayer} host_row_delta={hostRowDelta} " +
+                    $"resolved_layer={candidate}");
+                return candidate;
+            }
         }
 
-        var direction = Math.Sign(hostLayer - requestedLayer);
+        // Native AddFileItem prefers the next lower row when the requested row
+        // is occupied. Search visible folded rows in that same direction; if
+        // the host supplied a row delta, preserve its direction.
+        var direction = Math.Sign(hostRowDelta);
         if (direction == 0)
-            direction = hostLayer >= requestedLayer ? 1 : -1;
+            direction = 1;
 
-        for (var layer = hostLayer;
-             layer >= 0 && layer <= display.Layout.MaxLayer;
-             layer += direction)
+        for (var step = 1;
+             step < display.Layout.VisibleLayers.Count;
+             step++)
         {
-            if (display.Layout.IsHidden(layer))
-                continue;
+            var row = requestedRow + direction * step;
+            if (row < 0
+                || row >= display.Layout.VisibleLayers.Count)
+            {
+                break;
+            }
 
+            var layer =
+                display.Layout.DisplayRowToLogical(row);
             if (!LayerWouldOverlap(item, layer, addedSet))
             {
                 log(
                     $"filedrop_collision_escape item={item.GetType().Name} " +
-                    $"host_layer={hostLayer} requested_layer={requestedLayer} " +
-                    $"resolved_layer={layer} direction={direction}");
+                    $"raw_host_layer={rawHostLayer} requested_layer={requestedLayer} " +
+                    $"resolved_layer={layer} direction={direction} step={step}");
+                return layer;
+            }
+        }
+
+        // If the preferred direction has no room, try the opposite side before
+        // falling back to the requested logical layer.
+        direction = -direction;
+        for (var step = 1;
+             step < display.Layout.VisibleLayers.Count;
+             step++)
+        {
+            var row = requestedRow + direction * step;
+            if (row < 0
+                || row >= display.Layout.VisibleLayers.Count)
+            {
+                break;
+            }
+
+            var layer =
+                display.Layout.DisplayRowToLogical(row);
+            if (!LayerWouldOverlap(item, layer, addedSet))
+            {
+                log(
+                    $"filedrop_collision_escape_reverse item={item.GetType().Name} " +
+                    $"raw_host_layer={rawHostLayer} requested_layer={requestedLayer} " +
+                    $"resolved_layer={layer} direction={direction} step={step}");
                 return layer;
             }
         }
 
         log(
             $"filedrop_collision_escape_unresolved item={item.GetType().Name} " +
-            $"host_layer={hostLayer} requested_layer={requestedLayer}");
-        return hostLayer;
+            $"raw_host_layer={rawHostLayer} requested_layer={requestedLayer}");
+        return requestedLayer;
     }
 
     private void CorrectPendingNewItems(string source)
@@ -234,22 +298,19 @@ internal sealed class FileDropMapAdapter : IDisposable
 
         foreach (var item in added)
         {
-            var targetLayer = pendingLogicalLayer;
+            var requestedLayer = pendingLogicalLayer;
+            var targetLayer = ResolveFoldedDropLayer(
+                item,
+                requestedLayer,
+                addedSet);
 
-            if (item.Layer != targetLayer
-                && LayerWouldOverlap(item, targetLayer, addedSet))
+            if (targetLayer != requestedLayer)
             {
-                var resolved = ResolveVisibleCollisionEscape(
-                    item,
-                    targetLayer,
-                    addedSet);
-
                 log(
                     $"filedrop_preserve_native_collision source={source} " +
-                    $"item={item.GetType().Name} host_layer={item.Layer} " +
-                    $"requested_layer={targetLayer} resolved_layer={resolved} " +
+                    $"item={item.GetType().Name} raw_host_layer={item.Layer} " +
+                    $"requested_layer={requestedLayer} resolved_layer={targetLayer} " +
                     $"frame={item.Frame} length={item.Length}");
-                targetLayer = resolved;
             }
 
             if (item.Layer != targetLayer)
@@ -260,6 +321,7 @@ internal sealed class FileDropMapAdapter : IDisposable
         }
 
         pendingLogicalLayer = -1;
+        pendingDisplayRow = -1;
         pendingBefore = null;
     }
 
@@ -270,6 +332,7 @@ internal sealed class FileDropMapAdapter : IDisposable
 
         disposed = true;
         pendingLogicalLayer = -1;
+        pendingDisplayRow = -1;
         pendingBefore = null;
         vmNotify.PropertyChanged -= VmChanged;
         host.View.RemoveHandler(DragDrop.PreviewDragEnterEvent, new DragEventHandler(DragEnter));
