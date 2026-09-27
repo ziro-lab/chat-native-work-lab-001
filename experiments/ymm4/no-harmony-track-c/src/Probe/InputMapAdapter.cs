@@ -121,46 +121,25 @@ internal sealed class InputMapAdapter : IDisposable
         return false;
     }
 
-    private int ResolveVisibleCollisionEscape(
-        IItem item,
-        int requestedLayer,
+    private bool GroupTargetsAreValid(
+        IReadOnlyDictionary<IItem, int> requestedTargets,
+        int offset,
         HashSet<IItem> moving)
     {
-        var hostLayer = item.Layer;
-        if (!display.Layout.IsHidden(hostLayer)
-            && !LayerWouldOverlap(item, hostLayer, moving))
+        foreach (var (item, requestedLayer) in requestedTargets)
         {
-            return hostLayer;
-        }
+            var layer = requestedLayer + offset;
+            if (layer < 0 || layer > display.Layout.MaxLayer)
+                return false;
 
-        var direction = Math.Sign(hostLayer - requestedLayer);
-        if (direction == 0)
-            direction = hostLayer >= requestedLayer ? 1 : -1;
-
-        for (var layer = hostLayer;
-             layer >= 0 && layer <= display.Layout.MaxLayer;
-             layer += direction)
-        {
-            if (display.Layout.IsHidden(layer))
-                continue;
-
-            if (!LayerWouldOverlap(item, layer, moving))
+            if (display.Layout.IsHidden(layer)
+                || LayerWouldOverlap(item, layer, moving))
             {
-                log(
-                    $"move_collision_escape item={item.Remark} " +
-                    $"host_layer={hostLayer} requested_layer={requestedLayer} " +
-                    $"resolved_layer={layer} direction={direction}");
-                return layer;
+                return false;
             }
         }
 
-        // No better visible escape exists in the host-selected direction.
-        // Preserve the native host choice rather than forcing the colliding
-        // requested layer.
-        log(
-            $"move_collision_escape_unresolved item={item.Remark} " +
-            $"host_layer={hostLayer} requested_layer={requestedLayer}");
-        return hostLayer;
+        return true;
     }
 
     private bool ApplyHostCollisionPolicy(
@@ -171,33 +150,91 @@ internal sealed class InputMapAdapter : IDisposable
         foreach (var member in group.Keys)
             moving.Add(member);
 
-        var collisionDetected = false;
+        var evidence = targets
+            .Where(pair =>
+                pair.Key.Layer != pair.Value
+                && LayerWouldOverlap(
+                    pair.Key,
+                    pair.Value,
+                    moving))
+            .Select(pair => new
+            {
+                Item = pair.Key,
+                Requested = pair.Value,
+                HostOffset = pair.Key.Layer - pair.Value
+            })
+            .ToArray();
 
-        foreach (var (item, targetLayer) in targets.ToArray())
+        if (evidence.Length == 0)
+            return false;
+
+        // Native YMM4 moves a selected group as one unit when one member would
+        // collide. Preserve that group-level escape instead of resolving each
+        // member independently.
+        var firstOffset = evidence
+            .Select(x => x.HostOffset)
+            .FirstOrDefault(offset => offset != 0);
+        var direction = Math.Sign(firstOffset);
+        if (direction == 0)
+            direction = 1;
+
+        var startDistance = Math.Max(1, Math.Abs(firstOffset));
+
+        for (var distance = startDistance;
+             distance <= display.Layout.MaxLayer + 1;
+             distance++)
         {
-            // If the host already chose the requested logical layer there is no
-            // post-correction to police.
-            if (item.Layer == targetLayer)
+            var offset = direction * distance;
+            if (!GroupTargetsAreValid(
+                    targets,
+                    offset,
+                    moving))
+            {
                 continue;
+            }
 
-            if (!LayerWouldOverlap(item, targetLayer, moving))
-                continue;
-
-            collisionDetected = true;
-            var resolved = ResolveVisibleCollisionEscape(
-                item,
-                targetLayer,
-                moving);
+            foreach (var item in targets.Keys.ToArray())
+                targets[item] += offset;
 
             log(
-                $"move_preserve_native_collision item={item.Remark} " +
-                $"host_layer={item.Layer} requested_layer={targetLayer} " +
-                $"resolved_layer={resolved} frame={item.Frame} length={item.Length}");
-
-            targets[item] = resolved;
+                $"move_group_collision_escape offset={offset} " +
+                $"direction={direction} members={targets.Count} " +
+                $"evidence={string.Join("|", evidence.Select(x => $"{x.Item.Remark}:hostL{x.Item.Layer}:requestedL{x.Requested}"))}");
+            return true;
         }
 
-        return collisionDetected;
+        // A ceiling/floor can exhaust the host-selected direction. Try the
+        // opposite visible direction before falling back to raw native layers.
+        for (var distance = 1;
+             distance <= display.Layout.MaxLayer + 1;
+             distance++)
+        {
+            var offset = -direction * distance;
+            if (!GroupTargetsAreValid(
+                    targets,
+                    offset,
+                    moving))
+            {
+                continue;
+            }
+
+            foreach (var item in targets.Keys.ToArray())
+                targets[item] += offset;
+
+            log(
+                $"move_group_collision_escape_reverse offset={offset} " +
+                $"members={targets.Count}");
+            return true;
+        }
+
+        // No visible collision-free group position exists. Preserve the host
+        // group's current native layers rather than forcing a colliding target.
+        foreach (var item in targets.Keys.ToArray())
+            targets[item] = item.Layer;
+
+        log(
+            $"move_group_collision_escape_unresolved members={targets.Count}");
+        return true;
     }
 
     private void PreviewMove(object sender, MouseEventArgs e)
