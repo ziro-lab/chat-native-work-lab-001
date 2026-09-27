@@ -181,7 +181,39 @@ internal static class ProbeC
             var child = Make("child", 10, 2); var hidden = Make("hidden", 80, 3); var tail = Make("tail", 280, 10); var low = Make("low", 160, 20);
             var collisionBlock = Make("collision_block", 20, 10, 120);
             var collisionMover = Make("collision_mover", 140, 10, 120);
-            var fixtures = new IItem[] { drag, other, target, child, hidden, tail, low, collisionBlock, collisionMover };
+
+            // Practical-use matrix fixtures.
+            var boundaryBlock = Make("boundary_block", 100, 6, 80);
+            var boundaryMover = Make("boundary_mover", 180, 6, 80);
+
+            var multiBlockA = Make("multi_block_a", 20, 14, 80);
+            var multiMoverA = Make("multi_mover_a", 100, 14, 80);
+            var multiBlockB = Make("multi_block_b", 180, 14, 80);
+            var multiMoverB = Make("multi_mover_b", 260, 14, 80);
+
+            var shapeBlock = new ShapeItem
+            {
+                Frame = 20,
+                Layer = 16,
+                Length = 120,
+                Remark = "CNWL_C_shape_block"
+            };
+            var shapeMover = new ShapeItem
+            {
+                Frame = 140,
+                Layer = 16,
+                Length = 120,
+                Remark = "CNWL_C_shape_mover"
+            };
+
+            var fixtures = new IItem[]
+            {
+                drag, other, target, child, hidden, tail, low,
+                collisionBlock, collisionMover,
+                boundaryBlock, boundaryMover,
+                multiBlockA, multiMoverA, multiBlockB, multiMoverB,
+                shapeBlock, shapeMover
+            };
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             t.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
             var model = window.DataContext.GetType().GetField("model", Host.Flags)?.GetValue(window.DataContext) ?? throw new MissingMemberException("MainViewModel.model");
@@ -271,6 +303,74 @@ internal static class ProbeC
             Check(
                 "collision_native_cross_reset",
                 (collisionMover.Layer, collisionMover.Frame) == nativeCrossBaseline);
+
+            // Practical matrix A: ShapeItem cross-layer collision parity baseline.
+            await Reveal(host, 16 * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var shapeNativeBaseline = (shapeMover.Layer, shapeMover.Frame);
+            var shapeNativeStart = host.Center(shapeMover);
+            var shapeNativeGoal = OverlapCenter(
+                host.ItemView(shapeBlock),
+                host.ItemView(shapeMover),
+                shapeBlock,
+                startOffsetFrames: 20,
+                y: shapeNativeStart.Y);
+            await DragPath(
+                shapeNativeStart,
+                new Point(shapeNativeStart.X, shapeNativeStart.Y + h),
+                new Point(shapeNativeGoal.X, shapeNativeStart.Y + h),
+                shapeNativeGoal);
+            var shapeNativeResult = (
+                Layer: shapeMover.Layer,
+                Frame: shapeMover.Frame,
+                Overlap: Overlaps(shapeBlock, shapeMover));
+            Fact("matrix_shape_native_layer", shapeNativeResult.Layer);
+            Fact("matrix_shape_native_frame", shapeNativeResult.Frame);
+            Fact("matrix_shape_native_overlap", shapeNativeResult.Overlap);
+            if ((shapeMover.Layer, shapeMover.Frame) != shapeNativeBaseline)
+            {
+                await Native.Key(0x5A, true);
+                await Task.Delay(300);
+            }
+            Check(
+                "matrix_shape_native_reset",
+                (shapeMover.Layer, shapeMover.Frame) == shapeNativeBaseline);
+
+            // Practical matrix B: native FileDrop onto an occupied timeline range.
+            // Record host placement; the folded adapter must not force a different
+            // collision result later.
+            await Reveal(host, 10 * h);
+            var nativeDropBlockView = host.ItemView(collisionBlock);
+            var nativeDropBlockRect = Host.ScreenRect(nativeDropBlockView);
+            var nativeDropPixelsPerFrame =
+                nativeDropBlockRect.Width / Math.Max(1, collisionBlock.Length);
+            var nativeDropPoint = new Point(
+                nativeDropBlockRect.X + 20 * nativeDropPixelsPerFrame,
+                nativeDropBlockRect.Y + nativeDropBlockRect.Height / 2.0);
+            var nativeCollisionDrop = await IntegratedFileDropHarness.DropPng(
+                window,
+                host,
+                nativeDropPoint,
+                output,
+                "practical-native-collision");
+            Check(
+                "matrix_filedrop_native_added",
+                nativeCollisionDrop.AddedItems.Length > 0);
+            var nativeDropPrimary = nativeCollisionDrop.AddedItems.First();
+            var nativeDropResult = (
+                Layer: nativeDropPrimary.Layer,
+                Frame: nativeDropPrimary.Frame,
+                Overlap: Overlaps(collisionBlock, nativeDropPrimary));
+            Fact("matrix_filedrop_native_layer", nativeDropResult.Layer);
+            Fact("matrix_filedrop_native_frame", nativeDropResult.Frame);
+            Fact("matrix_filedrop_native_overlap", nativeDropResult.Overlap);
+            await Native.Key(0x5A, true);
+            await Task.Delay(450);
+            Check(
+                "matrix_filedrop_native_undo",
+                !t.Items.Any(item =>
+                    nativeCollisionDrop.AddedItems.Any(added =>
+                        ReferenceEquals(item, added))));
 
             display = new DirectDisplay(host, Log);
             var a = new CollapsedSpan[] { new(2, 3), new(6, 8) };
@@ -369,6 +469,227 @@ internal static class ProbeC
             Check(
                 "collision_folded_cross_reset",
                 (collisionMover.Layer, collisionMover.Frame) == foldedCrossBaseline);
+
+            // Practical matrix C: same ShapeItem route under folded mapping must
+            // match native host collision behavior.
+            await Reveal(host, display.Layout.VisualRowOfLogical(16) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var shapeFoldedBaseline = (shapeMover.Layer, shapeMover.Frame);
+            var shapeFoldedStart = host.Center(shapeMover);
+            var shapeFoldedGoal = OverlapCenter(
+                host.ItemView(shapeBlock),
+                host.ItemView(shapeMover),
+                shapeBlock,
+                startOffsetFrames: 20,
+                y: shapeFoldedStart.Y);
+            await DragPath(
+                shapeFoldedStart,
+                new Point(shapeFoldedStart.X, shapeFoldedStart.Y + h),
+                new Point(shapeFoldedGoal.X, shapeFoldedStart.Y + h),
+                shapeFoldedGoal);
+            await Sample(host, display, "matrix_shape_folded");
+            var shapeFoldedResult = (
+                Layer: shapeMover.Layer,
+                Frame: shapeMover.Frame,
+                Overlap: Overlaps(shapeBlock, shapeMover));
+            Fact("matrix_shape_folded_layer", shapeFoldedResult.Layer);
+            Fact("matrix_shape_folded_frame", shapeFoldedResult.Frame);
+            Fact("matrix_shape_folded_overlap", shapeFoldedResult.Overlap);
+            Check(
+                "matrix_shape_native_parity",
+                shapeFoldedResult == shapeNativeResult);
+            if ((shapeMover.Layer, shapeMover.Frame) != shapeFoldedBaseline)
+            {
+                await Native.Key(0x5A, true);
+                await Sample(host, display, "matrix_shape_folded_undo");
+            }
+            Check(
+                "matrix_shape_folded_reset",
+                (shapeMover.Layer, shapeMover.Frame) == shapeFoldedBaseline);
+
+            // Practical matrix D: multi-select collision. Two movers are selected
+            // together and returned onto two occupied ranges. The host's group
+            // avoidance must remain intact and the selected group must stay shaped.
+            await Reveal(host, display.Layout.VisualRowOfLogical(14) * h);
+            t.SelectItems([multiMoverA, multiMoverB]);
+            await Task.Delay(180);
+            var multiBaselineA = (multiMoverA.Layer, multiMoverA.Frame);
+            var multiBaselineB = (multiMoverB.Layer, multiMoverB.Frame);
+            var multiStart = host.Center(multiMoverA);
+            var multiGoal = OverlapCenter(
+                host.ItemView(multiBlockA),
+                host.ItemView(multiMoverA),
+                multiBlockA,
+                startOffsetFrames: 20,
+                y: multiStart.Y);
+            await DragPath(
+                multiStart,
+                new Point(multiStart.X, multiStart.Y + h),
+                new Point(multiGoal.X, multiStart.Y + h),
+                multiGoal);
+            await Sample(host, display, "matrix_multi_collision");
+            var multiOverlap =
+                Overlaps(multiBlockA, multiMoverA)
+                || Overlaps(multiBlockB, multiMoverB);
+            Fact("matrix_multi_layer_a", multiMoverA.Layer);
+            Fact("matrix_multi_layer_b", multiMoverB.Layer);
+            Fact("matrix_multi_frame_a", multiMoverA.Frame);
+            Fact("matrix_multi_frame_b", multiMoverB.Frame);
+            Fact("matrix_multi_overlap", multiOverlap);
+            Check("matrix_multi_no_overlap", !multiOverlap);
+            Check(
+                "matrix_multi_same_layer",
+                multiMoverA.Layer == multiMoverB.Layer);
+            Check(
+                "matrix_multi_shape_preserved",
+                multiMoverB.Frame - multiMoverA.Frame
+                    == multiBaselineB.Frame - multiBaselineA.Frame);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_multi_collision_undo");
+            Check(
+                "matrix_multi_reset",
+                (multiMoverA.Layer, multiMoverA.Frame) == multiBaselineA
+                && (multiMoverB.Layer, multiMoverB.Frame) == multiBaselineB);
+
+            // Practical matrix E: collapsed-boundary collision. L6 is the visible
+            // owner of collapsed L6..L8. Move down one DISPLAY row (logical L9),
+            // overlap horizontally, then return to L6. A collision escape must not
+            // strand the item on a hidden logical row.
+            await Reveal(host, display.Layout.VisualRowOfLogical(6) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var boundaryBaseline = (boundaryMover.Layer, boundaryMover.Frame);
+            var boundaryStart = host.Center(boundaryMover);
+            var boundaryGoal = OverlapCenter(
+                host.ItemView(boundaryBlock),
+                host.ItemView(boundaryMover),
+                boundaryBlock,
+                startOffsetFrames: 20,
+                y: boundaryStart.Y);
+            await DragPath(
+                boundaryStart,
+                new Point(boundaryStart.X, boundaryStart.Y + h),
+                new Point(boundaryGoal.X, boundaryStart.Y + h),
+                boundaryGoal);
+            await Sample(host, display, "matrix_boundary_collision");
+            var boundaryOverlap = Overlaps(boundaryBlock, boundaryMover);
+            Fact("matrix_boundary_layer", boundaryMover.Layer);
+            Fact("matrix_boundary_frame", boundaryMover.Frame);
+            Fact("matrix_boundary_overlap", boundaryOverlap);
+            Fact(
+                "matrix_boundary_hidden",
+                display.Layout.IsHidden(boundaryMover.Layer));
+            Check("matrix_boundary_no_overlap", !boundaryOverlap);
+            Check(
+                "matrix_boundary_not_hidden",
+                !display.Layout.IsHidden(boundaryMover.Layer));
+            if ((boundaryMover.Layer, boundaryMover.Frame) != boundaryBaseline)
+            {
+                await Native.Key(0x5A, true);
+                await Sample(host, display, "matrix_boundary_collision_undo");
+            }
+            Check(
+                "matrix_boundary_reset",
+                (boundaryMover.Layer, boundaryMover.Frame) == boundaryBaseline);
+
+            // Practical matrix F: folded FileDrop onto the same occupied logical
+            // time/layer as the native baseline. Placement policy should match
+            // native YMM4 rather than being overwritten by post-correction.
+            await Reveal(host, display.Layout.VisualRowOfLogical(10) * h);
+            var foldedDropBlockView = host.ItemView(collisionBlock);
+            var foldedDropBlockRect = Host.ScreenRect(foldedDropBlockView);
+            var foldedDropPixelsPerFrame =
+                foldedDropBlockRect.Width / Math.Max(1, collisionBlock.Length);
+            var foldedDropPoint = new Point(
+                foldedDropBlockRect.X + 20 * foldedDropPixelsPerFrame,
+                foldedDropBlockRect.Y + foldedDropBlockRect.Height / 2.0);
+            var foldedCollisionDrop = await IntegratedFileDropHarness.DropPng(
+                window,
+                host,
+                foldedDropPoint,
+                output,
+                "practical-folded-collision");
+            await Sample(host, display, "matrix_filedrop_folded");
+            Check(
+                "matrix_filedrop_folded_added",
+                foldedCollisionDrop.AddedItems.Length > 0);
+            var foldedDropPrimary = foldedCollisionDrop.AddedItems.First();
+            var foldedDropResult = (
+                Layer: foldedDropPrimary.Layer,
+                Frame: foldedDropPrimary.Frame,
+                Overlap: Overlaps(collisionBlock, foldedDropPrimary));
+            Fact("matrix_filedrop_folded_layer", foldedDropResult.Layer);
+            Fact("matrix_filedrop_folded_frame", foldedDropResult.Frame);
+            Fact("matrix_filedrop_folded_overlap", foldedDropResult.Overlap);
+            Check(
+                "matrix_filedrop_native_parity",
+                foldedDropResult == nativeDropResult);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_filedrop_folded_undo");
+            Check(
+                "matrix_filedrop_folded_undo",
+                !t.Items.Any(item =>
+                    foldedCollisionDrop.AddedItems.Any(added =>
+                        ReferenceEquals(item, added))));
+
+            // Practical matrix G: repeat the original Voice collision after an
+            // Undo/Redo cycle to catch stale gesture/layer state.
+            await Reveal(host, display.Layout.VisualRowOfLogical(10) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var repeatBaseline = (collisionMover.Layer, collisionMover.Frame);
+            var repeatStart = host.Center(collisionMover);
+            var repeatGoal = OverlapCenter(
+                host.ItemView(collisionBlock),
+                host.ItemView(collisionMover),
+                collisionBlock,
+                startOffsetFrames: 20,
+                y: repeatStart.Y);
+            await DragPath(
+                repeatStart,
+                new Point(repeatStart.X, repeatStart.Y + h),
+                new Point(repeatGoal.X, repeatStart.Y + h),
+                repeatGoal);
+            await Sample(host, display, "matrix_repeat_collision_1");
+            var repeatFirst = (collisionMover.Layer, collisionMover.Frame);
+            Check(
+                "matrix_repeat_collision_1_no_overlap",
+                !Overlaps(collisionBlock, collisionMover));
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_repeat_collision_undo");
+            await Native.Key(0x59, true);
+            await Sample(host, display, "matrix_repeat_collision_redo");
+            Check(
+                "matrix_repeat_collision_redo",
+                (collisionMover.Layer, collisionMover.Frame) == repeatFirst);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_repeat_collision_reset");
+            Check(
+                "matrix_repeat_collision_reset",
+                (collisionMover.Layer, collisionMover.Frame) == repeatBaseline);
+
+            repeatStart = host.Center(collisionMover);
+            repeatGoal = OverlapCenter(
+                host.ItemView(collisionBlock),
+                host.ItemView(collisionMover),
+                collisionBlock,
+                startOffsetFrames: 20,
+                y: repeatStart.Y);
+            await DragPath(
+                repeatStart,
+                new Point(repeatStart.X, repeatStart.Y + h),
+                new Point(repeatGoal.X, repeatStart.Y + h),
+                repeatGoal);
+            await Sample(host, display, "matrix_repeat_collision_2");
+            Check(
+                "matrix_repeat_collision_2_no_overlap",
+                !Overlaps(collisionBlock, collisionMover));
+            Check(
+                "matrix_repeat_collision_stable",
+                (collisionMover.Layer, collisionMover.Frame) == repeatFirst);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_repeat_collision_2_reset");
+            Check(
+                "matrix_repeat_collision_final_reset",
+                (collisionMover.Layer, collisionMover.Frame) == repeatBaseline);
 
             await Reveal(host, display.Layout.VisualRowOfLogical(target.Layer) * h);
             await Right(host, target, 9, "right_before_drag", h);
