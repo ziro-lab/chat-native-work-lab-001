@@ -32,7 +32,12 @@ internal static class ProbeC
     }
     private static void Log(string text) => File.AppendAllText(Path.Combine(output, "progress.txt"), DateTime.UtcNow.ToString("O") + " " + text + Environment.NewLine);
     private static void Check(string name, bool ok) { checks.Add(name + "=" + ok); failed |= !ok; Log("assert " + checks[^1]); }
-    private static void Fact(string name, object value) { facts.Add(name + "=" + value); Log("fact " + facts[^1]); }
+    private static void Fact(string name, object value)
+    {
+        var rendered = value is bool flag ? (flag ? "1" : "0") : value?.ToString() ?? "<null>";
+        facts.Add(name + "=" + rendered);
+        Log("fact " + facts[^1]);
+    }
     private static bool Overlaps(IItem a, IItem b) =>
         a.Layer == b.Layer
         && a.Frame < b.Frame + b.Length
@@ -352,6 +357,10 @@ internal static class ProbeC
             Fact(
                 "collision_cross_bypass_reproduced",
                 !nativeCrossOverlap && foldedCrossOverlap);
+            Check("collision_native_cross_no_overlap", !nativeCrossOverlap);
+            Check("collision_folded_cross_no_overlap", !foldedCrossOverlap);
+            Check("collision_folded_cross_host_layer_preserved", collisionMover.Layer != 10);
+            Check("collision_folded_cross_frame_preserved", collisionMover.Frame == 40);
             if (foldedCrossChanged)
             {
                 await Native.Key(0x5A, true);
