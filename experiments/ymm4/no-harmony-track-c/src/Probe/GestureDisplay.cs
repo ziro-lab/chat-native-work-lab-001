@@ -58,9 +58,14 @@ internal sealed class DirectDisplay : IDisposable
     internal int SubscriptionCount => watched.Count + collections.Count;
     internal double ExpectedExtent { get; private set; }
     internal bool GestureActive => gesture;
+    internal bool IsOperational => !disposed && Failure is null;
     internal event EventHandler? Applied;
 
-    internal DirectDisplay(Host host, Action<string> log)
+    internal DirectDisplay(
+        Host host,
+        Action<string> log,
+        bool strictValidation = true,
+        bool enableRenderAudits = true)
     {
         this.host = host;
         this.log = log;
