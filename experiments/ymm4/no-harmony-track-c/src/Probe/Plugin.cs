@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -90,6 +91,68 @@ internal static class ProbeC
         Check(name + "_converter", position is Point mapped && Host.ConverterLayer(mapped, height) == expected);
         await Native.Key(0x1B);
     }
+
+    private static class CollisionDragNative
+    {
+        [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll")] internal static extern void mouse_event(uint flags, uint dx, uint dy, uint data, nuint extra);
+        internal const uint LeftDown = 2;
+        internal const uint LeftUp = 4;
+    }
+
+    private static async Task DragPath(Point start, params Point[] waypoints)
+    {
+        CollisionDragNative.SetCursorPos(
+            (int)Math.Round(start.X),
+            (int)Math.Round(start.Y));
+        await Task.Delay(140);
+        CollisionDragNative.mouse_event(CollisionDragNative.LeftDown, 0, 0, 0, 0);
+        await Task.Delay(140);
+
+        var from = start;
+        try
+        {
+            foreach (var to in waypoints)
+            {
+                const int steps = 6;
+                for (var i = 1; i <= steps; i++)
+                {
+                    var p = new Point(
+                        from.X + (to.X - from.X) * i / steps,
+                        from.Y + (to.Y - from.Y) * i / steps);
+                    CollisionDragNative.SetCursorPos(
+                        (int)Math.Round(p.X),
+                        (int)Math.Round(p.Y));
+                    await Task.Delay(80);
+                }
+                from = to;
+                await Task.Delay(120);
+            }
+        }
+        finally
+        {
+            CollisionDragNative.mouse_event(CollisionDragNative.LeftUp, 0, 0, 0, 0);
+        }
+
+        await Task.Delay(450);
+    }
+
+    private static Point OverlapCenter(
+        FrameworkElement blockerView,
+        FrameworkElement moverView,
+        IItem blocker,
+        int startOffsetFrames,
+        double y)
+    {
+        var blockerRect = Host.ScreenRect(blockerView);
+        var moverRect = Host.ScreenRect(moverView);
+        var pixelsPerFrame = blockerRect.Width / Math.Max(1, blocker.Length);
+        return new Point(
+            blockerRect.X
+                + startOffsetFrames * pixelsPerFrame
+                + moverRect.Width / 2.0,
+            y);
+    }
     private static async Task Run(Window window, object vm, Timeline t)
     {
         DirectDisplay? display = null; InputMapAdapter? input = null; FileDropMapAdapter? fileDrop = null;
@@ -160,6 +223,49 @@ internal static class ProbeC
             }
             Check("collision_native_reset", (collisionMover.Layer, collisionMover.Frame) == collisionBaseline);
 
+            // Reproduction route from hands-on feedback:
+            // leave the source layer, move horizontally into the blocker while on
+            // the adjacent layer, then return to the original layer and release.
+            await Reveal(host, 12 * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var nativeCrossBaseline = (collisionMover.Layer, collisionMover.Frame);
+            var nativeCrossStart = host.Center(collisionMover);
+            var nativeCrossGoal = OverlapCenter(
+                host.ItemView(collisionBlock),
+                host.ItemView(collisionMover),
+                collisionBlock,
+                startOffsetFrames: 20,
+                y: nativeCrossStart.Y);
+            var nativeCrossOtherLayer = new Point(
+                nativeCrossStart.X,
+                nativeCrossStart.Y - h);
+            var nativeCrossOtherLayerOverlap = new Point(
+                nativeCrossGoal.X,
+                nativeCrossStart.Y - h);
+            Log(
+                $"phase=collision_native_cross_layer baseline={nativeCrossBaseline} " +
+                $"goal_frame={collisionBlock.Frame + 20}");
+            await DragPath(
+                nativeCrossStart,
+                nativeCrossOtherLayer,
+                nativeCrossOtherLayerOverlap,
+                nativeCrossGoal);
+            var nativeCrossOverlap = Overlaps(collisionBlock, collisionMover);
+            var nativeCrossChanged =
+                (collisionMover.Layer, collisionMover.Frame) != nativeCrossBaseline;
+            Fact("collision_native_cross_overlap", nativeCrossOverlap);
+            Fact("collision_native_cross_layer", collisionMover.Layer);
+            Fact("collision_native_cross_frame", collisionMover.Frame);
+            Fact("collision_native_cross_changed", nativeCrossChanged);
+            if (nativeCrossChanged)
+            {
+                await Native.Key(0x5A, true);
+                await Task.Delay(350);
+            }
+            Check(
+                "collision_native_cross_reset",
+                (collisionMover.Layer, collisionMover.Frame) == nativeCrossBaseline);
+
             display = new DirectDisplay(host, Log);
             var a = new CollapsedSpan[] { new(2, 3), new(6, 8) };
             var b = new CollapsedSpan[] { new(1, 5), new(2, 3), new(6, 8) };
@@ -203,6 +309,55 @@ internal static class ProbeC
                 await Sample(host, display, "collision_folded_undo");
             }
             Check("collision_folded_reset", (collisionMover.Layer, collisionMover.Frame) == foldedCollisionBaseline);
+
+            await Reveal(host, display.Layout.VisualRowOfLogical(12) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var foldedCrossBaseline = (collisionMover.Layer, collisionMover.Frame);
+            var foldedCrossCorrectionsBefore = input.Corrections;
+            var foldedCrossStart = host.Center(collisionMover);
+            var foldedCrossGoal = OverlapCenter(
+                host.ItemView(collisionBlock),
+                host.ItemView(collisionMover),
+                collisionBlock,
+                startOffsetFrames: 20,
+                y: foldedCrossStart.Y);
+            var foldedCrossOtherLayer = new Point(
+                foldedCrossStart.X,
+                foldedCrossStart.Y - h);
+            var foldedCrossOtherLayerOverlap = new Point(
+                foldedCrossGoal.X,
+                foldedCrossStart.Y - h);
+            Log(
+                $"phase=collision_folded_cross_layer baseline={foldedCrossBaseline} " +
+                $"visual_row={display.Layout.VisualRowOfLogical(12)} " +
+                $"goal_frame={collisionBlock.Frame + 20}");
+            await DragPath(
+                foldedCrossStart,
+                foldedCrossOtherLayer,
+                foldedCrossOtherLayerOverlap,
+                foldedCrossGoal);
+            await Sample(host, display, "collision_folded_cross");
+            var foldedCrossOverlap = Overlaps(collisionBlock, collisionMover);
+            var foldedCrossChanged =
+                (collisionMover.Layer, collisionMover.Frame) != foldedCrossBaseline;
+            var foldedCrossCorrections =
+                input.Corrections - foldedCrossCorrectionsBefore;
+            Fact("collision_folded_cross_overlap", foldedCrossOverlap);
+            Fact("collision_folded_cross_layer", collisionMover.Layer);
+            Fact("collision_folded_cross_frame", collisionMover.Frame);
+            Fact("collision_folded_cross_changed", foldedCrossChanged);
+            Fact("collision_folded_cross_corrections", foldedCrossCorrections);
+            Fact(
+                "collision_cross_bypass_reproduced",
+                !nativeCrossOverlap && foldedCrossOverlap);
+            if (foldedCrossChanged)
+            {
+                await Native.Key(0x5A, true);
+                await Sample(host, display, "collision_folded_cross_undo");
+            }
+            Check(
+                "collision_folded_cross_reset",
+                (collisionMover.Layer, collisionMover.Frame) == foldedCrossBaseline);
 
             await Reveal(host, display.Layout.VisualRowOfLogical(target.Layer) * h);
             await Right(host, target, 9, "right_before_drag", h);
