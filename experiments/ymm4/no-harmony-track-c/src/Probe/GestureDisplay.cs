@@ -127,7 +127,16 @@ internal sealed class DirectDisplay : IDisposable
         if (disposed)
             throw new ObjectDisposedException(nameof(DirectDisplay));
         if (gesture)
-            throw new InvalidOperationException("Folder change during gesture");
+        {
+            if (strictValidation)
+                throw new InvalidOperationException("Folder change during gesture");
+
+            spans = next.ToArray();
+            DeferredApplies++;
+            log("folder_change_deferred_during_gesture");
+            return;
+        }
+
         spans = next.ToArray();
         Queue();
     }
@@ -397,8 +406,6 @@ internal sealed class DirectDisplay : IDisposable
             throw new InvalidOperationException("Invalid native height");
 
         slots.Add(target, new Slot(target, layer, item, ratio, top, height));
-        if (strictValidation && slots.Count > 2048)
-            throw new InvalidOperationException("Fixture slot budget exceeded");
     }
 
     private void RefreshSlots()
@@ -539,8 +546,6 @@ internal sealed class DirectDisplay : IDisposable
             }
 
             var maximum = Math.Max(count, Math.Max(host.Timeline.MaxLayer, spans.Length == 0 ? 0 : spans.Max(x => x.End))) + 8;
-            if (strictValidation && maximum > 1024)
-                throw new InvalidOperationException("Fixture layer budget exceeded");
 
             Layout = FolderLayout.Create(maximum, spans);
             ExpectedExtent = Enumerable.Range(0, count).Count(x => !Layout.IsHidden(x)) * (double)Height;
