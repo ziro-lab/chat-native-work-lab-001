@@ -21,6 +21,7 @@ internal static class ProbeC
     private static bool scheduled, failed;
     private static string output = "";
     private static readonly List<string> checks = [];
+    private static readonly List<string> facts = [];
     internal static void Schedule()
     {
         var path = Environment.GetEnvironmentVariable("CNWL_TRACK_C_DIR");
@@ -30,6 +31,11 @@ internal static class ProbeC
     }
     private static void Log(string text) => File.AppendAllText(Path.Combine(output, "progress.txt"), DateTime.UtcNow.ToString("O") + " " + text + Environment.NewLine);
     private static void Check(string name, bool ok) { checks.Add(name + "=" + ok); failed |= !ok; Log("assert " + checks[^1]); }
+    private static void Fact(string name, object value) { facts.Add(name + "=" + value); Log("fact " + facts[^1]); }
+    private static bool Overlaps(IItem a, IItem b) =>
+        a.Layer == b.Layer
+        && a.Frame < b.Frame + b.Length
+        && b.Frame < a.Frame + a.Length;
     private static void Bootstrap()
     {
         var ticks = 0; var created = false;
@@ -102,10 +108,12 @@ internal static class ProbeC
             var host = new Host(window, t, vm, view, scroll.Content as FrameworkElement ?? throw new InvalidOperationException("Content"), scroll);
             host.Activate(); Check("visible_context_bound", ReferenceEquals(vm, view.DataContext));
             var character = new Character { Name = "CNWL_TRACK_C" };
-            VoiceItem Make(string name, int frame, int layer) => new(character) { Frame = frame, Layer = layer, Length = 30, Serif = name, Remark = "CNWL_C_" + name };
+            VoiceItem Make(string name, int frame, int layer, int length = 30) => new(character) { Frame = frame, Layer = layer, Length = length, Serif = name, Remark = "CNWL_C_" + name };
             var drag = Make("drag", 40, 6); var other = Make("other", 220, 6); var target = Make("target", 140, 9);
             var child = Make("child", 10, 2); var hidden = Make("hidden", 80, 3); var tail = Make("tail", 280, 10); var low = Make("low", 160, 20);
-            var fixtures = new IItem[] { drag, other, target, child, hidden, tail, low };
+            var collisionBlock = Make("collision_block", 360, 12, 120);
+            var collisionMover = Make("collision_mover", 500, 12, 120);
+            var fixtures = new IItem[] { drag, other, target, child, hidden, tail, low, collisionBlock, collisionMover };
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             t.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
             var model = window.DataContext.GetType().GetField("model", Host.Flags)?.GetValue(window.DataContext) ?? throw new MissingMemberException("MainViewModel.model");
@@ -122,6 +130,30 @@ internal static class ProbeC
             Check("native_control_undo", (drag.Layer, drag.Frame) == original);
             if ((drag.Layer, drag.Frame) != original) throw new InvalidOperationException("Native control failed");
             Log("native_frame_delta=" + delta);
+
+            // Collision control: with native geometry and no fold adapter, try to
+            // push the later VoiceItem into the earlier VoiceItem on the same layer.
+            // Record the host result without assuming the policy.
+            await Reveal(host, 12 * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var collisionBaseline = (collisionMover.Layer, collisionMover.Frame);
+            var nativeCollisionStart = host.Center(collisionMover);
+            var nativeBlockRect = Host.ScreenRect(host.ItemView(collisionBlock));
+            var nativeCollisionGoal = new Point(
+                nativeBlockRect.X + nativeBlockRect.Width * 0.65,
+                nativeCollisionStart.Y);
+            Log($"phase=collision_native start={collisionBaseline} block=L{collisionBlock.Layer}:F{collisionBlock.Frame}:Len{collisionBlock.Length}");
+            await Native.Drag(nativeCollisionStart, nativeCollisionGoal);
+            await Task.Delay(350);
+            var nativeCollisionOverlap = Overlaps(collisionBlock, collisionMover);
+            Fact("collision_native_overlap", nativeCollisionOverlap);
+            Fact("collision_native_mover_layer", collisionMover.Layer);
+            Fact("collision_native_mover_frame", collisionMover.Frame);
+            Fact("collision_native_block_end", collisionBlock.Frame + collisionBlock.Length);
+            await Native.Key(0x5A, true);
+            await Task.Delay(300);
+            Check("collision_native_undo", (collisionMover.Layer, collisionMover.Frame) == collisionBaseline);
+
             display = new DirectDisplay(host, Log);
             var a = new CollapsedSpan[] { new(2, 3), new(6, 8) };
             var b = new CollapsedSpan[] { new(1, 5), new(2, 3), new(6, 8) };
@@ -134,6 +166,32 @@ internal static class ProbeC
             await Native.Click(host.Center(target));
             Check("native_click_a", t.SelectedItems.Any(x => ReferenceEquals(x, target)));
             Check("click_no_layer_write", input.Corrections == 0 && (target.Layer, target.Frame) == targetState);
+
+            // Same collision gesture under folded geometry. Logical L12 is drawn
+            // several rows above native L12, so the host may temporarily evaluate
+            // the drag on the display-row layer before InputMapAdapter restores L12.
+            await Reveal(host, display.Layout.VisualRowOfLogical(12) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var foldedCollisionBaseline = (collisionMover.Layer, collisionMover.Frame);
+            var correctionsBeforeCollision = input.Corrections;
+            var foldedCollisionStart = host.Center(collisionMover);
+            var foldedBlockRect = Host.ScreenRect(host.ItemView(collisionBlock));
+            var foldedCollisionGoal = new Point(
+                foldedBlockRect.X + foldedBlockRect.Width * 0.65,
+                foldedCollisionStart.Y);
+            Log($"phase=collision_folded visual_row={display.Layout.VisualRowOfLogical(12)} start={foldedCollisionBaseline}");
+            await Native.Drag(foldedCollisionStart, foldedCollisionGoal);
+            await Sample(host, display, "collision_folded");
+            var foldedCollisionOverlap = Overlaps(collisionBlock, collisionMover);
+            Fact("collision_folded_overlap", foldedCollisionOverlap);
+            Fact("collision_folded_mover_layer", collisionMover.Layer);
+            Fact("collision_folded_mover_frame", collisionMover.Frame);
+            Fact("collision_folded_corrections", input.Corrections - correctionsBeforeCollision);
+            Fact("collision_bypass_reproduced", !nativeCollisionOverlap && foldedCollisionOverlap);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "collision_folded_undo");
+            Check("collision_folded_undo", (collisionMover.Layer, collisionMover.Frame) == foldedCollisionBaseline);
+
             await Right(host, target, 9, "right_before_drag", h);
             await Reveal(host, display.Layout.VisualRowOfLogical(6) * h);
             t.SelectedItems = ImmutableList<IItem>.Empty;
@@ -282,7 +340,7 @@ internal static class ProbeC
     private static void Finish()
     {
         var temp = Path.Combine(output, "result.tmp");
-        File.WriteAllLines(temp, new[] { "status=" + (failed ? "FAIL_TRACK_C_INPUT" : "PASS_TRACK_C_INPUT"), "assertion_count=" + checks.Count }.Concat(checks));
+        File.WriteAllLines(temp, new[] { "status=" + (failed ? "FAIL_TRACK_C_INPUT" : "PASS_TRACK_C_INPUT"), "assertion_count=" + checks.Count }.Concat(checks).Concat(facts));
         File.Move(temp, Path.Combine(output, "result.txt"), true);
     }
 }
