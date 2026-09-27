@@ -111,8 +111,8 @@ internal static class ProbeC
             VoiceItem Make(string name, int frame, int layer, int length = 30) => new(character) { Frame = frame, Layer = layer, Length = length, Serif = name, Remark = "CNWL_C_" + name };
             var drag = Make("drag", 40, 6); var other = Make("other", 220, 6); var target = Make("target", 140, 9);
             var child = Make("child", 10, 2); var hidden = Make("hidden", 80, 3); var tail = Make("tail", 280, 10); var low = Make("low", 160, 20);
-            var collisionBlock = Make("collision_block", 360, 12, 120);
-            var collisionMover = Make("collision_mover", 500, 12, 120);
+            var collisionBlock = Make("collision_block", 20, 12, 80);
+            var collisionMover = Make("collision_mover", 120, 12, 80);
             var fixtures = new IItem[] { drag, other, target, child, hidden, tail, low, collisionBlock, collisionMover };
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             t.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
