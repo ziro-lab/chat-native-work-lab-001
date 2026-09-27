@@ -143,7 +143,8 @@ internal sealed class InputMapAdapter : IDisposable
 
     private void Move(object sender, MouseEventArgs e)
     {
-        if (disposed || !display.IsOperational || anchor is null || e.LeftButton != MouseButtonState.Pressed)
+        var activeAnchor = anchor;
+        if (disposed || !display.IsOperational || activeAnchor is null || e.LeftButton != MouseButtonState.Pressed)
             return;
 
         BubbleMoves++;
@@ -158,7 +159,7 @@ internal sealed class InputMapAdapter : IDisposable
             // this MouseMove has already run. From now until MouseUp, freeze direct
             // geometry writes so native Layer/Top updates cannot cause a refresh loop.
             dragging = true;
-            log($"gesture_transition_after_native_move anchor=L{anchor.Layer}:F{anchor.Frame} p={p}");
+            log($"gesture_transition_after_native_move anchor=L{activeAnchor.Layer}:F{activeAnchor.Frame} p={p}");
             try
             {
                 display.BeginGesture(group.Keys);
