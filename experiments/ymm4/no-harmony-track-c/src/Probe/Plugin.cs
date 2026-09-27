@@ -174,8 +174,8 @@ internal static class ProbeC
             VoiceItem Make(string name, int frame, int layer, int length = 30) => new(character) { Frame = frame, Layer = layer, Length = length, Serif = name, Remark = "CNWL_C_" + name };
             var drag = Make("drag", 40, 6); var other = Make("other", 220, 6); var target = Make("target", 140, 9);
             var child = Make("child", 10, 2); var hidden = Make("hidden", 80, 3); var tail = Make("tail", 280, 10); var low = Make("low", 160, 20);
-            var collisionBlock = Make("collision_block", 20, 12, 120);
-            var collisionMover = Make("collision_mover", 140, 12, 120);
+            var collisionBlock = Make("collision_block", 20, 10, 120);
+            var collisionMover = Make("collision_mover", 140, 10, 120);
             var fixtures = new IItem[] { drag, other, target, child, hidden, tail, low, collisionBlock, collisionMover };
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             t.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
@@ -197,7 +197,7 @@ internal static class ProbeC
             // Collision control: with native geometry and no fold adapter, try to
             // push the later VoiceItem into the earlier VoiceItem on the same layer.
             // Record the host result without assuming the policy.
-            await Reveal(host, 12 * h);
+            await Reveal(host, 10 * h);
             t.SelectedItems = ImmutableList<IItem>.Empty;
             var collisionBaseline = (collisionMover.Layer, collisionMover.Frame);
             var nativeCollisionStart = host.Center(collisionMover);
@@ -226,7 +226,7 @@ internal static class ProbeC
             // Reproduction route from hands-on feedback:
             // leave the source layer, move horizontally into the blocker while on
             // the adjacent layer, then return to the original layer and release.
-            await Reveal(host, 12 * h);
+            await Reveal(host, 10 * h);
             t.SelectedItems = ImmutableList<IItem>.Empty;
             var nativeCrossBaseline = (collisionMover.Layer, collisionMover.Frame);
             var nativeCrossStart = host.Center(collisionMover);
@@ -238,10 +238,10 @@ internal static class ProbeC
                 y: nativeCrossStart.Y);
             var nativeCrossOtherLayer = new Point(
                 nativeCrossStart.X,
-                nativeCrossStart.Y - h);
+                nativeCrossStart.Y + h);
             var nativeCrossOtherLayerOverlap = new Point(
                 nativeCrossGoal.X,
-                nativeCrossStart.Y - h);
+                nativeCrossStart.Y + h);
             Log(
                 $"phase=collision_native_cross_layer baseline={nativeCrossBaseline} " +
                 $"goal_frame={collisionBlock.Frame + 20}");
@@ -257,6 +257,7 @@ internal static class ProbeC
             Fact("collision_native_cross_layer", collisionMover.Layer);
             Fact("collision_native_cross_frame", collisionMover.Frame);
             Fact("collision_native_cross_changed", nativeCrossChanged);
+            Fact("collision_native_cross_returned_source_layer", collisionMover.Layer == 10);
             if (nativeCrossChanged)
             {
                 await Native.Key(0x5A, true);
@@ -282,7 +283,7 @@ internal static class ProbeC
             // Same collision gesture under folded geometry. Logical L12 is drawn
             // several rows above native L12, so the host may temporarily evaluate
             // the drag on the display-row layer before InputMapAdapter restores L12.
-            await Reveal(host, display.Layout.VisualRowOfLogical(12) * h);
+            await Reveal(host, display.Layout.VisualRowOfLogical(10) * h);
             t.SelectedItems = ImmutableList<IItem>.Empty;
             var foldedCollisionBaseline = (collisionMover.Layer, collisionMover.Frame);
             var correctionsBeforeCollision = input.Corrections;
@@ -291,7 +292,7 @@ internal static class ProbeC
             var foldedCollisionGoal = new Point(
                 foldedBlockRect.X + foldedBlockRect.Width * 0.65,
                 foldedCollisionStart.Y);
-            Log($"phase=collision_folded visual_row={display.Layout.VisualRowOfLogical(12)} start={foldedCollisionBaseline}");
+            Log($"phase=collision_folded visual_row={display.Layout.VisualRowOfLogical(10)} start={foldedCollisionBaseline}");
             await Native.Drag(foldedCollisionStart, foldedCollisionGoal);
             await Sample(host, display, "collision_folded");
             var foldedCollisionOverlap = Overlaps(collisionBlock, collisionMover);
@@ -310,7 +311,7 @@ internal static class ProbeC
             }
             Check("collision_folded_reset", (collisionMover.Layer, collisionMover.Frame) == foldedCollisionBaseline);
 
-            await Reveal(host, display.Layout.VisualRowOfLogical(12) * h);
+            await Reveal(host, display.Layout.VisualRowOfLogical(10) * h);
             t.SelectedItems = ImmutableList<IItem>.Empty;
             var foldedCrossBaseline = (collisionMover.Layer, collisionMover.Frame);
             var foldedCrossCorrectionsBefore = input.Corrections;
@@ -323,13 +324,13 @@ internal static class ProbeC
                 y: foldedCrossStart.Y);
             var foldedCrossOtherLayer = new Point(
                 foldedCrossStart.X,
-                foldedCrossStart.Y - h);
+                foldedCrossStart.Y + h);
             var foldedCrossOtherLayerOverlap = new Point(
                 foldedCrossGoal.X,
-                foldedCrossStart.Y - h);
+                foldedCrossStart.Y + h);
             Log(
                 $"phase=collision_folded_cross_layer baseline={foldedCrossBaseline} " +
-                $"visual_row={display.Layout.VisualRowOfLogical(12)} " +
+                $"visual_row={display.Layout.VisualRowOfLogical(10)} " +
                 $"goal_frame={collisionBlock.Frame + 20}");
             await DragPath(
                 foldedCrossStart,
@@ -346,6 +347,7 @@ internal static class ProbeC
             Fact("collision_folded_cross_layer", collisionMover.Layer);
             Fact("collision_folded_cross_frame", collisionMover.Frame);
             Fact("collision_folded_cross_changed", foldedCrossChanged);
+            Fact("collision_folded_cross_returned_source_layer", collisionMover.Layer == 10);
             Fact("collision_folded_cross_corrections", foldedCrossCorrections);
             Fact(
                 "collision_cross_bypass_reproduced",
