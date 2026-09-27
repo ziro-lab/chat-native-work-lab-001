@@ -1,5 +1,20 @@
 # Chat Native Work Lab
 
+## YMM4 Plugin AI Manual
+
+YMM4プラグインをChatGPT / Codex / ClaudeなどのコーディングAIと一緒に開発する人向けに、配布用マニュアルを用意しています。
+
+- **[YMM4 Plugin AI Manual](docs/YMM4_PLUGIN_AI_MANUAL.md)** — **この1ファイルだけで使える配布用本体**
+- **[YMM4 Plugin AI Prompt](docs/YMM4_PLUGIN_AI_PROMPT.md)** — 任意のコピペ用初期指示
+
+ManualはこのLabを知らない利用者でも単体で機能するように、必要な開発基準・API選択・実装上の注意・バージョン付き確認済み挙動を本文へ直接まとめています。
+
+このLabの実験群や内部Referenceは、Manualを更新・検証するための裏側の資料であり、Manual利用者が読むことは前提にしていません。
+
+> このManualは非公式です。YMM4公式ドキュメント・公式サンプルを置き換えるものではありません。
+
+---
+
 Public experiment lab for testing how far chat-driven development can go when GitHub Actions is used as a target-native validation environment.
 
 The main question is not merely whether code builds. The lab asks whether a chat-driven workflow can:
@@ -71,6 +86,8 @@ Static IL/reflection inspection, native automated observations and manual intera
 See [`docs/YMM4_OBSERVATION_POLICY.md`](docs/YMM4_OBSERVATION_POLICY.md) and [`docs/YMM4_OBSERVATION_TEMPLATE.md`](docs/YMM4_OBSERVATION_TEMPLATE.md).
 
 Before opening a new YMM4 probe, consult [`docs/YMM4_REFERENCE_SOURCES.md`](docs/YMM4_REFERENCE_SOURCES.md) and [`docs/YMM4_PLUGIN_SURFACE_GUIDE.md`](docs/YMM4_PLUGIN_SURFACE_GUIDE.md). The registry defines the external-source search order; the surface guide keeps the public-API -> WPF/public-host -> bounded-reflection -> Harmony/internal escalation ladder.
+
+For coding-agent consumption, start from [`docs/YMM4_AI_DEVELOPMENT_REFERENCE.md`](docs/YMM4_AI_DEVELOPMENT_REFERENCE.md) and its compact [`docs/YMM4_AI_KNOWLEDGE_INDEX.md`](docs/YMM4_AI_KNOWLEDGE_INDEX.md). These keep official/reference material, version-pinned Lab evidence, negative findings and candidate knowledge at different authority levels.
 
 Small plugin prototypes consume those observations in [`ziro-lab/ymm4-plugin-garage`](https://github.com/ziro-lab/ymm4-plugin-garage) rather than duplicating host-behavior research there.
 
