@@ -121,6 +121,11 @@ jobs:
 
           $binaryText=[Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes((Resolve-Path $dll)))
           foreach($forbidden in @(
+            'Direct layout update budget exceeded',
+            'Visual tree budget exceeded',
+            'Fixture slot budget exceeded',
+            'Fixture layer budget exceeded',
+            'Gesture visual update budget exceeded',
             'PASS_P6_',
             'CNWL_P6_DENSITY_STRESS_SMOKE',
             'CNWL_P6_HISTORY_STRESS_SMOKE',
