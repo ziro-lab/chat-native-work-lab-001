@@ -1,0 +1,44 @@
+name: Preview speed build bootstrap
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/preview-speed-build-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download exact .NET SDK 10.0.401
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --silent --show-error             -o dotnet-sdk-10.0.401-linux-x64.tar.gz             https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.401/dotnet-sdk-10.0.401-linux-x64.tar.gz
+          echo '51c8b999af9e8dd9998c9edc5944e19a90788862068acd38694e098889054ce8c23d4f0c5cccfa16bf187d044562359e5ee69a9f8ad0bbe913ba90311fbce25b  dotnet-sdk-10.0.401-linux-x64.tar.gz' | sha512sum -c -
+
+      - name: Download exact YMM4 4.56.1.0 Lite
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --silent --show-error             -o YukkuriMovieMaker_v4.56.1.0_Lite.zip             https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          echo '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a  YukkuriMovieMaker_v4.56.1.0_Lite.zip' | sha256sum -c -
+
+      - name: Upload build bootstrap
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: preview-speed-build-bootstrap
+          path: |
+            dotnet-sdk-10.0.401-linux-x64.tar.gz
+            YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if-no-files-found: error
+          retention-days: 2
