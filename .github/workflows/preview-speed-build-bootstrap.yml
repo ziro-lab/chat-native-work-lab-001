@@ -33,12 +33,18 @@ jobs:
           curl -L --fail --retry 3 --silent --show-error             -o YukkuriMovieMaker_v4.56.1.0_Lite.zip             https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
           echo '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a  YukkuriMovieMaker_v4.56.1.0_Lite.zip' | sha256sum -c -
 
-      - name: Upload build bootstrap
+      - name: Upload .NET SDK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: preview-speed-build-bootstrap
-          path: |
-            dotnet-sdk-10.0.401-linux-x64.tar.gz
-            YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          name: preview-speed-dotnet-sdk
+          path: dotnet-sdk-10.0.401-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload YMM4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: preview-speed-ymm4
+          path: YukkuriMovieMaker_v4.56.1.0_Lite.zip
           if-no-files-found: error
           retention-days: 2
