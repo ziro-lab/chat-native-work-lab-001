@@ -57,7 +57,11 @@ internal sealed partial class HandsOnController : IDisposable
         this.state = state;
         timeline = host.Timeline;
 
-        display = new DirectDisplay(host, HandsOnRuntime.Diagnostic);
+        display = new DirectDisplay(
+            host,
+            HandsOnRuntime.Diagnostic,
+            strictValidation: false,
+            enableRenderAudits: false);
         foreach (var canvas in Host.Elements(window)
             .Where(element =>
                 element.IsVisible
@@ -3864,7 +3868,7 @@ internal sealed partial class HandsOnController : IDisposable
 
     internal void ScrollPanelToLayer(int layer)
     {
-        if (disposed || layer < 0)
+        if (disposed || layer < 0 || !display.IsOperational)
             return;
 
         display.ThrowIfFailed();
@@ -3895,7 +3899,7 @@ internal sealed partial class HandsOnController : IDisposable
 
     internal void RefreshFromDocument()
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         var timelineState = FolderDocumentRules.FindTimeline(
@@ -3931,6 +3935,16 @@ internal sealed partial class HandsOnController : IDisposable
         if (disposed)
             return;
 
+        if (!display.IsOperational)
+        {
+            if (adorner is not null)
+            {
+                adornerLayer.Remove(adorner);
+                adorner = null;
+            }
+            return;
+        }
+
         if (adorner is not null)
         {
             adornerLayer.Remove(adorner);
@@ -3957,7 +3971,7 @@ internal sealed partial class HandsOnController : IDisposable
 
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         var point = e.GetPosition(labels);
