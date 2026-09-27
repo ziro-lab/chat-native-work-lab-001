@@ -1,0 +1,93 @@
+name: Preview speed build bootstrap
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/preview-speed-build-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download exact .NET SDK 10.0.401
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --silent --show-error             -o dotnet-sdk-10.0.401-linux-x64.tar.gz             https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.401/dotnet-sdk-10.0.401-linux-x64.tar.gz
+          echo '51c8b999af9e8dd9998c9edc5944e19a90788862068acd38694e098889054ce8c23d4f0c5cccfa16bf187d044562359e5ee69a9f8ad0bbe913ba90311fbce25b  dotnet-sdk-10.0.401-linux-x64.tar.gz' | sha512sum -c -
+
+      - name: Upload .NET SDK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: preview-speed-dotnet-sdk
+          path: dotnet-sdk-10.0.401-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+  windows-refs:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Confirm .NET 10 SDK and WindowsDesktop reference pack
+        shell: pwsh
+        run: |
+          $sdk = dotnet --list-sdks | Select-String '^10\.0\.401 '
+          if (-not $sdk) { throw '.NET SDK 10.0.401 is not present.' }
+          $pack = Get-ChildItem 'C:\Program Files\dotnet\packs\Microsoft.WindowsDesktop.App.Ref' -Directory |
+            Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+          if (-not $pack) { throw 'WindowsDesktop reference pack is not present.' }
+          $ref = Join-Path $pack.FullName 'ref\net10.0'
+          if (-not (Test-Path $ref)) { throw "net10.0 WindowsDesktop refs not found: $ref" }
+          "WPF_REF=$ref" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WPF_PACK_VERSION=$($pack.Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Download and extract exact YMM4 4.56.1.0 Lite
+        shell: pwsh
+        run: |
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.56.1.0/YukkuriMovieMaker_v4.56.1.0_Lite.zip
+          if ($LASTEXITCODE -ne 0) { throw 'YMM4 download failed.' }
+          $hash = (Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive -LiteralPath ymm4.zip -DestinationPath ymm4
+          $exe = Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if (-not $exe) { throw 'YukkuriMovieMaker.exe not found.' }
+          "YMM4_DIR=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Collect compile references
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force refs\wpf | Out-Null
+          New-Item -ItemType Directory -Force refs\ymm4 | Out-Null
+          Copy-Item "$env:WPF_REF\*.dll" refs\wpf\
+          foreach ($name in @('YukkuriMovieMaker.dll','YukkuriMovieMaker.Plugin.dll')) {
+            $src = Join-Path $env:YMM4_DIR $name
+            if (-not (Test-Path $src)) { throw "Missing YMM4 reference: $src" }
+            Copy-Item $src refs\ymm4\$name
+          }
+          @(
+            "ymm4_zip_sha256=49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a"
+            "wpf_pack_version=$env:WPF_PACK_VERSION"
+          ) | Set-Content refs\VERSIONS.txt -Encoding utf8
+
+      - name: Upload compile references
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: preview-speed-windows-refs
+          path: refs/
+          if-no-files-found: error
+          retention-days: 2
