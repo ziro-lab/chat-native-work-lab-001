@@ -57,11 +57,24 @@ internal sealed partial class HandsOnController : IDisposable
         this.state = state;
         timeline = host.Timeline;
 
+        var strictRuntimeValidation = Environment
+            .GetEnvironmentVariables()
+            .Keys
+            .Cast<object>()
+            .OfType<string>()
+            .Any(name =>
+                name.StartsWith("CNWL_", StringComparison.Ordinal)
+                && name.EndsWith("_SMOKE", StringComparison.Ordinal)
+                && string.Equals(
+                    Environment.GetEnvironmentVariable(name),
+                    "1",
+                    StringComparison.Ordinal));
+
         display = new DirectDisplay(
             host,
             HandsOnRuntime.Diagnostic,
-            strictValidation: false,
-            enableRenderAudits: false);
+            strictValidation: strictRuntimeValidation,
+            enableRenderAudits: strictRuntimeValidation);
         foreach (var canvas in Host.Elements(window)
             .Where(element =>
                 element.IsVisible
