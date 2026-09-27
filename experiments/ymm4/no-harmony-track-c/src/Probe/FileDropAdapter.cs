@@ -186,35 +186,25 @@ internal sealed class FileDropMapAdapter : IDisposable
         int requestedLayer,
         HashSet<IItem> addedSet)
     {
+        // The folded logical target is authoritative when it is free. Raw YMM4
+        // Layer values here are physical/uncompressed-row observations and can
+        // differ even for an ordinary non-colliding drop.
+        if (!LayerWouldOverlap(item, requestedLayer, addedSet))
+        {
+            return requestedLayer;
+        }
+
         var requestedRow =
             display.Layout.VisualRowOfLogical(requestedLayer);
         var rawHostLayer = item.Layer;
 
-        // YMM4 evaluates the drop against uncompressed physical rows. Translate
-        // any host row offset back into folded display-row space before deciding
-        // the logical layer. A zero offset means the host simply used the raw
-        // display row and had no knowledge of collisions on the logical target.
+        // YMM4 evaluates the native command against uncompressed physical rows.
+        // Once we know the folded logical target is actually occupied, use any
+        // raw row delta only as an escape direction hint.
         var hostRowDelta =
             pendingDisplayRow < 0
                 ? 0
                 : rawHostLayer - pendingDisplayRow;
-
-        var candidateRow = requestedRow + hostRowDelta;
-        if (candidateRow >= 0
-            && candidateRow < display.Layout.VisibleLayers.Count)
-        {
-            var candidate =
-                display.Layout.DisplayRowToLogical(candidateRow);
-            if (!LayerWouldOverlap(item, candidate, addedSet))
-            {
-                log(
-                    $"filedrop_folded_host_map item={item.GetType().Name} " +
-                    $"raw_host_layer={rawHostLayer} raw_drop_row={pendingDisplayRow} " +
-                    $"requested_layer={requestedLayer} host_row_delta={hostRowDelta} " +
-                    $"resolved_layer={candidate}");
-                return candidate;
-            }
-        }
 
         // Native AddFileItem prefers the next lower row when the requested row
         // is occupied. Search visible folded rows in that same direction; if
