@@ -1395,10 +1395,31 @@ internal static class Probe
             Check(
                 "p15b_filedrop_added_item",
                 dropObservation.AddedItems.Length > 0);
+            var p15bAdded = dropObservation.AddedItems.ToArray();
+            var p15bAddedSet = new HashSet<IItem>(
+                p15bAdded,
+                ReferenceEqualityComparer.Instance);
+            var p15bAddedLayers = p15bAdded
+                .Select(x => x.Layer)
+                .ToArray();
+
+            static bool RangesOverlap(IItem a, IItem b)
+            {
+                var aStart = (long)a.Frame;
+                var bStart = (long)b.Frame;
+                var aEnd = aStart + Math.Max(0, (long)a.Length);
+                var bEnd = bStart + Math.Max(0, (long)b.Length);
+                return aStart < bEnd && bStart < aEnd;
+            }
+
             Check(
                 "p15b_filedrop_added_layer",
-                dropObservation.AddedItems.All(
-                    x => x.Layer == 10));
+                p15bAdded.All(item =>
+                    !display.Layout.IsHidden(item.Layer)
+                    && !timeline.Items.Any(other =>
+                        !p15bAddedSet.Contains(other)
+                        && other.Layer == item.Layer
+                        && RangesOverlap(item, other))));
             Check(
                 "p15b_filedrop_folder_unchanged",
                 FolderText(bridge.State) ==
@@ -1483,7 +1504,8 @@ internal static class Probe
                 redoDrop is not null);
             Check(
                 "p15b_filedrop_redo_layer",
-                redoDrop?.Layer == 10);
+                redoDrop is not null
+                && p15bAddedLayers.Contains(redoDrop.Layer));
             Check(
                 "p15b_filedrop_redo_folder_unchanged",
                 FolderText(bridge.State) ==
