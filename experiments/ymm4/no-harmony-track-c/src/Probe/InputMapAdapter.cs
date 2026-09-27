@@ -104,40 +104,137 @@ internal sealed class InputMapAdapter : IDisposable
         return aStart < bEnd && bStart < aEnd;
     }
 
-    private bool CorrectionWouldOverlap(
-        IReadOnlyDictionary<IItem, int> targets)
+    private bool LayerWouldOverlap(
+        IItem item,
+        int layer,
+        HashSet<IItem> moving)
     {
-        var moving = group.Keys.ToHashSet(
-            ReferenceEqualityComparer.Instance);
-
-        foreach (var (item, targetLayer) in targets)
+        foreach (var other in host.Timeline.Items)
         {
-            // If the host already chose the requested logical layer there is no
-            // post-correction to police. Preserve native behavior as-is.
-            if (item.Layer == targetLayer)
+            if (moving.Contains(other) || other.Layer != layer)
                 continue;
 
-            foreach (var other in host.Timeline.Items)
-            {
-                if (moving.Contains(other)
-                    || other.Layer != targetLayer)
-                {
-                    continue;
-                }
-
-                if (TimeRangesOverlap(item, other))
-                {
-                    log(
-                        $"move_preserve_native_collision item={item.Remark} " +
-                        $"host_layer={item.Layer} requested_layer={targetLayer} " +
-                        $"frame={item.Frame} length={item.Length} " +
-                        $"other={other.Remark} other_frame={other.Frame} other_length={other.Length}");
-                    return true;
-                }
-            }
+            if (TimeRangesOverlap(item, other))
+                return true;
         }
 
         return false;
+    }
+
+    private bool GroupTargetsAreValid(
+        IReadOnlyDictionary<IItem, int> requestedTargets,
+        int offset,
+        HashSet<IItem> moving)
+    {
+        foreach (var (item, requestedLayer) in requestedTargets)
+        {
+            var layer = requestedLayer + offset;
+            if (layer < 0 || layer > display.Layout.MaxLayer)
+                return false;
+
+            if (display.Layout.IsHidden(layer)
+                || LayerWouldOverlap(item, layer, moving))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool ApplyHostCollisionPolicy(
+        Dictionary<IItem, int> targets)
+    {
+        var moving = new HashSet<IItem>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var member in group.Keys)
+            moving.Add(member);
+
+        var evidence = targets
+            .Where(pair =>
+                pair.Key.Layer != pair.Value
+                && LayerWouldOverlap(
+                    pair.Key,
+                    pair.Value,
+                    moving))
+            .Select(pair => new
+            {
+                Item = pair.Key,
+                Requested = pair.Value,
+                HostOffset = pair.Key.Layer - pair.Value
+            })
+            .ToArray();
+
+        if (evidence.Length == 0)
+            return false;
+
+        // Native YMM4 moves a selected group as one unit when one member would
+        // collide. Preserve that group-level escape instead of resolving each
+        // member independently.
+        var firstOffset = evidence
+            .Select(x => x.HostOffset)
+            .FirstOrDefault(offset => offset != 0);
+        var direction = Math.Sign(firstOffset);
+        if (direction == 0)
+            direction = 1;
+
+        var startDistance = Math.Max(1, Math.Abs(firstOffset));
+
+        for (var distance = startDistance;
+             distance <= display.Layout.MaxLayer + 1;
+             distance++)
+        {
+            var offset = direction * distance;
+            if (!GroupTargetsAreValid(
+                    targets,
+                    offset,
+                    moving))
+            {
+                continue;
+            }
+
+            foreach (var item in targets.Keys.ToArray())
+                targets[item] += offset;
+
+            log(
+                $"move_group_collision_escape offset={offset} " +
+                $"direction={direction} members={targets.Count} " +
+                $"evidence={string.Join("|", evidence.Select(x => $"{x.Item.Remark}:hostL{x.Item.Layer}:requestedL{x.Requested}"))}");
+            return true;
+        }
+
+        // A ceiling/floor can exhaust the host-selected direction. Try the
+        // opposite visible direction before falling back to raw native layers.
+        for (var distance = 1;
+             distance <= display.Layout.MaxLayer + 1;
+             distance++)
+        {
+            var offset = -direction * distance;
+            if (!GroupTargetsAreValid(
+                    targets,
+                    offset,
+                    moving))
+            {
+                continue;
+            }
+
+            foreach (var item in targets.Keys.ToArray())
+                targets[item] += offset;
+
+            log(
+                $"move_group_collision_escape_reverse offset={offset} " +
+                $"members={targets.Count}");
+            return true;
+        }
+
+        // No visible collision-free group position exists. Preserve the host
+        // group's current native layers rather than forcing a colliding target.
+        foreach (var item in targets.Keys.ToArray())
+            targets[item] = item.Layer;
+
+        log(
+            $"move_group_collision_escape_unresolved members={targets.Count}");
+        return true;
     }
 
     private void PreviewMove(object sender, MouseEventArgs e)
@@ -243,14 +340,10 @@ internal sealed class InputMapAdapter : IDisposable
 
         // YMM4 can intentionally keep a dragged item on another native layer
         // when returning to the requested layer would overlap an existing item.
-        // In that case the host decision is collision avoidance, not a folded
-        // display mapping error. Do not overwrite it with logical-layer
-        // post-correction.
-        if (CorrectionWouldOverlap(targets))
-        {
-            display.UpdateGestureVisuals();
-            return;
-        }
+        // Preserve that collision-avoidance intent. If the raw native escape
+        // layer is hidden by a collapsed folder, translate it to the next
+        // collision-free visible logical layer in the same direction.
+        ApplyHostCollisionPolicy(targets);
 
         // Put the folded visual compensation in place BEFORE changing Layer.
         // If the host immediately moves Top to the native logical row, the selected
