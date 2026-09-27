@@ -149,6 +149,71 @@ internal sealed class FileDropMapAdapter : IDisposable
         CorrectPendingNewItems("vm_" + (e.PropertyName ?? "<null>"));
     }
 
+    private static bool TimeRangesOverlap(IItem a, IItem b)
+    {
+        var aStart = (long)a.Frame;
+        var bStart = (long)b.Frame;
+        var aEnd = aStart + Math.Max(0, (long)a.Length);
+        var bEnd = bStart + Math.Max(0, (long)b.Length);
+        return aStart < bEnd && bStart < aEnd;
+    }
+
+    private bool LayerWouldOverlap(
+        IItem item,
+        int layer,
+        HashSet<IItem> addedSet)
+    {
+        foreach (var other in host.Timeline.Items)
+        {
+            if (addedSet.Contains(other) || other.Layer != layer)
+                continue;
+
+            if (TimeRangesOverlap(item, other))
+                return true;
+        }
+
+        return false;
+    }
+
+    private int ResolveVisibleCollisionEscape(
+        IItem item,
+        int requestedLayer,
+        HashSet<IItem> addedSet)
+    {
+        var hostLayer = item.Layer;
+        if (!display.Layout.IsHidden(hostLayer)
+            && !LayerWouldOverlap(item, hostLayer, addedSet))
+        {
+            return hostLayer;
+        }
+
+        var direction = Math.Sign(hostLayer - requestedLayer);
+        if (direction == 0)
+            direction = hostLayer >= requestedLayer ? 1 : -1;
+
+        for (var layer = hostLayer;
+             layer >= 0 && layer <= display.Layout.MaxLayer;
+             layer += direction)
+        {
+            if (display.Layout.IsHidden(layer))
+                continue;
+
+            if (!LayerWouldOverlap(item, layer, addedSet))
+            {
+                log(
+                    $"filedrop_collision_escape item={item.GetType().Name} " +
+                    $"host_layer={hostLayer} requested_layer={requestedLayer} " +
+                    $"resolved_layer={layer} direction={direction}");
+                return layer;
+            }
+        }
+
+        log(
+            $"filedrop_collision_escape_unresolved item={item.GetType().Name} " +
+            $"host_layer={hostLayer} requested_layer={requestedLayer}");
+        return hostLayer;
+    }
+
     private void CorrectPendingNewItems(string source)
     {
         if (disposed || pendingLogicalLayer < 0 || pendingBefore is null)
@@ -162,10 +227,33 @@ internal sealed class FileDropMapAdapter : IDisposable
         if (added.Length == 0)
             return;
 
+        var addedSet = new HashSet<IItem>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var item in added)
+            addedSet.Add(item);
+
         foreach (var item in added)
         {
-            if (item.Layer != pendingLogicalLayer)
-                item.Layer = pendingLogicalLayer;
+            var targetLayer = pendingLogicalLayer;
+
+            if (item.Layer != targetLayer
+                && LayerWouldOverlap(item, targetLayer, addedSet))
+            {
+                var resolved = ResolveVisibleCollisionEscape(
+                    item,
+                    targetLayer,
+                    addedSet);
+
+                log(
+                    $"filedrop_preserve_native_collision source={source} " +
+                    $"item={item.GetType().Name} host_layer={item.Layer} " +
+                    $"requested_layer={targetLayer} resolved_layer={resolved} " +
+                    $"frame={item.Frame} length={item.Length}");
+                targetLayer = resolved;
+            }
+
+            if (item.Layer != targetLayer)
+                item.Layer = targetLayer;
 
             PostCorrectedItems++;
             log($"filedrop_post_correct source={source} item={item.GetType().Name} layer={item.Layer} frame={item.Frame}");
