@@ -95,6 +95,51 @@ internal sealed class InputMapAdapter : IDisposable
         Math.Abs(p.X - down.X) >= SystemParameters.MinimumHorizontalDragDistance ||
         Math.Abs(p.Y - down.Y) >= SystemParameters.MinimumVerticalDragDistance;
 
+    private static bool TimeRangesOverlap(IItem a, IItem b)
+    {
+        var aStart = (long)a.Frame;
+        var bStart = (long)b.Frame;
+        var aEnd = aStart + Math.Max(0, (long)a.Length);
+        var bEnd = bStart + Math.Max(0, (long)b.Length);
+        return aStart < bEnd && bStart < aEnd;
+    }
+
+    private bool CorrectionWouldOverlap(
+        IReadOnlyDictionary<IItem, int> targets)
+    {
+        var moving = group.Keys.ToHashSet(
+            ReferenceEqualityComparer.Instance);
+
+        foreach (var (item, targetLayer) in targets)
+        {
+            // If the host already chose the requested logical layer there is no
+            // post-correction to police. Preserve native behavior as-is.
+            if (item.Layer == targetLayer)
+                continue;
+
+            foreach (var other in host.Timeline.Items)
+            {
+                if (moving.Contains(other)
+                    || other.Layer != targetLayer)
+                {
+                    continue;
+                }
+
+                if (TimeRangesOverlap(item, other))
+                {
+                    log(
+                        $"move_preserve_native_collision item={item.Remark} " +
+                        $"host_layer={item.Layer} requested_layer={targetLayer} " +
+                        $"frame={item.Frame} length={item.Length} " +
+                        $"other={other.Remark} other_frame={other.Frame} other_length={other.Length}");
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private void PreviewMove(object sender, MouseEventArgs e)
     {
         // Only marquee replaces preview input. Native item drag must reach its normal
@@ -195,6 +240,17 @@ internal sealed class InputMapAdapter : IDisposable
         var targets = new Dictionary<IItem, int>(ReferenceEqualityComparer.Instance);
         foreach (var (item, layer) in group)
             targets[item] = layer + delta;
+
+        // YMM4 can intentionally keep a dragged item on another native layer
+        // when returning to the requested layer would overlap an existing item.
+        // In that case the host decision is collision avoidance, not a folded
+        // display mapping error. Do not overwrite it with logical-layer
+        // post-correction.
+        if (CorrectionWouldOverlap(targets))
+        {
+            display.UpdateGestureVisuals();
+            return;
+        }
 
         // Put the folded visual compensation in place BEFORE changing Layer.
         // If the host immediately moves Top to the native logical row, the selected
