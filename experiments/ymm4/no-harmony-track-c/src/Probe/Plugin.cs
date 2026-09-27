@@ -183,8 +183,8 @@ internal static class ProbeC
             var collisionMover = Make("collision_mover", 140, 10, 120);
 
             // Practical-use matrix fixtures.
-            var boundaryBlock = Make("boundary_block", 100, 6, 80);
-            var boundaryMover = Make("boundary_mover", 180, 6, 80);
+            var boundaryBlock = Make("boundary_block", 300, 6, 60);
+            var boundaryMover = Make("boundary_mover", 360, 6, 60);
 
             var multiBlockA = Make("multi_block_a", 20, 14, 80);
             var multiMoverA = Make("multi_mover_a", 100, 14, 80);
