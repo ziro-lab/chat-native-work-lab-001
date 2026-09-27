@@ -40,7 +40,7 @@ internal sealed class InputMapAdapter : IDisposable
 
     private void Down(object sender, MouseButtonEventArgs e)
     {
-        if (disposed)
+        if (disposed || !display.IsOperational)
             return;
 
         display.ThrowIfFailed();
@@ -108,6 +108,14 @@ internal sealed class InputMapAdapter : IDisposable
         if (e.ChangedButton != MouseButton.Left || !marquee)
             return;
 
+        if (!display.IsOperational)
+        {
+            marquee = false;
+            if (ReferenceEquals(Mouse.Captured, host.Source))
+                Mouse.Capture(null);
+            return;
+        }
+
         var rect = new Rect(
             host.Source.PointToScreen(down),
             host.Source.PointToScreen(Mouse.GetPosition(host.Source)));
@@ -135,7 +143,7 @@ internal sealed class InputMapAdapter : IDisposable
 
     private void Move(object sender, MouseEventArgs e)
     {
-        if (disposed || anchor is null || e.LeftButton != MouseButtonState.Pressed)
+        if (disposed || !display.IsOperational || anchor is null || e.LeftButton != MouseButtonState.Pressed)
             return;
 
         BubbleMoves++;
