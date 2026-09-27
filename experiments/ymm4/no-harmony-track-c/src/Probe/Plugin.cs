@@ -206,13 +206,20 @@ internal static class ProbeC
                 Remark = "CNWL_C_shape_mover"
             };
 
+            var partialBlock = Make("partial_block", 20, 18, 80);
+            var partialMoverA = Make("partial_mover_a", 100, 18, 80);
+            var partialMoverB = Make("partial_mover_b", 260, 18, 80);
+            var resizeVoice = Make("resize_voice", 20, 12, 80);
+
             var fixtures = new IItem[]
             {
                 drag, other, target, child, hidden, tail, low,
                 collisionBlock, collisionMover,
                 boundaryBlock, boundaryMover,
                 multiBlockA, multiMoverA, multiBlockB, multiMoverB,
-                shapeBlock, shapeMover
+                shapeBlock, shapeMover,
+                partialBlock, partialMoverA, partialMoverB,
+                resizeVoice
             };
             foreach (var item in fixtures) if (!t.TryAddItems([item], item.Frame, item.Layer)) throw new InvalidOperationException("Fixture add");
             t.SelectedItems = ImmutableList<IItem>.Empty; await Task.Delay(1000);
@@ -371,6 +378,77 @@ internal static class ProbeC
                 !t.Items.Any(item =>
                     nativeCollisionDrop.AddedItems.Any(added =>
                         ReferenceEquals(item, added))));
+
+            // Practical matrix H baseline: multi-select where only one selected
+            // item collides on return. Native YMM4 should keep group behavior
+            // coherent; folded mode must match it exactly.
+            await Reveal(host, 18 * h);
+            t.SelectItems([partialMoverA, partialMoverB]);
+            await Task.Delay(180);
+            var partialNativeBaselineA =
+                (partialMoverA.Layer, partialMoverA.Frame);
+            var partialNativeBaselineB =
+                (partialMoverB.Layer, partialMoverB.Frame);
+            var partialNativeStart = host.Center(partialMoverA);
+            var partialNativeGoal = OverlapCenter(
+                host.ItemView(partialBlock),
+                host.ItemView(partialMoverA),
+                partialBlock,
+                startOffsetFrames: 20,
+                y: partialNativeStart.Y);
+            await DragPath(
+                partialNativeStart,
+                new Point(partialNativeStart.X, partialNativeStart.Y + h),
+                new Point(partialNativeGoal.X, partialNativeStart.Y + h),
+                partialNativeGoal);
+            var partialNativeResult = (
+                LayerA: partialMoverA.Layer,
+                FrameA: partialMoverA.Frame,
+                LayerB: partialMoverB.Layer,
+                FrameB: partialMoverB.Frame,
+                OverlapA: Overlaps(partialBlock, partialMoverA));
+            Fact("matrix_partial_native_layer_a", partialNativeResult.LayerA);
+            Fact("matrix_partial_native_layer_b", partialNativeResult.LayerB);
+            Fact("matrix_partial_native_frame_a", partialNativeResult.FrameA);
+            Fact("matrix_partial_native_frame_b", partialNativeResult.FrameB);
+            Fact("matrix_partial_native_overlap_a", partialNativeResult.OverlapA);
+            await Native.Key(0x5A, true);
+            await Task.Delay(350);
+            Check(
+                "matrix_partial_native_reset",
+                (partialMoverA.Layer, partialMoverA.Frame)
+                    == partialNativeBaselineA
+                && (partialMoverB.Layer, partialMoverB.Frame)
+                    == partialNativeBaselineB);
+
+            // Practical matrix I baseline: resize the right edge of a VoiceItem.
+            await Reveal(host, 12 * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var resizeNativeBaseline =
+                (resizeVoice.Layer, resizeVoice.Frame, resizeVoice.Length);
+            var resizeNativeRect =
+                Host.ScreenRect(host.ItemView(resizeVoice));
+            var resizeNativeStart = new Point(
+                resizeNativeRect.Right - 2,
+                resizeNativeRect.Y + resizeNativeRect.Height / 2.0);
+            await Native.Drag(
+                resizeNativeStart,
+                new Point(resizeNativeStart.X + 48, resizeNativeStart.Y));
+            await Task.Delay(300);
+            var resizeNativeResult =
+                (resizeVoice.Layer, resizeVoice.Frame, resizeVoice.Length);
+            Fact("matrix_resize_native_layer", resizeNativeResult.Layer);
+            Fact("matrix_resize_native_frame", resizeNativeResult.Frame);
+            Fact("matrix_resize_native_length", resizeNativeResult.Length);
+            Check(
+                "matrix_resize_native_changed",
+                resizeNativeResult != resizeNativeBaseline);
+            await Native.Key(0x5A, true);
+            await Task.Delay(350);
+            Check(
+                "matrix_resize_native_reset",
+                (resizeVoice.Layer, resizeVoice.Frame, resizeVoice.Length)
+                    == resizeNativeBaseline);
 
             display = new DirectDisplay(host, Log);
             var a = new CollapsedSpan[] { new(2, 3), new(6, 8) };
@@ -590,6 +668,80 @@ internal static class ProbeC
             Check(
                 "matrix_boundary_reset",
                 (boundaryMover.Layer, boundaryMover.Frame) == boundaryBaseline);
+
+            // Practical matrix H: only one member of a selected group collides.
+            // The folded adapter must not split the group differently from native.
+            await Reveal(host, display.Layout.VisualRowOfLogical(18) * h);
+            t.SelectItems([partialMoverA, partialMoverB]);
+            await Task.Delay(180);
+            var partialFoldedBaselineA =
+                (partialMoverA.Layer, partialMoverA.Frame);
+            var partialFoldedBaselineB =
+                (partialMoverB.Layer, partialMoverB.Frame);
+            var partialFoldedStart = host.Center(partialMoverA);
+            var partialFoldedGoal = OverlapCenter(
+                host.ItemView(partialBlock),
+                host.ItemView(partialMoverA),
+                partialBlock,
+                startOffsetFrames: 20,
+                y: partialFoldedStart.Y);
+            await DragPath(
+                partialFoldedStart,
+                new Point(partialFoldedStart.X, partialFoldedStart.Y + h),
+                new Point(partialFoldedGoal.X, partialFoldedStart.Y + h),
+                partialFoldedGoal);
+            await Sample(host, display, "matrix_partial_folded");
+            var partialFoldedResult = (
+                LayerA: partialMoverA.Layer,
+                FrameA: partialMoverA.Frame,
+                LayerB: partialMoverB.Layer,
+                FrameB: partialMoverB.Frame,
+                OverlapA: Overlaps(partialBlock, partialMoverA));
+            Fact("matrix_partial_folded_layer_a", partialFoldedResult.LayerA);
+            Fact("matrix_partial_folded_layer_b", partialFoldedResult.LayerB);
+            Fact("matrix_partial_folded_frame_a", partialFoldedResult.FrameA);
+            Fact("matrix_partial_folded_frame_b", partialFoldedResult.FrameB);
+            Fact("matrix_partial_folded_overlap_a", partialFoldedResult.OverlapA);
+            Check(
+                "matrix_partial_native_parity",
+                partialFoldedResult == partialNativeResult);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_partial_folded_undo");
+            Check(
+                "matrix_partial_folded_reset",
+                (partialMoverA.Layer, partialMoverA.Frame)
+                    == partialFoldedBaselineA
+                && (partialMoverB.Layer, partialMoverB.Frame)
+                    == partialFoldedBaselineB);
+
+            // Practical matrix I: right-edge VoiceItem resize parity.
+            await Reveal(host, display.Layout.VisualRowOfLogical(12) * h);
+            t.SelectedItems = ImmutableList<IItem>.Empty;
+            var resizeFoldedBaseline =
+                (resizeVoice.Layer, resizeVoice.Frame, resizeVoice.Length);
+            var resizeFoldedRect =
+                Host.ScreenRect(host.ItemView(resizeVoice));
+            var resizeFoldedStart = new Point(
+                resizeFoldedRect.Right - 2,
+                resizeFoldedRect.Y + resizeFoldedRect.Height / 2.0);
+            await Native.Drag(
+                resizeFoldedStart,
+                new Point(resizeFoldedStart.X + 48, resizeFoldedStart.Y));
+            await Sample(host, display, "matrix_resize_folded");
+            var resizeFoldedResult =
+                (resizeVoice.Layer, resizeVoice.Frame, resizeVoice.Length);
+            Fact("matrix_resize_folded_layer", resizeFoldedResult.Layer);
+            Fact("matrix_resize_folded_frame", resizeFoldedResult.Frame);
+            Fact("matrix_resize_folded_length", resizeFoldedResult.Length);
+            Check(
+                "matrix_resize_native_parity",
+                resizeFoldedResult == resizeNativeResult);
+            await Native.Key(0x5A, true);
+            await Sample(host, display, "matrix_resize_folded_undo");
+            Check(
+                "matrix_resize_folded_reset",
+                (resizeVoice.Layer, resizeVoice.Frame, resizeVoice.Length)
+                    == resizeFoldedBaseline);
 
             // Practical matrix F: folded FileDrop onto the same occupied logical
             // time/layer as the native baseline. Placement policy should match
