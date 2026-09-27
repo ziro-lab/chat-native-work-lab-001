@@ -166,8 +166,11 @@ internal sealed class InputMapAdapter : IDisposable
     private bool ApplyHostCollisionPolicy(
         Dictionary<IItem, int> targets)
     {
-        var moving = group.Keys.ToHashSet(
+        var moving = new HashSet<IItem>(
             ReferenceEqualityComparer.Instance);
+        foreach (var member in group.Keys)
+            moving.Add(member);
+
         var collisionDetected = false;
 
         foreach (var (item, targetLayer) in targets.ToArray())
