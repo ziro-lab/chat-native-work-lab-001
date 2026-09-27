@@ -150,9 +150,15 @@ internal static class ProbeC
             Fact("collision_native_mover_layer", collisionMover.Layer);
             Fact("collision_native_mover_frame", collisionMover.Frame);
             Fact("collision_native_block_end", collisionBlock.Frame + collisionBlock.Length);
-            await Native.Key(0x5A, true);
-            await Task.Delay(300);
-            Check("collision_native_undo", (collisionMover.Layer, collisionMover.Frame) == collisionBaseline);
+            var nativeCollisionChanged =
+                (collisionMover.Layer, collisionMover.Frame) != collisionBaseline;
+            Fact("collision_native_changed", nativeCollisionChanged);
+            if (nativeCollisionChanged)
+            {
+                await Native.Key(0x5A, true);
+                await Task.Delay(300);
+            }
+            Check("collision_native_reset", (collisionMover.Layer, collisionMover.Frame) == collisionBaseline);
 
             display = new DirectDisplay(host, Log);
             var a = new CollapsedSpan[] { new(2, 3), new(6, 8) };
@@ -188,9 +194,15 @@ internal static class ProbeC
             Fact("collision_folded_mover_frame", collisionMover.Frame);
             Fact("collision_folded_corrections", input.Corrections - correctionsBeforeCollision);
             Fact("collision_bypass_reproduced", !nativeCollisionOverlap && foldedCollisionOverlap);
-            await Native.Key(0x5A, true);
-            await Sample(host, display, "collision_folded_undo");
-            Check("collision_folded_undo", (collisionMover.Layer, collisionMover.Frame) == foldedCollisionBaseline);
+            var foldedCollisionChanged =
+                (collisionMover.Layer, collisionMover.Frame) != foldedCollisionBaseline;
+            Fact("collision_folded_changed", foldedCollisionChanged);
+            if (foldedCollisionChanged)
+            {
+                await Native.Key(0x5A, true);
+                await Sample(host, display, "collision_folded_undo");
+            }
+            Check("collision_folded_reset", (collisionMover.Layer, collisionMover.Frame) == foldedCollisionBaseline);
 
             await Reveal(host, display.Layout.VisualRowOfLogical(target.Layer) * h);
             await Right(host, target, 9, "right_before_drag", h);
