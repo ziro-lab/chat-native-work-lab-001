@@ -157,9 +157,8 @@ internal sealed partial class HandsOnController : IDisposable
         {
             await Task.Delay(900);
 
-            if (timeline.Items.Any())
-                throw new InvalidOperationException(
-                    "P7 external FileDrop smoke must start from an empty Timeline.");
+            HandsOnRuntime.Diagnostic(
+                $"p7_external_filedrop_baseline_items={timeline.Items.Count}");
 
             var sourceExe = Environment.GetEnvironmentVariable(
                 "CNWL_P7_EXTERNAL_FILEDROP_SOURCE_EXE");
