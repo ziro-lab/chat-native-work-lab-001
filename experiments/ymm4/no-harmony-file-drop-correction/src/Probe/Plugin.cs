@@ -159,10 +159,10 @@ internal static class Probe
             var explorerCorrectedDropObserved=dropObserved;
             var explorerCorrectedCommand=customAddFileCommandExecuted;
 
-            RequireImageDrop("external_wpf_baseline",externalWpfBaseline,externalWpfBaselineDropObserved,false);
-            RequireImageDrop("external_wpf_corrected",externalWpfCorrected,externalWpfCorrectedDropObserved,externalWpfCorrectedCommand);
-            RequireImageDrop("explorer_baseline",explorerBaseline,explorerBaselineDropObserved,false);
-            RequireImageDrop("explorer_corrected",explorerCorrected,explorerCorrectedDropObserved,explorerCorrectedCommand);
+            RequireImageDrop("external_wpf_baseline",externalWpfBaseline,externalWpfBaselineDropObserved,false,false);
+            RequireImageDrop("external_wpf_corrected",externalWpfCorrected,externalWpfCorrectedDropObserved,true,externalWpfCorrectedCommand);
+            RequireImageDrop("explorer_baseline",explorerBaseline,explorerBaselineDropObserved,false,false);
+            RequireImageDrop("explorer_corrected",explorerCorrected,explorerCorrectedDropObserved,true,explorerCorrectedCommand);
 
             var correctedLayers=corrected.Layers.Split(',',StringSplitOptions.RemoveEmptyEntries);
             var correctedMatchesFold=correctedLayers.Contains("3");
@@ -449,7 +449,7 @@ internal static class Probe
                 Path.GetFullPath(drop.FilePath),
                 StringComparison.OrdinalIgnoreCase));
 
-    static void RequireImageDrop(string name,DropObservation drop,bool observed,bool requireCommand)
+    static void RequireImageDrop(string name,DropObservation drop,bool observed,bool requireCommand,bool commandExecuted)
     {
         var types=DescribeTypes(drop);
         var pathExact=PathsExact(drop);
@@ -458,7 +458,7 @@ internal static class Probe
         if(drop.AddedItems.Length!=1)throw new InvalidOperationException(name+" expected exactly one item but got "+drop.AddedItems.Length);
         if(drop.AddedItems[0].GetType().Name!="ImageItem")throw new InvalidOperationException(name+" expected ImageItem but got "+drop.AddedItems[0].GetType().Name);
         if(!pathExact)throw new InvalidOperationException(name+" FilePath mismatch: "+(FilePathOf(drop.AddedItems[0])??"<null>")+" != "+drop.FilePath);
-        if(requireCommand&&!customAddFileCommandExecuted)throw new InvalidOperationException(name+" custom AddFileItem command did not execute");
+        if(requireCommand&&!commandExecuted)throw new InvalidOperationException(name+" custom AddFileItem command did not execute");
     }
 
     static async Task Shortcut(byte key)
