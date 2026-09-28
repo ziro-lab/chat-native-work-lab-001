@@ -282,44 +282,96 @@ internal static class Program
                 Marshal.ThrowExceptionForHR(create);
 
             var data = (ComIDataObject)shellObject;
-            var start = new Point(80, 80);
-            Native.SetCursorPos((int)start.X, (int)start.Y);
-            Thread.Sleep(100);
-            Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
-            Thread.Sleep(100);
-            var dropSource = new OleDropSource();
-            var target = new Point(targetX, targetY);
-            var mover = Task.Run(() =>
+            var app = new Application();
+            var border = new Border
             {
-                Thread.Sleep(220);
-                for (var i = 1; i <= 18; i++)
+                Width = 96,
+                Height = 72,
+                Background = Brushes.DarkSlateGray
+            };
+            var window = new Window
+            {
+                Width = 120,
+                Height = 100,
+                Left = 30,
+                Top = 30,
+                WindowStyle = WindowStyle.ToolWindow,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = true,
+                Topmost = true,
+                Content = border,
+                Title = "ExternalShellDragSource"
+            };
+
+            Exception? failure = null;
+            uint effect = 0;
+            var dragResult = int.MinValue;
+            Task? mover = null;
+
+            window.Loaded += async (_, _) =>
+            {
+                try
                 {
+                    await Task.Delay(250);
+                    window.Activate();
+                    window.UpdateLayout();
+
+                    var startPoint = border.PointToScreen(
+                        new Point(border.ActualWidth / 2, border.ActualHeight / 2));
+                    var target = new Point(targetX, targetY);
                     Native.SetCursorPos(
-                        (int)Math.Round(start.X + (target.X - start.X) * i / 18.0),
-                        (int)Math.Round(start.Y + (target.Y - start.Y) * i / 18.0));
-                    Thread.Sleep(70);
+                        (int)Math.Round(startPoint.X),
+                        (int)Math.Round(startPoint.Y));
+                    await Task.Delay(120);
+                    Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
+                    await Task.Delay(120);
+
+                    var dropSource = new OleDropSource();
+                    mover = Task.Run(() =>
+                    {
+                        Thread.Sleep(220);
+                        for (var i = 1; i <= 18; i++)
+                        {
+                            Native.SetCursorPos(
+                                (int)Math.Round(startPoint.X + (target.X - startPoint.X) * i / 18.0),
+                                (int)Math.Round(startPoint.Y + (target.Y - startPoint.Y) * i / 18.0));
+                            Thread.Sleep(70);
+                        }
+
+                        Thread.Sleep(180);
+                        dropSource.Complete();
+                        Native.SetCursorPos((int)Math.Round(target.X + 1), (int)Math.Round(target.Y));
+                        Thread.Sleep(50);
+                        Native.SetCursorPos((int)Math.Round(target.X), (int)Math.Round(target.Y));
+                        Thread.Sleep(50);
+                        Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
+                    });
+
+                    dragResult = ShellNative.DoDragDrop(
+                        data,
+                        dropSource,
+                        ShellNative.Copy,
+                        out effect);
                 }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+                finally
+                {
+                    Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
+                    try { mover?.Wait(TimeSpan.FromSeconds(5)); } catch { }
+                    window.Close();
+                    app.Shutdown();
+                }
+            };
 
-                Thread.Sleep(180);
-                dropSource.Complete();
-                Native.SetCursorPos((int)Math.Round(target.X + 1), (int)Math.Round(target.Y));
-                Thread.Sleep(40);
-                Native.SetCursorPos((int)Math.Round(target.X), (int)Math.Round(target.Y));
-                Thread.Sleep(40);
-                Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
-            });
+            app.Run(window);
 
-            uint effect;
-            int dragResult;
-            try
-            {
-                dragResult = ShellNative.DoDragDrop(data, dropSource, ShellNative.Copy, out effect);
-            }
-            finally
-            {
-                Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
-                try { mover.Wait(TimeSpan.FromSeconds(5)); } catch { }
-            }
+            if (failure is not null)
+                throw new InvalidOperationException("Shell external drag failed", failure);
+            if (dragResult == int.MinValue)
+                throw new InvalidOperationException("Shell external drag did not execute DoDragDrop");
 
             File.WriteAllLines(resultPath,
             [
