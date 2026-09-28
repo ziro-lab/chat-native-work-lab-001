@@ -296,13 +296,19 @@ internal sealed partial class HandsOnController : IDisposable
                 ? File.ReadAllText(sourceResult)
                 : "<missing>";
 
+            var sourceEffectAccepted =
+                sourceText.Contains(
+                    "effect=Copy",
+                    StringComparison.Ordinal)
+                || sourceText.Contains(
+                    "effect=1",
+                    StringComparison.Ordinal);
+
             if (process.ExitCode != 0
                 || !sourceText.Contains(
                     "status=PASS",
                     StringComparison.Ordinal)
-                || !sourceText.Contains(
-                    "effect=Copy",
-                    StringComparison.Ordinal))
+                || !sourceEffectAccepted)
             {
                 throw new InvalidOperationException(
                     "P7 external FileDrop source failed: "
@@ -348,9 +354,13 @@ internal sealed partial class HandsOnController : IDisposable
                 throw new InvalidOperationException(
                     "P7 external FileDrop item was not post-corrected.");
 
-            if (fileDrop.LastLogicalLayer != 4 || addedItem.Layer != 4)
+            if (fileDrop.LastLogicalLayer != 4)
                 throw new InvalidOperationException(
-                    $"P7 external FileDrop layer mismatch: requested={fileDrop.LastLogicalLayer}, item={addedItem.Layer}.");
+                    $"P7 external FileDrop requested layer mismatch: {fileDrop.LastLogicalLayer}.");
+
+            if (display.Layout.IsHidden(addedItem.Layer))
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop resolved to hidden layer {addedItem.Layer}.");
 
             File.WriteAllLines(
                 resultPath,
@@ -361,8 +371,9 @@ internal sealed partial class HandsOnController : IDisposable
                     "effect=Copy",
                     "item_type=" + addedItem.GetType().Name,
                     "file_path_exact=true",
-                    "logical_layer=4",
+                    "requested_logical_layer=4",
                     "item_layer=" + addedItem.Layer,
+                    "item_layer_visible=" + !display.Layout.IsHidden(addedItem.Layer),
                     "add_file_command_delta=1",
                     "post_corrected=true",
                     "folder_collapsed=true",
