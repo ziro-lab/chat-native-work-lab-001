@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using ComIDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 using System.Text;
 using System.Threading;
 using System.Windows;
@@ -42,6 +43,86 @@ internal static class Native
     internal const uint LeftUp = 0x0004;
 }
 
+internal static class ShellNative
+{
+    internal const uint Copy = 0x00000001;
+    internal const uint MkLeftButton = 0x0001;
+    internal const int S_OK = 0;
+    internal const int DragDropSDrop = 0x00040100;
+    internal const int DragDropSCancel = 0x00040101;
+    internal const int DragDropSUseDefaultCursors = 0x00040102;
+
+    [DllImport("ole32.dll")]
+    internal static extern int OleInitialize(nint reserved);
+
+    [DllImport("ole32.dll")]
+    internal static extern void OleUninitialize();
+
+    [DllImport("ole32.dll", EntryPoint = "DoDragDrop")]
+    internal static extern int DoDragDrop(
+        [MarshalAs(UnmanagedType.Interface)] ComIDataObject dataObject,
+        [MarshalAs(UnmanagedType.Interface)] IOleDropSource dropSource,
+        uint okEffects,
+        out uint effect);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    internal static extern int SHParseDisplayName(
+        string name,
+        nint bindingContext,
+        out nint pidl,
+        uint attributesIn,
+        out uint attributesOut);
+
+    [DllImport("shell32.dll")]
+    internal static extern nint ILCloneFull(nint pidl);
+
+    [DllImport("shell32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ILRemoveLastID(nint pidl);
+
+    [DllImport("shell32.dll")]
+    internal static extern nint ILFindLastID(nint pidl);
+
+    [DllImport("shell32.dll")]
+    internal static extern int SHCreateDataObject(
+        nint pidlFolder,
+        uint count,
+        nint childPidls,
+        [MarshalAs(UnmanagedType.Interface)] object? inner,
+        ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out object dataObject);
+
+    [DllImport("ole32.dll")]
+    internal static extern void CoTaskMemFree(nint pointer);
+}
+
+[ComVisible(true)]
+[Guid("00000121-0000-0000-C000-000000000046")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IOleDropSource
+{
+    [PreserveSig]
+    int QueryContinueDrag([MarshalAs(UnmanagedType.Bool)] bool escapePressed, uint keyState);
+
+    [PreserveSig]
+    int GiveFeedback(uint effect);
+}
+
+[ComVisible(true)]
+internal sealed class OleDropSource : IOleDropSource
+{
+    public int QueryContinueDrag(bool escapePressed, uint keyState)
+    {
+        if (escapePressed)
+            return ShellNative.DragDropSCancel;
+        if ((keyState & ShellNative.MkLeftButton) == 0)
+            return ShellNative.DragDropSDrop;
+        return ShellNative.S_OK;
+    }
+
+    public int GiveFeedback(uint effect) => ShellNative.DragDropSUseDefaultCursors;
+}
+
 internal static class Program
 {
     [STAThread]
@@ -63,6 +144,7 @@ internal static class Program
             return mode switch
             {
                 "wpf" => RunWpf(file, targetX, targetY, resultPath),
+                "shell" => RunShell(file, targetX, targetY, resultPath),
                 "explorer" => RunExplorer(file, targetX, targetY, resultPath),
                 _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown mode")
             };
@@ -160,6 +242,84 @@ internal static class Program
             "file=" + file
         ]);
         return 0;
+    }
+
+    private static int RunShell(string file, double targetX, double targetY, string resultPath)
+    {
+        var init = ShellNative.OleInitialize(0);
+        if (init < 0)
+            Marshal.ThrowExceptionForHR(init);
+
+        nint fullPidl = 0;
+        nint parentPidl = 0;
+        nint childArray = 0;
+        object? shellObject = null;
+
+        try
+        {
+            var parse = ShellNative.SHParseDisplayName(file, 0, out fullPidl, 0, out _);
+            if (parse < 0)
+                Marshal.ThrowExceptionForHR(parse);
+
+            parentPidl = ShellNative.ILCloneFull(fullPidl);
+            if (parentPidl == 0 || !ShellNative.ILRemoveLastID(parentPidl))
+                throw new InvalidOperationException("Could not derive parent PIDL");
+
+            var child = ShellNative.ILFindLastID(fullPidl);
+            if (child == 0)
+                throw new InvalidOperationException("Could not derive child PIDL");
+
+            childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, child);
+
+            var iid = new Guid("0000010e-0000-0000-C000-000000000046");
+            var create = ShellNative.SHCreateDataObject(parentPidl, 1, childArray, null, ref iid, out shellObject);
+            if (create < 0)
+                Marshal.ThrowExceptionForHR(create);
+
+            var data = (ComIDataObject)shellObject;
+            var start = new Point(80, 80);
+            Native.SetCursorPos((int)start.X, (int)start.Y);
+            Thread.Sleep(100);
+            Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
+            Thread.Sleep(100);
+            var mover = StartMoverAfterPress(start, new Point(targetX, targetY));
+
+            uint effect;
+            int dragResult;
+            try
+            {
+                dragResult = ShellNative.DoDragDrop(data, new OleDropSource(), ShellNative.Copy, out effect);
+            }
+            finally
+            {
+                Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
+                try { mover.Wait(TimeSpan.FromSeconds(5)); } catch { }
+            }
+
+            File.WriteAllLines(resultPath,
+            [
+                "status=PASS",
+                "mode=shell",
+                "source_process=" + Environment.ProcessId,
+                "drag_hresult=0x" + dragResult.ToString("X8", CultureInfo.InvariantCulture),
+                "effect=" + effect,
+                "file=" + file
+            ]);
+            return 0;
+        }
+        finally
+        {
+            if (shellObject is not null && Marshal.IsComObject(shellObject))
+                Marshal.FinalReleaseComObject(shellObject);
+            if (childArray != 0)
+                Marshal.FreeCoTaskMem(childArray);
+            if (parentPidl != 0)
+                ShellNative.CoTaskMemFree(parentPidl);
+            if (fullPidl != 0)
+                ShellNative.CoTaskMemFree(fullPidl);
+            ShellNative.OleUninitialize();
+        }
     }
 
     private static int RunExplorer(string file, double targetX, double targetY, string resultPath)
