@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 internal static class Native
 {
@@ -109,33 +110,49 @@ internal static class Program
             Title = "ExternalDragSource"
         };
 
-        window.Show();
-        window.Activate();
-        window.UpdateLayout();
-        Thread.Sleep(350);
+        DragDropEffects effect = DragDropEffects.None;
+        Exception? failure = null;
+        Task? mover = null;
 
-        var start = border.PointToScreen(new Point(border.ActualWidth / 2, border.ActualHeight / 2));
-        Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
-        Thread.Sleep(120);
-        Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
-        Thread.Sleep(120);
-        var mover = StartMoverAfterPress(start, new Point(targetX, targetY));
-
-        var data = new DataObject();
-        data.SetData(DataFormats.FileDrop, new[] { file });
-
-        DragDropEffects effect;
-        try
+        window.Loaded += (_, _) =>
         {
-            effect = DragDrop.DoDragDrop(border, data, DragDropEffects.Copy);
-        }
-        finally
-        {
-            Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
-            try { mover.Wait(TimeSpan.FromSeconds(5)); } catch { }
-            window.Close();
-            app.Shutdown();
-        }
+            app.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    window.Activate();
+                    window.UpdateLayout();
+                    Thread.Sleep(250);
+
+                    var start = border.PointToScreen(new Point(border.ActualWidth / 2, border.ActualHeight / 2));
+                    Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
+                    Thread.Sleep(120);
+                    Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
+                    Thread.Sleep(120);
+                    mover = StartMoverAfterPress(start, new Point(targetX, targetY));
+
+                    var data = new DataObject();
+                    data.SetData(DataFormats.FileDrop, new[] { file });
+                    effect = DragDrop.DoDragDrop(border, data, DragDropEffects.Copy);
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+                finally
+                {
+                    Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
+                    try { mover?.Wait(TimeSpan.FromSeconds(5)); } catch { }
+                    window.Close();
+                    app.Shutdown();
+                }
+            }), DispatcherPriority.ApplicationIdle);
+        };
+
+        app.Run(window);
+
+        if (failure is not null)
+            throw new InvalidOperationException("WPF external drag failed", failure);
 
         File.WriteAllLines(resultPath,
         [
