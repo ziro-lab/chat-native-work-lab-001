@@ -9,6 +9,7 @@ permissions: { contents: read }
 jobs:
   native:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - version: '4.55.1.1'
@@ -33,12 +34,15 @@ jobs:
       - shell: pwsh
         run: |
           dotnet build experiments/ymm4/no-harmony-file-drop-correction/src/Probe/Probe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          dotnet build experiments/ymm4/no-harmony-file-drop-correction/src/ExternalDragSource/ExternalDragSource.csproj -c Release -o out/source --nologo -warnaserror
           $d=Join-Path $env:YMM4_DIR 'user\plugin\CNWL_NoHarmonyFileDrop'
           New-Item -ItemType Directory -Force $d|Out-Null
           Copy-Item out/probe/Ymm4NoHarmonyFileDropCorrectionProbe.dll $d
           if(Test-Path out/probe/0Harmony.dll){throw'unexpected Harmony'}
       - shell: pwsh
-        run: ./experiments/ymm4/no-harmony-file-drop-correction/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+        run: |
+          $env:CNWL_YMM4_NO_HARMONY_FILEDROP_SOURCE_EXE=(Resolve-Path 'out/source/ExternalDragSource.exe').Path
+          ./experiments/ymm4/no-harmony-file-drop-correction/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
       - if: always()
         shell: pwsh
         run: foreach($f in @('result.txt','trace.txt','error.txt')){$p=Join-Path 'out/evidence' $f;if(Test-Path $p){Write-Host "=== $f ===";Get-Content $p}}

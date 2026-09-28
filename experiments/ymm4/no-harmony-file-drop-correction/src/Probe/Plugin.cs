@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -136,6 +137,33 @@ internal static class Probe
             ResetRouteFlags();
             var corrected=await DoFileDrop(mainWindow,t,correctedPoint,"corrected");
 
+            correctionEnabled=false;
+            ResetRouteFlags();
+            var externalWpfBaseline=await DoExternalFileDrop(mainWindow,t,baselinePoint,"external-wpf-baseline","wpf");
+            var externalWpfBaselineDropObserved=dropObserved;
+
+            correctionEnabled=true;
+            ResetRouteFlags();
+            var externalWpfCorrected=await DoExternalFileDrop(mainWindow,t,correctedPoint,"external-wpf-corrected","wpf");
+            var externalWpfCorrectedDropObserved=dropObserved;
+            var externalWpfCorrectedCommand=customAddFileCommandExecuted;
+
+            correctionEnabled=false;
+            ResetRouteFlags();
+            var shellBaseline=await DoExternalFileDrop(mainWindow,t,baselinePoint,"shell-baseline","shell");
+            var shellBaselineDropObserved=dropObserved;
+
+            correctionEnabled=true;
+            ResetRouteFlags();
+            var shellCorrected=await DoExternalFileDrop(mainWindow,t,correctedPoint,"shell-corrected","shell");
+            var shellCorrectedDropObserved=dropObserved;
+            var shellCorrectedCommand=customAddFileCommandExecuted;
+
+            RequireImageDrop("external_wpf_baseline",externalWpfBaseline,externalWpfBaselineDropObserved,false,false);
+            RequireImageDrop("external_wpf_corrected",externalWpfCorrected,externalWpfCorrectedDropObserved,true,externalWpfCorrectedCommand);
+            RequireImageDrop("shell_baseline",shellBaseline,shellBaselineDropObserved,false,false);
+            RequireImageDrop("shell_corrected",shellCorrected,shellCorrectedDropObserved,true,shellCorrectedCommand);
+
             var correctedLayers=corrected.Layers.Split(',',StringSplitOptions.RemoveEmptyEntries);
             var correctedMatchesFold=correctedLayers.Contains("3");
 
@@ -175,7 +203,17 @@ internal static class Probe
                 $"redo_preserved_fold_layer={redoPreservedFoldLayer}",
                 $"drag_enter_observed={dragEnterObserved}",
                 $"drag_over_observed={dragOverObserved}",
-                $"drop_observed={dropObserved}"
+                $"drop_observed={dropObserved}",
+                $"external_wpf_baseline_type={DescribeTypes(externalWpfBaseline)}",
+                $"external_wpf_baseline_path_exact={PathsExact(externalWpfBaseline)}",
+                $"external_wpf_corrected_type={DescribeTypes(externalWpfCorrected)}",
+                $"external_wpf_corrected_path_exact={PathsExact(externalWpfCorrected)}",
+                $"external_wpf_corrected_command={externalWpfCorrectedCommand}",
+                $"shell_baseline_type={DescribeTypes(shellBaseline)}",
+                $"shell_baseline_path_exact={PathsExact(shellBaseline)}",
+                $"shell_corrected_type={DescribeTypes(shellCorrected)}",
+                $"shell_corrected_path_exact={PathsExact(shellCorrected)}",
+                $"shell_corrected_command={shellCorrectedCommand}"
             ]);
         }catch(Exception ex){Fail(ex);}
     }
@@ -250,7 +288,9 @@ internal static class Probe
         var mapped=MapDisplayPointToLogical(raw);
         if(correctionEnabled)
             SetReactivePoint(timelineVm,"TimelineCursorPosition",mapped);
-        trace.Add($"{phase} correction={correctionEnabled} raw={Fmt(raw)} mapped={Fmt(mapped)} effects={e.Effects}");
+        string formats;
+        try{formats=string.Join("|",e.Data.GetFormats(false));}catch{formats="<unavailable>";}
+        trace.Add($"{phase} correction={correctionEnabled} raw={Fmt(raw)} mapped={Fmt(mapped)} effects={e.Effects} formats={formats}");
         // Do not handle: YMM4 remains the actual file-drop implementation.
     }
 
@@ -335,6 +375,92 @@ internal static class Probe
             added);
     }
 
+    static async Task<DropObservation> DoExternalFileDrop(Window mainWindow,Timeline t,Point target,string label,string mode)
+    {
+        var sourceExe=Environment.GetEnvironmentVariable("CNWL_YMM4_NO_HARMONY_FILEDROP_SOURCE_EXE");
+        if(string.IsNullOrWhiteSpace(sourceExe)||!File.Exists(sourceExe))
+            throw new FileNotFoundException("External drag source missing",sourceExe);
+
+        var sourceDir=Path.Combine(output,"external-source-"+label);
+        Directory.CreateDirectory(sourceDir);
+        foreach(var old in Directory.EnumerateFiles(sourceDir))File.Delete(old);
+
+        var png=Path.Combine(sourceDir,"外部 ドロップ "+label+".png");
+        File.WriteAllBytes(png,Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQ1sAAAAASUVORK5CYII="));
+        var helperResult=Path.Combine(output,label+"-source.txt");
+        if(File.Exists(helperResult))File.Delete(helperResult);
+
+        var before=t.Items.ToArray();
+        var psi=new ProcessStartInfo
+        {
+            FileName=sourceExe,
+            UseShellExecute=false,
+            WorkingDirectory=Path.GetDirectoryName(sourceExe)!
+        };
+        psi.ArgumentList.Add(mode);
+        psi.ArgumentList.Add(png);
+        psi.ArgumentList.Add(target.X.ToString(CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add(target.Y.ToString(CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add(helperResult);
+
+        trace.Add($"{label}_launch mode={mode} source_exe={sourceExe} target={Fmt(target)} source_pid_pending");
+        using var process=Process.Start(psi)??throw new InvalidOperationException("Could not start external drag source");
+        trace.Add($"{label}_source_pid={process.Id}");
+
+        using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(mode=="explorer"?25:15));
+        try{await process.WaitForExitAsync(timeout.Token);}
+        catch(OperationCanceledException)
+        {
+            try{process.Kill(true);}catch{}
+            throw new TimeoutException(label+" external drag source timeout");
+        }
+
+        await Task.Delay(1600);
+        var helperText=File.Exists(helperResult)?File.ReadAllText(helperResult):"<missing>";
+        trace.Add($"{label}_helper exit={process.ExitCode} result={helperText.Replace(Environment.NewLine," | ")}");
+        if(process.ExitCode!=0||!helperText.Contains("status=PASS",StringComparison.Ordinal))
+            throw new InvalidOperationException(label+" external drag source failed");
+
+        mainWindow.Activate();Native.SetForegroundWindow(new WindowInteropHelper(mainWindow).Handle);
+
+        var added=t.Items.Where(x=>!before.Any(b=>ReferenceEquals(b,x))).ToArray();
+        if(correctionEnabled&&pendingDropLogicalLayer>=0)
+        {
+            foreach(var item in added)
+                item.Layer=pendingDropLogicalLayer;
+            ApplyFold();
+        }
+
+        var detail=string.Join("|",added.Select(x=>x.GetType().Name+"@L"+x.Layer+":F"+x.Frame+":P="+(FilePathOf(x)??"<null>")));
+        trace.Add($"{label}_result added={added.Length} items={detail} expected_path={png} pending_logical={pendingDropLogicalLayer}");
+        return new(true,"External",added.Length>0,added.Length,
+            string.Join(",",added.Select(x=>x.Layer).OrderBy(x=>x)),
+            string.Join(",",added.Select(x=>x.Frame).OrderBy(x=>x)),
+            png,
+            added);
+    }
+
+    static string DescribeTypes(DropObservation drop)=>string.Join(",",drop.AddedItems.Select(x=>x.GetType().Name));
+
+    static bool PathsExact(DropObservation drop)=>
+        drop.AddedItems.Length>0&&drop.AddedItems.All(x=>
+            string.Equals(
+                Path.GetFullPath(FilePathOf(x)??""),
+                Path.GetFullPath(drop.FilePath),
+                StringComparison.OrdinalIgnoreCase));
+
+    static void RequireImageDrop(string name,DropObservation drop,bool observed,bool requireCommand,bool commandExecuted)
+    {
+        var types=DescribeTypes(drop);
+        var pathExact=PathsExact(drop);
+        trace.Add($"{name}_assert observed={observed} count={drop.AddedItems.Length} types={types} path_exact={pathExact} command_required={requireCommand}");
+        if(!observed)throw new InvalidOperationException(name+" drop event not observed");
+        if(drop.AddedItems.Length!=1)throw new InvalidOperationException(name+" expected exactly one item but got "+drop.AddedItems.Length);
+        if(drop.AddedItems[0].GetType().Name!="ImageItem")throw new InvalidOperationException(name+" expected ImageItem but got "+drop.AddedItems[0].GetType().Name);
+        if(!pathExact)throw new InvalidOperationException(name+" FilePath mismatch: "+(FilePathOf(drop.AddedItems[0])??"<null>")+" != "+drop.FilePath);
+        if(requireCommand&&!commandExecuted)throw new InvalidOperationException(name+" custom AddFileItem command did not execute");
+    }
+
     static async Task Shortcut(byte key)
     {
         const byte ctrl=0x11;
@@ -372,5 +498,5 @@ internal static class Probe
     static ScreenBox Box(FrameworkElement fe){try{var p=fe.PointToScreen(new Point());return new(p.X,p.Y,fe.ActualWidth,fe.ActualHeight);}catch{return default;}}
     static string Fmt(Point p)=>$"{p.X:F2},{p.Y:F2}";
     static void WriteResult(string s,IEnumerable<string>d)=>File.WriteAllLines(Path.Combine(output,"result.txt"),new[]{"status="+s}.Concat(d),new UTF8Encoding(false));
-    static void Fail(Exception ex){try{File.WriteAllText(Path.Combine(output,"error.txt"),ex.ToString(),new UTF8Encoding(false));WriteResult("FAIL_EXCEPTION",["message="+ex.GetBaseException().Message]);}catch{}}
+    static void Fail(Exception ex){try{File.WriteAllLines(Path.Combine(output,"trace.txt"),trace,new UTF8Encoding(false));File.WriteAllText(Path.Combine(output,"error.txt"),ex.ToString(),new UTF8Encoding(false));WriteResult("FAIL_EXCEPTION",["message="+ex.GetBaseException().Message]);}catch{}}
 }

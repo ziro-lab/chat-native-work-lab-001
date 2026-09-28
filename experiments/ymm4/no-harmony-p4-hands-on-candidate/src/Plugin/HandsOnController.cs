@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -125,7 +127,271 @@ internal sealed partial class HandsOnController : IDisposable
         ScheduleP5MediaCompatibilitySmoke();
         ScheduleP5ThirdPartyCompatibilitySmoke();
         ScheduleP5ConfiguredVoiceSmoke();
+        ScheduleP7ExternalFileDropSmoke();
         ScheduleP6Probes();
+    }
+
+    private void ScheduleP7ExternalFileDropSmoke()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("CNWL_P7_EXTERNAL_FILEDROP_SMOKE"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Application.Current.Dispatcher.BeginInvoke(
+            new Action(() => _ = RunP7ExternalFileDropSmokeAsync()),
+            DispatcherPriority.ContextIdle);
+    }
+
+    private async Task RunP7ExternalFileDropSmokeAsync()
+    {
+        var dir = Environment.GetEnvironmentVariable("CNWL_P4_HANDS_ON_DIAG_DIR");
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        Directory.CreateDirectory(dir);
+        var resultPath = Path.Combine(dir, "p7-external-filedrop-result.txt");
+
+        try
+        {
+            await Task.Delay(900);
+
+            HandsOnRuntime.Diagnostic(
+                $"p7_external_filedrop_baseline_items={timeline.Items.Count}");
+
+            var sourceExe = Environment.GetEnvironmentVariable(
+                "CNWL_P7_EXTERNAL_FILEDROP_SOURCE_EXE");
+            if (string.IsNullOrWhiteSpace(sourceExe))
+                throw new InvalidOperationException(
+                    "CNWL_P7_EXTERNAL_FILEDROP_SOURCE_EXE is missing.");
+
+            sourceExe = Path.GetFullPath(sourceExe);
+            if (!File.Exists(sourceExe))
+                throw new FileNotFoundException(
+                    "External FileDrop source missing.",
+                    sourceExe);
+
+            var anchor = new ShapeItem
+            {
+                Frame = 60,
+                Layer = 4,
+                Length = 70,
+                Remark = "CNWL_P7_EXTERNAL_DROP_ANCHOR"
+            };
+
+            if (!timeline.TryAddItems(
+                    [anchor],
+                    anchor.Frame,
+                    anchor.Layer,
+                    isItemSelectionEnabled: false))
+            {
+                throw new InvalidOperationException(
+                    "P7 external FileDrop anchor could not be added.");
+            }
+
+            var folderId = Guid.Parse(
+                "77777777-1111-2222-3333-000000000001");
+            var timelineKey = timeline.ID.ToString("D");
+
+            state.ReplaceProductState(
+                FolderProductStateRules.ReplaceCore(
+                    FolderProductState.Empty,
+                    FolderDocumentRules.NormalizeAndValidate(
+                        new FolderDocument
+                        {
+                            Timelines =
+                            [
+                                new TimelineFolderState
+                                {
+                                    TimelineKey = timelineKey,
+                                    Folders =
+                                    [
+                                        new PersistedFolder
+                                        {
+                                            Id = folderId,
+                                            Start = 1,
+                                            End = 3,
+                                            Name = "P7 FileDrop",
+                                            IsCollapsed = true
+                                        }
+                                    ]
+                                }
+                            ]
+                        })));
+
+            await Task.Delay(900);
+            display.ThrowIfFailed();
+
+            if (!display.Layout.IsHidden(2)
+                || !display.Layout.IsHidden(3)
+                || display.Layout.VisualRowOfLogical(4) != 2)
+            {
+                throw new InvalidOperationException(
+                    "P7 external FileDrop folded layout was not established.");
+            }
+
+            var anchorBox = Host.ScreenRect(host.ItemView(anchor));
+            var scrollBox = Host.ScreenRect(host.Scroll);
+            var target = new Point(
+                Math.Min(scrollBox.Right - 36, anchorBox.Right + 96),
+                anchorBox.Y + anchorBox.Height / 2.0);
+
+            if (!scrollBox.Contains(target))
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop target is outside ScrollViewer: {target} / {scrollBox}.");
+
+            var png = Path.Combine(dir, "外部 ドロップ Full版.png");
+            File.WriteAllBytes(
+                png,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQ1sAAAAASUVORK5CYII="));
+
+            var sourceResult = Path.Combine(dir, "p7-external-filedrop-source.txt");
+            if (File.Exists(sourceResult))
+                File.Delete(sourceResult);
+
+            var before = new HashSet<IItem>(
+                timeline.Items,
+                ReferenceEqualityComparer.Instance);
+            var commandBefore = fileDrop.AddCommandExecutions;
+            var correctedBefore = fileDrop.PostCorrectedItems;
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = sourceExe,
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(sourceExe)!
+            };
+            psi.ArgumentList.Add("shell");
+            psi.ArgumentList.Add(png);
+            psi.ArgumentList.Add(target.X.ToString(CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add(target.Y.ToString(CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add(sourceResult);
+
+            host.Activate();
+            using var process = Process.Start(psi)
+                ?? throw new InvalidOperationException(
+                    "P7 external FileDrop source could not start.");
+
+            using (var timeout = new CancellationTokenSource(
+                       TimeSpan.FromSeconds(18)))
+            {
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    try { process.Kill(true); } catch { }
+                    throw new TimeoutException(
+                        "P7 external FileDrop source timed out.");
+                }
+            }
+
+            await Task.Delay(1400);
+            display.ThrowIfFailed();
+
+            var sourceText = File.Exists(sourceResult)
+                ? File.ReadAllText(sourceResult)
+                : "<missing>";
+
+            var sourceEffectAccepted =
+                sourceText.Contains(
+                    "effect=Copy",
+                    StringComparison.Ordinal)
+                || sourceText.Contains(
+                    "effect=1",
+                    StringComparison.Ordinal);
+
+            if (process.ExitCode != 0
+                || !sourceText.Contains(
+                    "status=PASS",
+                    StringComparison.Ordinal)
+                || !sourceEffectAccepted)
+            {
+                throw new InvalidOperationException(
+                    "P7 external FileDrop source failed: "
+                    + sourceText.Replace(Environment.NewLine, " | "));
+            }
+
+            var added = timeline.Items
+                .Where(item => !before.Contains(item))
+                .ToArray();
+
+            if (added.Length != 1)
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop expected one item, got {added.Length}.");
+
+            var addedItem = added[0];
+            if (addedItem.GetType().Name != "ImageItem")
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop expected ImageItem, got {addedItem.GetType().FullName}.");
+
+            var filePath = addedItem.GetType()
+                .GetProperty(
+                    "FilePath",
+                    System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic)
+                ?.GetValue(addedItem) as string;
+
+            if (string.IsNullOrWhiteSpace(filePath)
+                || !string.Equals(
+                    Path.GetFullPath(filePath),
+                    Path.GetFullPath(png),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop FilePath mismatch: {filePath ?? "<null>"} != {png}.");
+            }
+
+            if (fileDrop.AddCommandExecutions != commandBefore + 1)
+                throw new InvalidOperationException(
+                    "P7 external FileDrop AddFileItem command count mismatch.");
+
+            if (fileDrop.PostCorrectedItems <= correctedBefore)
+                throw new InvalidOperationException(
+                    "P7 external FileDrop item was not post-corrected.");
+
+            if (fileDrop.LastLogicalLayer != 4)
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop requested layer mismatch: {fileDrop.LastLogicalLayer}.");
+
+            if (display.Layout.IsHidden(addedItem.Layer))
+                throw new InvalidOperationException(
+                    $"P7 external FileDrop resolved to hidden layer {addedItem.Layer}.");
+
+            File.WriteAllLines(
+                resultPath,
+                [
+                    "PASS_P7_EXTERNAL_FILEDROP_FULL",
+                    "source_process=external",
+                    "drag_source_mode=shell",
+                    "effect=Copy",
+                    "item_type=" + addedItem.GetType().Name,
+                    "file_path_exact=true",
+                    "requested_logical_layer=4",
+                    "item_layer=" + addedItem.Layer,
+                    "item_layer_visible=" + !display.Layout.IsHidden(addedItem.Layer),
+                    "add_file_command_delta=1",
+                    "post_corrected=true",
+                    "folder_collapsed=true",
+                    "full_controller=true",
+                    "overlay_attached=true"
+                ]);
+        }
+        catch (Exception ex)
+        {
+            HandsOnRuntime.Diagnostic(
+                "p7_external_filedrop_smoke_error=" + ex);
+            File.WriteAllText(
+                resultPath,
+                "FAIL_P7_EXTERNAL_FILEDROP_FULL"
+                + Environment.NewLine
+                + ex
+                + Environment.NewLine);
+        }
     }
 
     partial void ScheduleP6Probes();
