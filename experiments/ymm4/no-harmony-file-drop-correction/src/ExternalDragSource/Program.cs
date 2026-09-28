@@ -114,39 +114,36 @@ internal static class Program
         Exception? failure = null;
         Task? mover = null;
 
-        window.Loaded += (_, _) =>
+        window.Loaded += async (_, _) =>
         {
-            app.Dispatcher.BeginInvoke(new Action(() =>
+            try
             {
-                try
-                {
-                    window.Activate();
-                    window.UpdateLayout();
-                    Thread.Sleep(250);
+                await Task.Delay(250);
+                window.Activate();
+                window.UpdateLayout();
 
-                    var start = border.PointToScreen(new Point(border.ActualWidth / 2, border.ActualHeight / 2));
-                    Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
-                    Thread.Sleep(120);
-                    Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
-                    Thread.Sleep(120);
-                    mover = StartMoverAfterPress(start, new Point(targetX, targetY));
+                var start = border.PointToScreen(new Point(border.ActualWidth / 2, border.ActualHeight / 2));
+                Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
+                await Task.Delay(120);
+                Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
+                await Task.Delay(120);
+                mover = StartMoverAfterPress(start, new Point(targetX, targetY));
 
-                    var data = new DataObject();
-                    data.SetData(DataFormats.FileDrop, new[] { file });
-                    effect = DragDrop.DoDragDrop(border, data, DragDropEffects.Copy);
-                }
-                catch (Exception ex)
-                {
-                    failure = ex;
-                }
-                finally
-                {
-                    Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
-                    try { mover?.Wait(TimeSpan.FromSeconds(5)); } catch { }
-                    window.Close();
-                    app.Shutdown();
-                }
-            }), DispatcherPriority.ApplicationIdle);
+                var data = new DataObject();
+                data.SetData(DataFormats.FileDrop, new[] { file });
+                effect = DragDrop.DoDragDrop(border, data, DragDropEffects.Copy);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
+                try { mover?.Wait(TimeSpan.FromSeconds(5)); } catch { }
+                window.Close();
+                app.Shutdown();
+            }
         };
 
         app.Run(window);
