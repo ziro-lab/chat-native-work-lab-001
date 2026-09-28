@@ -425,6 +425,7 @@ internal static class Program
             "status=PASS",
             "mode=explorer",
             "source_process=" + Environment.ProcessId,
+            "effect=Copy",
             "explorer_window=" + explorerWindow,
             "directory=" + directory,
             "file=" + file
