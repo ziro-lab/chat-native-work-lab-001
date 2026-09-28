@@ -150,19 +150,19 @@ internal static class Probe
 
             correctionEnabled=false;
             ResetRouteFlags();
-            var explorerBaseline=await DoExternalFileDrop(mainWindow,t,baselinePoint,"explorer-baseline","explorer");
-            var explorerBaselineDropObserved=dropObserved;
+            var shellBaseline=await DoExternalFileDrop(mainWindow,t,baselinePoint,"shell-baseline","shell");
+            var shellBaselineDropObserved=dropObserved;
 
             correctionEnabled=true;
             ResetRouteFlags();
-            var explorerCorrected=await DoExternalFileDrop(mainWindow,t,correctedPoint,"explorer-corrected","explorer");
-            var explorerCorrectedDropObserved=dropObserved;
-            var explorerCorrectedCommand=customAddFileCommandExecuted;
+            var shellCorrected=await DoExternalFileDrop(mainWindow,t,correctedPoint,"shell-corrected","shell");
+            var shellCorrectedDropObserved=dropObserved;
+            var shellCorrectedCommand=customAddFileCommandExecuted;
 
             RequireImageDrop("external_wpf_baseline",externalWpfBaseline,externalWpfBaselineDropObserved,false,false);
             RequireImageDrop("external_wpf_corrected",externalWpfCorrected,externalWpfCorrectedDropObserved,true,externalWpfCorrectedCommand);
-            RequireImageDrop("explorer_baseline",explorerBaseline,explorerBaselineDropObserved,false,false);
-            RequireImageDrop("explorer_corrected",explorerCorrected,explorerCorrectedDropObserved,true,explorerCorrectedCommand);
+            RequireImageDrop("shell_baseline",shellBaseline,shellBaselineDropObserved,false,false);
+            RequireImageDrop("shell_corrected",shellCorrected,shellCorrectedDropObserved,true,shellCorrectedCommand);
 
             var correctedLayers=corrected.Layers.Split(',',StringSplitOptions.RemoveEmptyEntries);
             var correctedMatchesFold=correctedLayers.Contains("3");
@@ -209,11 +209,11 @@ internal static class Probe
                 $"external_wpf_corrected_type={DescribeTypes(externalWpfCorrected)}",
                 $"external_wpf_corrected_path_exact={PathsExact(externalWpfCorrected)}",
                 $"external_wpf_corrected_command={externalWpfCorrectedCommand}",
-                $"explorer_baseline_type={DescribeTypes(explorerBaseline)}",
-                $"explorer_baseline_path_exact={PathsExact(explorerBaseline)}",
-                $"explorer_corrected_type={DescribeTypes(explorerCorrected)}",
-                $"explorer_corrected_path_exact={PathsExact(explorerCorrected)}",
-                $"explorer_corrected_command={explorerCorrectedCommand}"
+                $"shell_baseline_type={DescribeTypes(shellBaseline)}",
+                $"shell_baseline_path_exact={PathsExact(shellBaseline)}",
+                $"shell_corrected_type={DescribeTypes(shellCorrected)}",
+                $"shell_corrected_path_exact={PathsExact(shellCorrected)}",
+                $"shell_corrected_command={shellCorrectedCommand}"
             ]);
         }catch(Exception ex){Fail(ex);}
     }
