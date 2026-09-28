@@ -111,11 +111,15 @@ internal interface IOleDropSource
 [ComVisible(true)]
 internal sealed class OleDropSource : IOleDropSource
 {
+    private volatile bool completeRequested;
+
+    internal void Complete() => completeRequested = true;
+
     public int QueryContinueDrag(bool escapePressed, uint keyState)
     {
         if (escapePressed)
             return ShellNative.DragDropSCancel;
-        if ((keyState & ShellNative.MkLeftButton) == 0)
+        if (completeRequested || (keyState & ShellNative.MkLeftButton) == 0)
             return ShellNative.DragDropSDrop;
         return ShellNative.S_OK;
     }
@@ -283,13 +287,33 @@ internal static class Program
             Thread.Sleep(100);
             Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
             Thread.Sleep(100);
-            var mover = StartMoverAfterPress(start, new Point(targetX, targetY));
+            var dropSource = new OleDropSource();
+            var target = new Point(targetX, targetY);
+            var mover = Task.Run(() =>
+            {
+                Thread.Sleep(220);
+                for (var i = 1; i <= 18; i++)
+                {
+                    Native.SetCursorPos(
+                        (int)Math.Round(start.X + (target.X - start.X) * i / 18.0),
+                        (int)Math.Round(start.Y + (target.Y - start.Y) * i / 18.0));
+                    Thread.Sleep(70);
+                }
+
+                Thread.Sleep(180);
+                dropSource.Complete();
+                Native.SetCursorPos((int)Math.Round(target.X + 1), (int)Math.Round(target.Y));
+                Thread.Sleep(40);
+                Native.SetCursorPos((int)Math.Round(target.X), (int)Math.Round(target.Y));
+                Thread.Sleep(40);
+                Native.mouse_event(Native.LeftUp, 0, 0, 0, 0);
+            });
 
             uint effect;
             int dragResult;
             try
             {
-                dragResult = ShellNative.DoDragDrop(data, new OleDropSource(), ShellNative.Copy, out effect);
+                dragResult = ShellNative.DoDragDrop(data, dropSource, ShellNative.Copy, out effect);
             }
             finally
             {
