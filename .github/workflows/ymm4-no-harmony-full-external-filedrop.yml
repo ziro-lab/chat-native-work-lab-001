@@ -65,10 +65,7 @@ jobs:
       - name: Execute full product external FileDrop
         shell: pwsh
         run: |
-          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunExternalFileDropSmoke.ps1 \`
-            -Ymm4Dir $env:YMM4_DIR \`
-            -SourceExe (Resolve-Path 'out/source/ExternalDragSource.exe').Path \`
-            -OutputDir (Join-Path $PWD 'out/evidence')
+          ./experiments/ymm4/no-harmony-p4-hands-on-candidate/RunExternalFileDropSmoke.ps1 -Ymm4Dir $env:YMM4_DIR -SourceExe (Resolve-Path 'out/source/ExternalDragSource.exe').Path -OutputDir (Join-Path $PWD 'out/evidence')
 
       - if: always()
         name: Show evidence
