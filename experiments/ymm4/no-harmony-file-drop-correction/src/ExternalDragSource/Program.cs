@@ -74,7 +74,7 @@ internal static class ShellNative
         out uint attributesOut);
 
     [DllImport("shell32.dll")]
-    internal static extern nint ILCloneFull(nint pidl);
+    internal static extern nint ILClone(nint pidl);
 
     [DllImport("shell32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -261,7 +261,7 @@ internal static class Program
             if (parse < 0)
                 Marshal.ThrowExceptionForHR(parse);
 
-            parentPidl = ShellNative.ILCloneFull(fullPidl);
+            parentPidl = ShellNative.ILClone(fullPidl);
             if (parentPidl == 0 || !ShellNative.ILRemoveLastID(parentPidl))
                 throw new InvalidOperationException("Could not derive parent PIDL");
 
