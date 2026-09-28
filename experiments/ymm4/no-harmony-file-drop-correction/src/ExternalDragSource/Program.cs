@@ -24,6 +24,9 @@ internal static class Native
     internal static extern bool SetForegroundWindow(nint hWnd);
 
     [DllImport("user32.dll")]
+    internal static extern bool PostMessage(nint hWnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
     internal static extern bool SetCursorPos(int x, int y);
 
     [DllImport("user32.dll")]
@@ -225,7 +228,7 @@ internal static class Program
         try
         {
             if (explorerWindow != 0)
-                Process.Start(new ProcessStartInfo("taskkill", "/PID " + explorer?.Id + " /T /F") { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(3000);
+                Native.PostMessage(explorerWindow, 0x0010, 0, 0);
         }
         catch
         {
