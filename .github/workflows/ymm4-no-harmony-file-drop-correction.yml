@@ -9,6 +9,7 @@ permissions: { contents: read }
 jobs:
   native:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - version: '4.55.1.1'
