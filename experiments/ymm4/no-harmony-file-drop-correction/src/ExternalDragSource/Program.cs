@@ -26,6 +26,9 @@ internal static class Native
     internal static extern bool SetForegroundWindow(nint hWnd);
 
     [DllImport("user32.dll")]
+    internal static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")]
     internal static extern bool PostMessage(nint hWnd, uint msg, nint wParam, nint lParam);
 
     [DllImport("user32.dll")]
@@ -112,7 +115,11 @@ internal static class Program
         Thread.Sleep(350);
 
         var start = border.PointToScreen(new Point(border.ActualWidth / 2, border.ActualHeight / 2));
-        var mover = StartMover(start, new Point(targetX, targetY));
+        Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
+        Thread.Sleep(120);
+        Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
+        Thread.Sleep(120);
+        var mover = StartMoverAfterPress(start, new Point(targetX, targetY));
 
         var data = new DataObject();
         data.SetData(DataFormats.FileDrop, new[] { file });
@@ -204,8 +211,11 @@ internal static class Program
         if (fileElement is null || explorerWindow == 0)
             throw new InvalidOperationException("Could not locate Explorer file item: " + file);
 
+        // Keep Explorer away from the YMM4 drop target so the target remains
+        // physically visible during the real shell drag.
+        Native.SetWindowPos(explorerWindow, 0, 0, 0, 430, 500, 0);
         Native.SetForegroundWindow(explorerWindow);
-        Thread.Sleep(250);
+        Thread.Sleep(500);
 
         var box = fileElement.Current.BoundingRectangle;
         var start = new Point(box.Left + box.Width / 2, box.Top + box.Height / 2);
@@ -248,12 +258,9 @@ internal static class Program
         return 0;
     }
 
-    private static Task StartMover(Point start, Point target) =>
+    private static Task StartMoverAfterPress(Point start, Point target) =>
         Task.Run(() =>
         {
-            Native.SetCursorPos((int)Math.Round(start.X), (int)Math.Round(start.Y));
-            Thread.Sleep(120);
-            Native.mouse_event(Native.LeftDown, 0, 0, 0, 0);
             Thread.Sleep(220);
 
             for (var i = 1; i <= 18; i++)
