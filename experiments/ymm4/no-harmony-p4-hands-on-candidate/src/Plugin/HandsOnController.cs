@@ -263,7 +263,7 @@ internal sealed partial class HandsOnController : IDisposable
                 UseShellExecute = false,
                 WorkingDirectory = Path.GetDirectoryName(sourceExe)!
             };
-            psi.ArgumentList.Add("explorer");
+            psi.ArgumentList.Add("shell");
             psi.ArgumentList.Add(png);
             psi.ArgumentList.Add(target.X.ToString(CultureInfo.InvariantCulture));
             psi.ArgumentList.Add(target.Y.ToString(CultureInfo.InvariantCulture));
@@ -357,7 +357,7 @@ internal sealed partial class HandsOnController : IDisposable
                 [
                     "PASS_P7_EXTERNAL_FILEDROP_FULL",
                     "source_process=external",
-                    "drag_source_mode=explorer",
+                    "drag_source_mode=shell",
                     "effect=Copy",
                     "item_type=" + addedItem.GetType().Name,
                     "file_path_exact=true",
