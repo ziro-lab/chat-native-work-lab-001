@@ -19,6 +19,8 @@ Before creating a new probe, check [`../../docs/YMM4_REFERENCE_SOURCES.md`](../.
 - [`tool-group-resolution/`](tool-group-resolution/) — YMM4 4.55.1.1 Tool Plugin group-key / existing Utilities-group observation.
 - [`preview-refresh-surface/`](preview-refresh-surface/) — YMM4 4.55.1.1 Plugin-facing preview-refresh surface and CurrentFrame/ScrollFrame event observation.
 - [`timeline-input-intent/`](timeline-input-intent/) — YMM4 4.55.1.1 real input-route ordering for Item/re-click/blank/ruler/drag/keyboard/playback-style actions.
+- [`vqa-forced-boundary-transient-comma/`](vqa-forced-boundary-transient-comma/) — Voice Quality Assist vNext gate for transient `、` injection, automatic VOICEVOX phrase split and injected-pause-only zeroing.
+- [`vqa-audio-effect-surface/`](vqa-audio-effect-surface/) — Voice Quality Assist vNext gate for Audio Effect UI/persistence/notification/pass-through/public collection viability.
 
 ### Recording archive investigation — YMM4 v4.56.1.0
 
