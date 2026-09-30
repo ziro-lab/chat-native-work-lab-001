@@ -38,7 +38,11 @@ foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirec
 
         var methodOwners = new Dictionary<MethodDefinitionHandle, string>();
         var interestingTypes = new List<string>();
+        var typeSurfaces = new List<TypeSurface>();
         var hasPsdType = false;
+        var capturePsdSurface =
+            assemblyName.Equals("YukkuriMovieMaker.Plugin.FileSource.Psd", StringComparison.OrdinalIgnoreCase) ||
+            assemblyName.Equals("YukkuriMovieMaker.Plugin.Tachie.Psd", StringComparison.OrdinalIgnoreCase);
 
         foreach (var typeHandle in md.TypeDefinitions)
         {
@@ -51,6 +55,14 @@ foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirec
                 interestingTypes.Add(fullName);
             if (fullName.Contains("psd", StringComparison.OrdinalIgnoreCase))
                 hasPsdType = true;
+
+            if (capturePsdSurface)
+            {
+                var methods = type.GetMethods().Select(h => md.GetString(md.GetMethodDefinition(h).Name)).Distinct().Order().ToArray();
+                var properties = type.GetProperties().Select(h => md.GetString(md.GetPropertyDefinition(h).Name)).Distinct().Order().ToArray();
+                var fields = type.GetFields().Select(h => md.GetString(md.GetFieldDefinition(h).Name)).Distinct().Order().ToArray();
+                typeSurfaces.Add(new TypeSurface(fullName, methods, properties, fields));
+            }
 
             foreach (var methodHandle in type.GetMethods())
                 methodOwners[methodHandle] = fullName;
@@ -155,7 +167,8 @@ foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirec
                 interestingTypes.Distinct().Order().Take(500).ToArray(),
                 literalHits.Distinct().OrderBy(x => x.Type).ThenBy(x => x.Method).ThenBy(x => x.Value).ToArray(),
                 charConstantHits.Distinct().OrderBy(x => x.Type).ThenBy(x => x.Method).ThenBy(x => x.Value).Take(1000).ToArray(),
-                rawHits.Distinct().OrderBy(x => x.Token).ThenBy(x => x.Encoding).ToArray()));
+                rawHits.Distinct().OrderBy(x => x.Token).ThenBy(x => x.Encoding).ToArray(),
+                typeSurfaces.OrderBy(x => x.Type).ToArray()));
         }
     }
     catch (BadImageFormatException)
@@ -191,6 +204,15 @@ foreach (var a in result.Assemblies)
     var star = a.CharConstantHits.Count(x => x.Value == 42);
     if (bang > 0 || star > 0)
         summary.AppendLine($"  relevant-method integer constants: !={bang}, *={star} (discovery only)");
+
+    foreach (var t in a.TypeSurfaces)
+    {
+        var members = t.Methods.Concat(t.Properties).Concat(t.Fields)
+            .Where(x => ContainsAny(x, "radio", "force", "flip", "select", "check", "visible", "visibility", "active", "switch", "layer"))
+            .Distinct().Order().ToArray();
+        if (members.Length > 0)
+            summary.AppendLine($"  surface: {t.Type} => {string.Join(", ", members)}");
+    }
 }
 
 var summaryPath = Path.Combine(output, "summary.txt");
@@ -240,7 +262,9 @@ sealed record AssemblyResult(
     string[] InterestingTypes,
     LiteralHit[] LiteralHits,
     CharConstantHit[] CharConstantHits,
-    RawHit[] RawHits);
+    RawHit[] RawHits,
+    TypeSurface[] TypeSurfaces);
+sealed record TypeSurface(string Type, string[] Methods, string[] Properties, string[] Fields);
 sealed record LiteralHit(string Type, string Method, string Value);
 sealed record CharConstantHit(string Type, string Method, int Value, string Opcode);
 sealed record RawHit(string Token, string Encoding);
