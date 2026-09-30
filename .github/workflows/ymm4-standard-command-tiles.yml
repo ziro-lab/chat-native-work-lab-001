@@ -1,0 +1,94 @@
+name: YMM4 standard command tile route
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/standard-command-tiles/**'
+      - '.github/workflows/ymm4-standard-command-tiles.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'experiments/ymm4/standard-command-tiles/**'
+      - '.github/workflows/ymm4-standard-command-tiles.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ymm4_version: '4.55.1.1'
+            ymm4_sha256: '125860147cc33b831fc1a6d6ea996958001c2ead3b0d37f7d900251d5617db9b'
+          - ymm4_version: '4.56.1.0'
+            ymm4_sha256: '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a'
+
+    name: YMM4 ${{ matrix.ymm4_version }} Lite
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download and verify exact YMM4 Lite
+        shell: pwsh
+        run: |
+          $version='${{ matrix.ymm4_version }}'
+          $expected='${{ matrix.ymm4_sha256 }}'
+          $url="https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v$version/YukkuriMovieMaker_v${version}_Lite.zip"
+          curl.exe -L --fail --retry 3 --silent --show-error -o ymm4.zip $url
+          $hash=(Get-FileHash ymm4.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne $expected){ throw "YMM4 hash mismatch: $hash" }
+          Expand-Archive ymm4.zip ymm4
+          $exe=Get-ChildItem ymm4 -Recurse -Filter YukkuriMovieMaker.exe | Select-Object -First 1
+          if(-not $exe){ throw 'YukkuriMovieMaker.exe not found' }
+          "YMM4_DIR=$($exe.Directory.FullName)\" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build probe and install into real YMM4
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/standard-command-tiles/src/Ymm4StandardCommandTileProbe/Ymm4StandardCommandTileProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror
+          $pluginDir=Join-Path $env:YMM4_DIR 'user\plugin\Ymm4StandardCommandTileProbe'
+          New-Item -ItemType Directory -Force $pluginDir | Out-Null
+          Copy-Item out/probe/Ymm4StandardCommandTileProbe.dll $pluginDir
+
+      - name: Run native command route assertions
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/standard-command-tiles/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence')
+
+      - name: Record provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/evidence | Out-Null
+          @{
+            source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
+            checkout_sha = (git rev-parse HEAD)
+            run_id = '${{ github.run_id }}'
+            run_attempt = '${{ github.run_attempt }}'
+            host = 'YMM4 ${{ matrix.ymm4_version }} Lite'
+            host_sha256 = '${{ matrix.ymm4_sha256 }}'
+          } | ConvertTo-Json | Set-Content out/evidence/provenance.json
+
+      - name: Show evidence
+        if: always()
+        shell: pwsh
+        run: |
+          if(Test-Path out/evidence/result.txt){ Get-Content out/evidence/result.txt }
+          if(Test-Path out/evidence/command-surface.txt){ Get-Content out/evidence/command-surface.txt }
+          if(Test-Path out/evidence/error.txt){ Get-Content out/evidence/error.txt }
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-standard-command-tiles-${{ matrix.ymm4_version }}
+          path: 'out/evidence/'
+          retention-days: 14
