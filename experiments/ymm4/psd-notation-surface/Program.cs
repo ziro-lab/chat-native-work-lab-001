@@ -86,7 +86,7 @@ foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirec
             }
 
             var il = body.GetILBytes();
-            if (il.IsDefaultOrEmpty)
+            if (il is null || il.Length == 0)
                 continue;
 
             for (var i = 0; i + 4 < il.Length; i++)
