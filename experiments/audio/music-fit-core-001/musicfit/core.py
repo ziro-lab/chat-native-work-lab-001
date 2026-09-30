@@ -10,7 +10,7 @@ import numpy as np
 import soundfile as sf
 from scipy import signal
 
-VERSION = '0.1.1'
+VERSION = '0.2.0a1'
 SCHEMA = 'musicfit/v1'
 
 class FitError(ValueError):
@@ -429,7 +429,42 @@ def _merged(spans):
     return result
 
 
+@dataclass(frozen=True)
+class _SearchProfile:
+    """Private checkpoint policy; legacy calls use None and retain their cost."""
+    ending_entries: tuple[int, ...]
+    ending_strengths: tuple[float, ...]
+    terminal_mode: str = 'source_end'
+    max_edits: int = 4
+
+    def terminal_penalty(self, a, route, mode, c):
+        if mode != self.terminal_mode or len(route) - 1 > self.max_edits:
+            return None
+        minimum = min(round(c.min_run_seconds * a.sample_rate),
+                      sum(s.end-s.start for s in route) // 4)
+        if any(s.end-s.start < minimum for s in route):
+            return None
+        if any(r.start <= l.end or transition_score(a,l.end,r.start) < c.min_similarity
+               for l,r in zip(route,route[1:])):
+            return None
+        strengths = [strength for entry,strength in zip(self.ending_entries,self.ending_strengths)
+                     if route[-1].start <= entry < route[-1].end]
+        if mode == 'source_end' and not strengths:
+            return None
+        return .12 * (len(route)-1) + (.1 * (1-max(strengths)) if strengths else 0)
+
+
 def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Budget | None = None, phase=4) -> list[Plan]:
+    if type(phase) is not int or phase not in (3,4,5):
+        raise FitError('phase_must_be_3_4_or_5')
+    if phase == 5:
+        from .phase5 import arrange
+        return arrange(a,seconds,config,budget).candidates
+    return _graph_plans(a,seconds,config,budget,phase)
+
+
+def _graph_plans(a: Analysis, seconds: float, config: Config | None = None,
+                 budget: Budget | None = None, phase=4, *, _profile=None) -> list[Plan]:
     c, b = config or Config(), budget or Budget()
     c.validate()
     if phase not in (3, 4): raise FitError('phase_must_be_3_or_4')
@@ -445,14 +480,29 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
     edges = [(e.end, e.start, e.score, f'b{i}') for i,e in enumerate(eligible)]
     if phase == 4:
         edges += [(e.start, e.end, e.score, f'f{i}') for i,e in enumerate(eligible)]
+    if _profile is not None:
+        # Prune directions and weak actual seams BEFORE search; not a post-hoc bonus.
+        edges = [(exit,entry,score,eid) for exit,entry,score,eid in edges
+                 if entry > exit and transition_score(a,exit,entry) >= c.min_similarity]
     terminals = {}
-    ending_entries = _ending_entries(a, c) if phase == 4 else []
+    ending_entries = (list(_profile.ending_entries) if _profile is not None
+                      else (_ending_entries(a, c) if phase == 4 else []))
+    max_jumps = c.max_jumps if _profile is None else min(c.max_jumps,_profile.max_edits)
+
+    def add_terminal(key, cost, route, mode, strategy):
+        if _profile is not None:
+            extra = _profile.terminal_penalty(a,route,mode,c)
+            if extra is None:
+                return
+            cost += extra
+        terminals[key] = (cost, route, mode, strategy)
     # State = output frames, source cursor, completed spans, cumulative cost, used edge IDs.
     beam = [(0, 0, (), 0.0, ())]
-    for depth in range(c.max_jumps + 1):
+    for depth in range(max_jumps + 1):
         b.check()
         next_states = []
         for written, cursor, spans, cost, used in beam:
+            if _profile is not None: b.check()
             remaining = target - written
             if remaining <= 0: continue
             if remaining <= n - cursor:
@@ -461,10 +511,10 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
                 penalty = 0 if mode == 'source_end' else 0.65
                 route = _merged([*spans, tail])
                 key = tuple((s.start, s.end) for s in route)
-                terminals[key] = (cost + penalty, route, mode, 'loop_fit' if phase==3 else 'graph_fit')
+                add_terminal(key, cost + penalty, route, mode, 'loop_fit' if phase==3 else 'graph_fit')
                 # Exact-length ending bridge: preserve the actual source ending.
                 # Novelty-derived entries expand, but never replace, the old fixed 2/4/8 s hypotheses.
-                if phase == 4 and remaining >= minimum + outro and n - cursor - remaining > round(0.12*sr):
+                if phase == 4 and remaining >= minimum + outro and n - cursor - remaining > (round(0.12*sr) if _profile is None else 0):
                     for entry in ending_entries:
                         tail_len = n - entry
                         exit = cursor + remaining - tail_len
@@ -473,8 +523,8 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
                         if score < c.min_similarity: continue
                         route = _merged([*spans, Span(cursor, exit), Span(entry, n)])
                         key = tuple((s.start,s.end) for s in route)
-                        terminals[key] = (cost + 0.07 + 0.7*(1-score), route, 'source_end', 'graph_fit')
-            if depth == c.max_jumps: continue
+                        add_terminal(key, cost + 0.07 + 0.7*(1-score), route, 'source_end', 'graph_fit')
+            if depth == max_jumps: continue
             for exit, entry, score, eid in edges:
                 if exit < cursor + minimum or exit < intro: continue
                 total = written + exit - cursor
@@ -486,6 +536,7 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
                 route = (*spans, Span(cursor, exit))
                 delta = abs(target - (total + n - entry)) / max(target, sr)
                 priority = newcost + 0.5 * delta
+                if _profile is not None: priority += .12 * len(newused)
                 next_states.append((priority, total, entry, route, newcost, newused))
         if not next_states: break
         next_states.sort(key=lambda v: (v[0],v[1],v[2],v[5]))
@@ -514,5 +565,5 @@ def plans(a: Analysis, seconds: float, config: Config | None = None, budget: Bud
         p = Plan(f'candidate-{len(selected)+1}', target, route, float(cost), mode, scores, warnings, strategy)
         validate_plan(a,p,c)
         selected.append(p)
-        if len(selected) == 3: break
+        if len(selected) == (3 if _profile is None else 1): break
     return selected

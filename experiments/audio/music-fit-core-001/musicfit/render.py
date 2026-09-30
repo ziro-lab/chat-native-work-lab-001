@@ -148,8 +148,16 @@ def fit(source: Path, seconds: float, output_dir: Path, config: Config | None = 
     c, b = config or Config(), budget or Budget()
     source, output_dir = Path(source), Path(output_dir)
     if output_dir.exists(): raise FitError('output_directory_already_exists')
+    if type(phase) is not int or phase not in (3,4,5):
+        raise FitError('phase_must_be_3_4_or_5')
     a = analyze(source,c,b)
-    candidates = plans(a,seconds,c,b,phase)
+    arrangement = None
+    if phase == 5:
+        from .phase5 import arrange
+        arrangement = arrange(a,seconds,c,b)
+        candidates = arrangement.candidates
+    else:
+        candidates = plans(a,seconds,c,b,phase)
     if not candidates: raise FitError('no_suitable_plan;try_shorter_duration_or_manual_loop')
     output_dir.parent.mkdir(parents=True,exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.musicfit-',dir=output_dir.parent))
@@ -175,8 +183,20 @@ def fit(source: Path, seconds: float, output_dir: Path, config: Config | None = 
                 'candidates':rows,
                 'quality':{'human_acceptance_rate':None,'calibrated_confidence':False},
                 'elapsed_seconds':time_elapsed(b)}
+        if arrangement is not None:
+            report['planner'] = arrangement.diagnostics
+            report['structure_hints'] = (arrangement.hints.to_dict()
+                                         if arrangement.hints is not None else None)
         (stage/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False)+'\n',encoding='utf-8')
-        (stage/'review.html').write_text(review_page(rows),encoding='utf-8')
+        page = review_page(rows)
+        if arrangement is not None:
+            note = ('Phase 5 試聴用チェックポイント：短縮はFamily Aのみ。'
+                    '延長は既存Phase 4へ委譲します。')
+            diagnostic = html.escape(json.dumps({'planner':report['planner'],
+                'structure_hints':report['structure_hints']},ensure_ascii=False,indent=2))
+            page += ('<details><summary>解析・構成の手がかり（診断用）</summary><p>'
+                     + note + '</p><pre style="white-space:pre-wrap">' + diagnostic + '</pre></details>')
+        (stage/'review.html').write_text(page,encoding='utf-8')
         b.check()
         if output_dir.exists(): raise FitError('output_directory_already_exists')
         os.rename(stage,output_dir)

@@ -1,0 +1,8 @@
+{
+  "schema": "musicfit/v1",
+  "input": "input.wav",
+  "target_seconds": 60.0,
+  "output_dir": "fitted-output-phase5-a",
+  "phase": 5,
+  "budget_seconds": 180
+}

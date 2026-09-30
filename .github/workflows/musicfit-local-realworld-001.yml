@@ -24,6 +24,8 @@ jobs:
     env:
       OPENBLAS_NUM_THREADS: 1
       OMP_NUM_THREADS: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -164,23 +166,37 @@ jobs:
         run: |
           $src = "experiments/audio/musicfit-local-realworld-001"
           $core = "experiments/audio/music-fit-core-001"
-          $dst = "package/MusicFit_Local_RealWorld_Test_v0.1.1"
+          $dst = "package/MusicFit_Local_RealWorld_Test_v0.2.0a1"
           New-Item -ItemType Directory -Force -Path $dst | Out-Null
           New-Item -ItemType Directory -Force -Path "$dst/input" | Out-Null
           Copy-Item "$src/README_JA.md" $dst
           Copy-Item "$src/settings.json" $dst
+          Copy-Item "$src/settings.phase5.json" $dst
           Copy-Item "$src/setup_windows.bat" $dst
           Copy-Item "$src/run_windows.bat" $dst
+          Copy-Item "$src/run_phase5_windows.bat" $dst
           Copy-Item "$src/run_local_test.py" $dst
           Copy-Item "$src/score_local_ratings.py" $dst
           Copy-Item "$src/requirements.txt" $dst
           Copy-Item "$src/input/ここにBGMを入れる.txt" "$dst/input/"
-          Copy-Item -Recurse "$core/musicfit" "$dst/musicfit"
+          New-Item -ItemType Directory -Force -Path "$dst/musicfit" | Out-Null
+          Copy-Item "$core/musicfit/*.py" "$dst/musicfit/"
+
+      - name: Test the assembled Phase 5 package and record identity
+        run: python experiments/audio/musicfit-local-realworld-001/phase5_package_smoke.py --package package/MusicFit_Local_RealWorld_Test_v0.2.0a1
 
       - name: Upload Windows local test package
         uses: actions/upload-artifact@v4
         with:
-          name: MusicFit-Local-RealWorld-Test-v0.1.1
-          path: package/MusicFit_Local_RealWorld_Test_v0.1.1
+          name: MusicFit-Local-RealWorld-Test-v0.2.0a1
+          path: package/MusicFit_Local_RealWorld_Test_v0.2.0a1
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Phase 5 assertion evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: musicfit-phase5-checkpoint-a-evidence
+          path: experiments/audio/musicfit-local-realworld-001/phase5-package-evidence.json
           if-no-files-found: error
           retention-days: 14

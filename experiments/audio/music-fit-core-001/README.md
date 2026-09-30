@@ -12,6 +12,7 @@ This is a **pre-plugin component**, not a YMM4 plugin. The core requires NumPy, 
 | Phase 2 | `render()` | Stereo-preserving streaming PCM24 WAV, smooth constant-sum crossfades, original sample rate and exact sample accounting. |
 | Phase 3 | `plans(..., phase=3)` | Single recurring jump type per route, protected prefix, exact duration and explicit fade ending. |
 | Phase 4 | `plans(..., phase=4)` | Bounded search across different backward/forward jumps; scored bridge to original ending using fixed tails plus lightweight novelty-derived ending entries; up to three distinct edit maps. |
+| Phase 5 A (experimental) | `plans(..., phase=5)` / `fit(..., phase=5)` | Boundary/ending hints and forward-only Shorten Family A; one candidate. Larger/equal targets explicitly delegate to Phase 4. Full Phase 5 is not complete. |
 | Audition | `fit()` | Full candidates, period-diverse `loop_hypotheses`, each join and ending excerpt, `result.json`, local `review.html` and listening-rating JSON export. |
 
 The full integration test discovers separate 8s and 6s repetitions from a waveform, combines them into a 14s extension, preserves the original ending, and renders the exact sample count. No loop points are injected into that test's analyzer.
@@ -25,12 +26,11 @@ Two lightweight policies were promoted only after public-lab A/B evidence:
 
 Neither change lowers the normal recurrence threshold or adds a model/runtime dependency.
 
+### Phase 5 checkpoint A — v0.2.0a1
 
-### Phase 5 design (planned, not implemented)
+The [full Phase 5 design](PHASE5_STRUCTURE_AWARE_PLANNER_DESIGN.md) remains the architecture target. The first [experimental checkpoint](PHASE5_CHECKPOINT_A.md) is now implemented: lightweight boundary/ending hints, shared-search forward-only Shorten A and explicit source-ending-before-fade fallback. Default Phase 4 remains the baseline. Intro detection, Highlight, B/C diversity, dedicated Extend policy and a selectable Loop workflow are not implemented yet.
 
-The next design iteration keeps the current Phase 4 core as the lower-level engine and adds a thin structure-aware planner for user-facing **Loop / Extend / Shorten** modes. The planned additions are lightweight boundary / intro / highlight / ending hints, mode-specific edge constraints, and family-first candidate diversity.
-
-This is **design-only** and does not widen the current PASS boundary. See [`PHASE5_STRUCTURE_AWARE_PLANNER_DESIGN.md`](PHASE5_STRUCTURE_AWARE_PLANNER_DESIGN.md).
+Use `request.phase5.example.json`, or the local test package's `run_phase5_windows.bat`. This is a listening checkpoint, not a claim of better human acceptance or full Phase 5 completion.
 
 ## Run
 

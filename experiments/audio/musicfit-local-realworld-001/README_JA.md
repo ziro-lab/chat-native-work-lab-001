@@ -4,6 +4,19 @@
 
 音源はローカルPC内だけで処理します。実行時に音源・評価結果をGitHubや外部サービスへ送る処理はありません。
 
+## v0.2.0a1 / Phase 5 チェックポイントA
+
+まず `setup_windows.bat` で準備します。
+
+- `run_windows.bat`: これまでの Phase 4。比較基準として残しています。
+- `run_phase5_windows.bat`: Phase 5 の短縮試聴用。`settings.phase5.json` の指定尺（初期値60秒）を使います。
+
+**Phase 5 全体の完成版ではありません。** 短縮は原曲Endingを優先するFamily Aを1件だけ返します。長くする要求は既存Phase 4へ委譲し、詳細JSONへその旨を記録します。Highlight保持・Intro自動検出・別構成B/C・Loop候補を選んで適用する操作は未実装です。
+
+同じBGM・同じ尺で二つのランチャーを実行し、全体とEndingを聞き比べてください。評価項目は増やしていません。Phase 5のEnding試聴は最大24秒に延ばし、既存Phase 4は8秒のままです。元曲も同じ長さのEndingプレビューを作ります。
+
+`core-result.json` には編集区間・境界候補・Endingの採用理由・fallback理由が残ります。診断用の折りたたみから開けます。`source_end` は元曲末尾への到達を意味し、自然な終止を自動保証するものではありません。末尾の短い安全fadeと継ぎ目のcrossfadeは従来Rendererのままです。
+
 ## 必要なPython
 
 Music Fitローカル実機テストは **Python 3.11 / 3.12 / 3.13** が必要です。
@@ -104,9 +117,9 @@ Python SoundFile / libsndfile が読み込める形式を対象にします。
 各ケースには、
 
 - 元曲
-- 元曲Ending 8秒
+- 元曲Ending（Phase 4は8秒、Phase 5は最大24秒）
 - Music Fit候補 A / B / C
-- 各候補のEnding 8秒
+- 各候補のEnding（同上）
 
 が入ります。
 
