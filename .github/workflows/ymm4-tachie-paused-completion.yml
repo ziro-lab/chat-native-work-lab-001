@@ -95,6 +95,12 @@ jobs:
             out/evidence/same-start/baseline-permitted.json
             out/evidence/same-start/baseline.png
             out/evidence/same-start/after.png
+            out/evidence/routed-nudge-start/result.json
+            out/evidence/routed-nudge-start/startup.json
+            out/evidence/routed-nudge-start/plugin-events.jsonl
+            out/evidence/routed-nudge-start/baseline-permitted.json
+            out/evidence/routed-nudge-start/baseline.png
+            out/evidence/routed-nudge-start/after.png
             out/evidence/nudge-start/result.json
             out/evidence/nudge-start/startup.json
             out/evidence/nudge-start/plugin-events.jsonl

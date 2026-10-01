@@ -173,6 +173,8 @@ internal static class Harness
     private static readonly Dictionary<int,ItemParameter> activeOwners=[];
     internal static int LastHostFrame=-1;
     private static long navigationVersion;private static FrameActionResult? frameAction;private static int frameActionCalls;
+    private sealed record RoutedSeekResult(string Status,int Original,int Target,int Final,bool TargetUpdateObserved,bool RestoreUpdateObserved,int Commands,string? Error);
+    private static RoutedSeekResult? routedSeek;private static int routedSeekCalls;
     internal static void Connect(int id,ItemParameter parameter){lock(gate)activeOwners[id]=parameter;}
     internal static void Disconnect(int id){lock(gate)activeOwners.Remove(id);}
     internal static void SetInfo(TimelineToolInfo info)
@@ -204,6 +206,87 @@ internal static class Harness
         frameAction=mode.StartsWith("same-",StringComparison.Ordinal)?FrameRefresh.Same(access):FrameRefresh.Nudge(access,mode.Contains("error",StringComparison.Ordinal)?()=>throw new InvalidOperationException("Injected after temporary move"):null);
         Log("completion-frame-action",new{mode,frameAction,frameActionCalls,actionElapsedMs=clock.Elapsed.TotalMilliseconds,sameUiTurn=true});
     }
+    static void BeginRoutedSeekRoundTrip(ItemParameter owner,object preview)
+    {
+        Application.Current.Dispatcher.VerifyAccess();
+        if(++routedSeekCalls!=1)throw new InvalidOperationException("Routed seek refresh reentered");
+        _=Run();
+        async Task Run()
+        {
+            var timeline=Info?.Timeline??throw new InvalidOperationException("Timeline unavailable");
+            var original=timeline.CurrentFrame;
+            if(original<0||timeline.Length<2){routedSeek=new("SKIPPED_BOUNDARY",original,original,original,false,false,0,null);return;}
+            var target=original<timeline.Length-1?original+1:original-1;
+            var commands=0;string? error=null;var targetObserved=false;var restoreObserved=false;
+            bool StillOwned()
+            {
+                lock(gate)return ReferenceEquals(Info?.Timeline,timeline)
+                    && Public(preview,"IsPlaying") is false
+                    && timeline.Items.OfType<TachieItem>().Any(x=>ReferenceEquals(x.TachieItemParameter,owner))
+                    && activeOwners.Values.Any(x=>ReferenceEquals(x,owner));
+            }
+            void Seek(int frame)
+            {
+                var command=CommandSettings.Default.GetCommand(CommandType.SeekWithoutSnap);
+                var window=Application.Current.MainWindow;
+                if(command==null||window==null||!command.CanExecute(frame,window))throw new InvalidOperationException("Public SeekWithoutSnap unavailable");
+                commands++;command.Execute(frame,window);
+                Log("public-seek-command-issued",new{frame,command="SeekWithoutSnap",commands});
+            }
+            async Task<bool> WaitFor(int frame,TimeSpan timeout)
+            {
+                var until=DateTimeOffset.UtcNow+timeout;
+                while(DateTimeOffset.UtcNow<until)
+                {
+                    if(!StillOwned())return false;
+                    var current=timeline.CurrentFrame;
+                    if(current!=original&&current!=target)return false;
+                    if(current==frame&&Volatile.Read(ref LastHostFrame)==frame)return true;
+                    await Task.Delay(25);
+                }
+                return false;
+            }
+            try
+            {
+                if(!StillOwned()){routedSeek=new("SKIPPED_STATE",original,target,timeline.CurrentFrame,false,false,0,null);return;}
+                Seek(target);
+                targetObserved=await WaitFor(target,TimeSpan.FromSeconds(4));
+                if(!targetObserved)
+                {
+                    error="Target frame was not observed by real ITachieSource2.Update";
+                    if(StillOwned()&&timeline.CurrentFrame==target)
+                    {
+                        Seek(original);
+                        restoreObserved=await WaitFor(original,TimeSpan.FromSeconds(4));
+                    }
+                    routedSeek=new(restoreObserved?"TARGET_NOT_OBSERVED_RESTORED":"TARGET_NOT_OBSERVED",original,target,timeline.CurrentFrame,false,restoreObserved,commands,error);
+                    Log("routed-seek-roundtrip",routedSeek);return;
+                }
+                Log("routed-seek-target-observed",new{original,target,current=timeline.CurrentFrame,lastHostFrame=Volatile.Read(ref LastHostFrame)});
+                if(!StillOwned()||timeline.CurrentFrame!=target)
+                {
+                    routedSeek=new("STALE_BEFORE_RESTORE",original,target,timeline.CurrentFrame,true,false,commands,null);
+                    Log("routed-seek-roundtrip",routedSeek);return;
+                }
+                Seek(original);
+                restoreObserved=await WaitFor(original,TimeSpan.FromSeconds(4));
+                routedSeek=new(restoreObserved?"RESTORED_AFTER_REAL_UPDATES":"RESTORE_NOT_OBSERVED",original,target,timeline.CurrentFrame,true,restoreObserved,commands,
+                    restoreObserved?null:"Original frame was not observed by real ITachieSource2.Update");
+                Log("routed-seek-roundtrip",routedSeek);
+            }
+            catch(Exception e)
+            {
+                error=e.GetType().Name+": "+e.Message;
+                if(StillOwned()&&timeline.CurrentFrame==target)
+                {
+                    try{Seek(original);restoreObserved=await WaitFor(original,TimeSpan.FromSeconds(4));}
+                    catch(Exception restore){error+="; restore "+restore.GetType().Name+": "+restore.Message;}
+                }
+                routedSeek=new(restoreObserved?"ERROR_RESTORED":"ERROR",original,target,timeline.CurrentFrame,targetObserved,restoreObserved,commands,error);
+                Log("routed-seek-roundtrip",routedSeek);
+            }
+        }
+    }
     static string Output=>Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")!;
     internal static void Log(string name,object details)
     {
@@ -220,6 +303,7 @@ internal static class Harness
                 if(Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")=="seed")
                 {Fixture.Seed(Environment.GetEnvironmentVariable("LAB_PAUSED_WORK")!);Result("SEEDED","Synthetic normal project generated",null);return;}
                 var mode=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")!;var notify=false;
+                var routedMode=mode.StartsWith("routed-",StringComparison.Ordinal);
                 var frameMode=mode.StartsWith("same-",StringComparison.Ordinal)||mode.StartsWith("nudge-",StringComparison.Ordinal);
                 FrameworkElement? surface=null;object? preview=null;Window? window=null;Capture.Frame? baseline=null;
                 var candidates=new List<object>();
@@ -266,14 +350,17 @@ internal static class Harness
                 int updateBefore;lock(gate)updateBefore=events.Count;
                 Log("baseline-established",new{notify,beforeState,dialogState,barrier=System.Text.Json.JsonSerializer.Deserialize<JsonElement>(System.IO.File.ReadAllText(Path.Combine(Output,"baseline-permitted.json")))});
                 System.IO.File.WriteAllText(Path.Combine(Output,"observing.txt"),"No UI interaction beyond this marker");
-                owner.Arm(notify,Application.Current.Dispatcher,frameMode?()=>CompleteFrameAction(owner,preview!,mode):null);
-                // After CPU readiness, only the explicitly requested public same-frame assignment or synchronous one-frame round trip may run. No host Update, play, selection or persisted edit is forced.
+                owner.Arm(notify,Application.Current.Dispatcher,routedMode?()=>BeginRoutedSeekRoundTrip(owner,preview!):frameMode?()=>CompleteFrameAction(owner,preview!,mode):null);
+                // Routed mode may temporarily visit exactly one neighbor. Only real host Update observes completion and permits restoration.
                 Capture.Frame final=baseline;var samples=new List<object>();
                 for(var i=0;i<36;i++)
                 {
                     await Task.Delay(250);if(System.IO.File.Exists(Path.Combine(Output,"result.json")))return;var clear=DialogFree();if(!clear.Clear){Result("BLOCKED","Popup/main-disabled during observation; no UI action",clear);return;}var state=State(preview!,window!);final=Capture.Read(surface);
-                    samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction});
-                    if(state.IsPlaying!=false||state.Frame!=beforeState.Frame)throw new InvalidOperationException("Frame/paused state changed during completion observation");
+                    samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction,routedSeek});
+                    if(state.IsPlaying!=false)throw new InvalidOperationException("Playback started during completion observation");
+                    if(!routedMode&&state.Frame!=beforeState.Frame)throw new InvalidOperationException("Frame changed during completion observation");
+                    if(routedMode&&routedSeek is not null&&routedSeek.Status=="RESTORED_AFTER_REAL_UPDATES"&&state.Frame!=beforeState.Frame)
+                        throw new InvalidOperationException("Routed seek did not finish at the original frame");
                     if(Error!=null)throw new InvalidOperationException(Error);
                 }
                 Capture.Save(Path.Combine(Output,"after.png"),final.Pixels,final.Width,final.Height);
@@ -284,14 +371,15 @@ internal static class Harness
                 var selectedUnchanged=selectedBefore.SequenceEqual(Info.Timeline.SelectedItems.Select(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode));
                 var inputProjectUnchanged=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(inputProject)))==projectHashBefore;
                 var frameActionValid=!frameMode||frameActionCalls==1&&frameAction?.Final==Info.Timeline.CurrentFrame&&(mode.StartsWith("same-",StringComparison.Ordinal)?frameAction.Status=="SAME_ASSIGNED":mode.Contains("error",StringComparison.Ordinal)?frameAction.Status=="ERROR_RESTORED":frameAction.Status=="RESTORED");
+                var routedValid=!routedMode||routedSeekCalls==1&&routedSeek?.Status=="RESTORED_AFTER_REAL_UPDATES"&&routedSeek.TargetUpdateObserved&&routedSeek.RestoreUpdateObserved&&routedSeek.Commands==2&&routedSeek.Final==Info.Timeline.CurrentFrame&&Info.Timeline.CurrentFrame.ToString(CultureInfo.InvariantCulture)==beforeState.Frame;
                 var undoUnchanged=commandsBefore==owner.UndoCommands&&historyEvents==0&&undoableBefore==Info.UndoRedoManager.IsUndoable&&redoableBefore==Info.UndoRedoManager.IsRedoable;
                 Info.UndoRedoManager.HistoryChanged-=historyObserver;
-                var signalCorrect=owner.Ready&&owner.Notices==0&&frameActionValid;
+                var signalCorrect=owner.Ready&&owner.Notices==0&&frameActionValid&&routedValid;
                 var changed=final.GreenFraction>.65;
                 var stayedRed=final.RedFraction>.65&&final.GreenFraction<.05;
                 var validPixels=changed||stayedRed;
-                var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!timelineUnchanged||!selectedUnchanged||!inputProjectUnchanged||!undoUnchanged?"FAIL":frameMode?changed?"PASS_FRAME_ACTION_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
-                Result(status,"Real stopped player; public frame action after readiness",new{mode,frameAction,frameActionCalls,timelineUnchanged,selectedUnchanged,inputProjectUnchanged,notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
+                var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!timelineUnchanged||!selectedUnchanged||!inputProjectUnchanged||!undoUnchanged?"FAIL":routedMode?changed?"PASS_ROUTED_TWO_STAGE_REPAINT":"OBSERVED_NO_REPAINT":frameMode?changed?"PASS_FRAME_ACTION_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
+                Result(status,routedMode?"Real stopped player; routed SeekWithoutSnap two-stage refresh":"Real stopped player; public frame action after readiness",new{mode,frameAction,frameActionCalls,routedSeek,routedSeekCalls,timelineUnchanged,selectedUnchanged,inputProjectUnchanged,notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
             }
             catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,new{stack=e.StackTrace?.Split('\n').Take(8).ToArray()});}
             finally{Parameter?.Retire();}

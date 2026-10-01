@@ -163,14 +163,13 @@ $rows=@()
 try{
  $seed=Run-Phase 'seed';$rows+=$seed
  if($seed.status -eq 'SEEDED'){
-  foreach($phase in @('control-start','same-start')){
+  foreach($phase in @('control-start','routed-nudge-start')){
    Start-Sleep -Seconds 1;$row=Run-Phase $phase;$rows+=$row
-   if($phase -eq 'same-start' -and $row.status -eq 'PASS_FRAME_ACTION_REPAINT'){break}
    if($row.status -in @('BLOCKED','FAIL','OBSERVED_CONTROL_REPAINT')){break}
   }
  }
- $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif($rows.status -contains 'FAIL' -or $rows.Count -ne 3 -or $rows[1].status -ne 'PASS_CONTROL_NO_REPAINT'){'INCONCLUSIVE_OR_FAILED'}elseif($rows[2].status -eq 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_SAME_COMMAND_REPAINT'}else{'VALID_NEGATIVE_SAME_COMMAND'}
- @{schema='lab.paused-frame-refresh.summary.v2';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});publicRoute='CommandSettings.Default.GetCommand(SeekWithoutSnap).Execute(int, MainWindow)';sameUiTurnRoundTrip=$false;nudgeNotExecuted='RoutedCommand Execute returns void; async completion/restore ownership needs separate protocol';notificationRequiresValidControl=$true;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;transientFlickerProvenAbsent=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
+ $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif($rows.status -contains 'FAIL' -or $rows.Count -ne 3 -or $rows[1].status -ne 'PASS_CONTROL_NO_REPAINT'){'INCONCLUSIVE_OR_FAILED'}elseif($rows[2].status -eq 'PASS_ROUTED_TWO_STAGE_REPAINT'){'OBSERVED_ROUTED_TWO_STAGE_REPAINT'}elseif($rows[2].status -eq 'OBSERVED_NO_REPAINT'){'VALID_NEGATIVE_ROUTED_TWO_STAGE'}else{'INCONCLUSIVE_OR_FAILED'}
+ @{schema='lab.paused-routed-two-stage-refresh.v1';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});publicRoute='CommandSettings.Default.GetCommand(SeekWithoutSnap).Execute(int, MainWindow)';restoreWaitsForRealSourceUpdate=$true;targetWaitsForRealSourceUpdate=$true;notificationUsed=$false;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;transientFlickerProvenAbsent=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
  Get-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Raw
- if($status -notin @('OBSERVED_SAME_COMMAND_REPAINT','VALID_NEGATIVE_SAME_COMMAND')){throw "Probe outcome: $status"}
+ if($status -notin @('OBSERVED_ROUTED_TWO_STAGE_REPAINT','VALID_NEGATIVE_ROUTED_TWO_STAGE')){throw "Probe outcome: $status"}
 }finally{Remove-Item Env:LAB_PAUSED_OUTPUT,Env:LAB_PAUSED_WORK,Env:LAB_PAUSED_PHASE -ErrorAction SilentlyContinue}
