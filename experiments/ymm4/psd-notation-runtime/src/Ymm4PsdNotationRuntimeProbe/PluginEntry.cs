@@ -20,31 +20,36 @@ public sealed class PluginEntry : ILocalizePlugin
             return;
 
         Directory.CreateDirectory(outputDir);
-        var resultPath = Path.Combine(outputDir, "runtime-result.json");
-        var markerPath = Path.Combine(outputDir, "runtime-marker.txt");
+        var cultureName = cultureInfo.Name;
 
-        RuntimeResult result;
-        try
+        _ = Task.Run(() =>
         {
-            result = RunProbe(outputDir, cultureInfo);
-        }
-        catch (Exception ex)
-        {
-            result = new RuntimeResult(
-                "FAIL",
-                cultureInfo.Name,
-                null,
-                [],
-                [],
-                [],
-                ex.ToString());
-        }
+            var resultPath = Path.Combine(outputDir, "runtime-result.json");
+            var markerPath = Path.Combine(outputDir, "runtime-marker.txt");
 
-        File.WriteAllText(
-            resultPath,
-            JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }),
-            new UTF8Encoding(false));
-        File.WriteAllText(markerPath, result.Status + Environment.NewLine, new UTF8Encoding(false));
+            RuntimeResult result;
+            try
+            {
+                result = RunProbe(outputDir, CultureInfo.GetCultureInfo(cultureName));
+            }
+            catch (Exception ex)
+            {
+                result = new RuntimeResult(
+                    "FAIL",
+                    cultureName,
+                    null,
+                    [],
+                    [],
+                    [],
+                    ex.ToString());
+            }
+
+            File.WriteAllText(
+                resultPath,
+                JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }),
+                new UTF8Encoding(false));
+            File.WriteAllText(markerPath, result.Status + Environment.NewLine, new UTF8Encoding(false));
+        });
     }
 
     static RuntimeResult RunProbe(string outputDir, CultureInfo cultureInfo)
