@@ -188,7 +188,8 @@ internal static class Harness
                         // Other dialogs are blocked there without an input action; this in-process observer waits.
                         await Task.Delay(250);
                     }
-                    if(!toolOpened)toolOpened=OpenObserverTool();
+                    // Do not activate a Tool while ordinary command-line project opening is still starting.
+                    if(!toolOpened&&Parameter!=null)toolOpened=OpenObserverTool();
                     (surface,preview,window)=FindSurface(candidates);
                     if(surface!=null&&Parameter!=null&&Info?.Timeline.Items.OfType<TachieItem>().Any(item=>ReferenceEquals(item.TachieItemParameter,Parameter))==true)
                     {
@@ -198,7 +199,7 @@ internal static class Harness
                     await Task.Delay(250);
                 }
                 if(surface==null||Parameter==null||Info==null||baseline==null||baseline.RedFraction<=.65)
-                {Result("BLOCKED","No live player with verified red synthetic preview baseline",new{candidates,sourceCount=NextSource,baselineRed=baseline?.RedFraction,baselineGreen=baseline?.GreenFraction});return;}
+                {Result("BLOCKED","No live player with verified red synthetic preview baseline",new{candidates,sourceCount=NextSource,toolOpened,toolInfoAvailable=Info!=null,liveOwnerMatched=Info?.Timeline.Items.OfType<TachieItem>().Any(item=>ReferenceEquals(item.TachieItemParameter,Parameter)),baselineRed=baseline?.RedFraction,baselineGreen=baseline?.GreenFraction});return;}
                 var beforeState=State(preview!,window!);Capture.Save(Path.Combine(Output,"baseline.png"),baseline.Pixels,baseline.Width,baseline.Height);
                 if(beforeState.IsPlaying!=false||beforeState.Frame==null)
                 {Result("BLOCKED","Cannot independently establish paused state and frame through public UI surface",new{beforeState});return;}

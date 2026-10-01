@@ -94,14 +94,15 @@ function Run-Phase([string]$Phase) {
   }
   if(-not(Test-Path $result)){@{status='BLOCKED';reason='No completed real-player observation before timeout/host exit';phase=$Phase}|ConvertTo-Json|Set-Content -LiteralPath $result -Encoding utf8}
   return Get-Content -LiteralPath $result -Raw|ConvertFrom-Json
- }finally{if(-not $process.HasExited){Stop-Process -Id $process.Id -Force}}
+ }finally{if(-not $process.HasExited){Stop-Process -Id $process.Id -Force};[void]$process.WaitForExit(5000)}
 }
 $rows=@()
 try{
  $seed=Run-Phase 'seed';$rows+=$seed
  if($seed.status -eq 'SEEDED'){
+  Start-Sleep -Seconds 1 # Let the prior isolated instance/mutex finish before ordinary project startup.
   $controlResult=Run-Phase 'control';$rows+=$controlResult
-  if($controlResult.reason -notlike 'Unrecognized consent*'){$rows+=Run-Phase 'notify'}
+  if($controlResult.reason -notlike 'Unrecognized consent*'){Start-Sleep -Seconds 1;$rows+=Run-Phase 'notify'}
  }
  $control=$rows|Where-Object phase -eq 'control';$notify=$rows|Where-Object phase -eq 'notify'
  $status=if($control.status -eq 'PASS_CONTROL_NO_REPAINT' -and $notify.status -eq 'PASS_NOTIFY_REPAINT'){'PASS_CAUSAL_PAUSED_REPAINT'}elseif($control.status -eq 'PASS_CONTROL_NO_REPAINT' -and $notify.status -eq 'OBSERVED_NO_REPAINT'){'VALID_NEGATIVE_NO_REPAINT'}elseif($rows.status -contains 'BLOCKED'){'BLOCKED'}else{'INCONCLUSIVE_OR_FAILED'}
