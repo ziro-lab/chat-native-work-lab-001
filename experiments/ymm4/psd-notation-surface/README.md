@@ -75,3 +75,38 @@ Expected artifact:
   - provenance JSON
 
 No YMM4 binary is committed or uploaded as evidence.
+
+
+## Observed result — 2026-10-01
+
+Evidence run: https://github.com/ziro-lab/chat-native-work-lab-001/actions/runs/36794485153
+
+Source HEAD: `c39b422c68e320952c1005dd99ec7bc2b167f83c`
+
+Observed on exact YMM4 Lite v4.56.1.0 archive SHA256
+`49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a`.
+
+### Static findings
+
+- Built-in PSD functionality is split at least across:
+  - `YukkuriMovieMaker.Plugin.FileSource.Psd.dll`
+  - `YukkuriMovieMaker.Plugin.Tachie.Psd.dll`
+- Across the managed scan, there were no direct `:flip`, `:flipx`, `:flipy`, or `:flipxy` literal/raw hits.
+- A decoded-IL notation trace over every method in the two built-in PSD assemblies produced **0 hits** for:
+  - `ldstr "*"` / `ldstr "!"`;
+  - integer constants 42 (`*`) / 33 (`!`);
+  - `String.StartsWith`, `String.EndsWith`, or `String.get_Chars` in a notation-looking path;
+  - any `flip` token.
+- `PsdFolder.Parse` reconstructs the PSD hierarchy from PSD layer/group records and creates `PsdFolder` / `PsdLayer` objects; the inspected method contains no marker-name parsing.
+- `SwitchLayerCommand.Execute` does implement a generic radio-like operation: sibling candidates are disabled, the current item is enabled, then the change is raised.
+- The built-in PSD type surface contains no dedicated `Radio`, `ForceVisible`, or `Flip` state/property. It does contain generic layer-selection commands and enabled-layer state.
+
+### Interpretation boundary
+
+This is strong static evidence that the inspected built-in managed PSD implementation does not contain an obvious PSDTool layer-name parser for `* / ! / :flip*`.
+
+It **does not yet prove runtime absence**. A name convention could theoretically be handled outside the two PSD managed assemblies or through a resource/native/UI path not represented by these signals.
+
+The existence of `SwitchLayerCommand` proves generic sibling switching, not that a leading `*` automatically selects that behavior.
+
+A minimal runtime PSD fixture is the correct next evidence if exact `* / !` compatibility must be settled. For `:flip*`, the complete absence of any flip token in the built-in managed scan makes direct built-in suffix handling unlikely, but runtime confirmation remains the final boundary.
