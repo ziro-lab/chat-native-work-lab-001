@@ -3,6 +3,18 @@ $ErrorActionPreference='Stop'
 $OutputDir=[IO.Path]::GetFullPath($OutputDir);$WorkDir=[IO.Path]::GetFullPath($WorkDir)
 New-Item -ItemType Directory -Path $OutputDir,$WorkDir -Force | Out-Null
 $exe=Join-Path $Ymm4Dir 'YukkuriMovieMaker.exe'
+$script:uiaAvailable=$false;$script:uiaError=''
+try{Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes -ErrorAction Stop;$script:uiaAvailable=$true}
+catch{$script:uiaError=$_.Exception.Message}
+function Read-DialogText([IntPtr]$Window) {
+ if(-not $script:uiaAvailable){return @{available=$false;error=$script:uiaError;text=@()}}
+ try{
+  $root=[System.Windows.Automation.AutomationElement]::FromHandle($Window)
+  $elements=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $text=@();foreach($element in $elements){if($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text -and $element.Current.Name){$text+=$element.Current.Name;if($text.Count -ge 12){break}}}
+  return @{available=$true;text=$text}
+ }catch{return @{available=$false;error=$_.Exception.Message;text=@()}}
+}
 Add-Type -TypeDefinition @'
 using System;using System.Text;using System.Runtime.InteropServices;
 public static class PausedNoticeWindows {
@@ -25,7 +37,7 @@ function Inspect-Dialogs([int]$TaskProcess,[bool]$Observing) {
     if($Observing){$script:unknown+=('Popup during observation; no Close sent: '+$title)}
     else{[void][PausedNoticeWindows]::PostMessage($window,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)}
    }
-   elseif($title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){$script:unknown+=$title}
+   elseif($title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){$script:unknown+=@{title=$title;message=(Read-DialogText $window)}}
   };return $true
  }
  [void][PausedNoticeWindows]::EnumWindows($visit,[IntPtr]::Zero)
@@ -43,7 +55,7 @@ function Run-Phase([string]$Phase) {
   for($i=0;$i -lt 160;$i++){
    if(Test-Path $result){break}
    $unknown=@(Inspect-Dialogs $process.Id (Test-Path (Join-Path $destination 'observing.txt')))
-   if($unknown.Count){@{status='BLOCKED';reason='Unrecognized consent/Confirm dialog; no response sent';dialogTitles=$unknown;phase=$Phase}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $result -Encoding utf8;break}
+   if($unknown.Count){@{status='BLOCKED';reason='Unrecognized consent/Confirm dialog; no response sent';dialogs=$unknown;phase=$Phase}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $result -Encoding utf8;break}
    if($process.HasExited){break};Start-Sleep -Milliseconds 250
   }
   if(-not(Test-Path $result)){@{status='BLOCKED';reason='No completed real-player observation before timeout/host exit';phase=$Phase}|ConvertTo-Json|Set-Content -LiteralPath $result -Encoding utf8}
