@@ -19,6 +19,7 @@ Directory.CreateDirectory(output);
 var notationTokens = new[] { "*", "!", ":flip", ":flipx", ":flipy", ":flipxy", "PSDTool", "%2f", "%25" };
 var assemblyResults = new List<AssemblyResult>();
 var targetIlDump = new StringBuilder();
+var notationTrace = new StringBuilder();
 var opcodeMap = BuildOpcodeMap();
 
 foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
@@ -165,6 +166,7 @@ foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirec
         if (capturePsdSurface)
         {
             DumpTargetIl(pe, md, methodOwners, assemblyName, opcodeMap, targetIlDump);
+            DumpNotationTrace(pe, md, methodOwners, assemblyName, opcodeMap, notationTrace);
         }
 
         if (psdRelated || literalHits.Count > 0)
@@ -227,6 +229,7 @@ foreach (var a in result.Assemblies)
 var summaryPath = Path.Combine(output, "summary.txt");
 File.WriteAllText(summaryPath, summary.ToString(), new UTF8Encoding(false));
 File.WriteAllText(Path.Combine(output, "target-il.txt"), targetIlDump.ToString(), new UTF8Encoding(false));
+File.WriteAllText(Path.Combine(output, "notation-trace.txt"), notationTrace.ToString(), new UTF8Encoding(false));
 Console.Write(summary.ToString());
 
 if (result.Assemblies.Length == 0)
@@ -326,6 +329,68 @@ static void DumpTargetIl(
         output.AppendLine($"## {assemblyName} :: {owner}::{methodName}");
         foreach (var line in DecodeIl(il, md, methodOwners, opcodeMap))
             output.AppendLine(line);
+    }
+}
+
+static void DumpNotationTrace(
+    PEReader pe,
+    MetadataReader md,
+    Dictionary<MethodDefinitionHandle, string> methodOwners,
+    string assemblyName,
+    Dictionary<ushort, OpCode> opcodeMap,
+    StringBuilder output)
+{
+    foreach (var methodHandle in md.MethodDefinitions)
+    {
+        var method = md.GetMethodDefinition(methodHandle);
+        if (method.RelativeVirtualAddress == 0)
+            continue;
+
+        MethodBodyBlock body;
+        try
+        {
+            body = pe.GetMethodBody(method.RelativeVirtualAddress);
+        }
+        catch
+        {
+            continue;
+        }
+
+        var il = body.GetILBytes();
+        if (il is null || il.Length == 0)
+            continue;
+
+        var lines = DecodeIl(il, md, methodOwners, opcodeMap).ToArray();
+        var hitIndexes = new HashSet<int>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var hit =
+                line.Contains("ldc.i4.s 33", StringComparison.Ordinal) ||
+                line.Contains("ldc.i4 33", StringComparison.Ordinal) ||
+                line.Contains("ldc.i4.s 42", StringComparison.Ordinal) ||
+                line.Contains("ldc.i4 42", StringComparison.Ordinal) ||
+                line.Contains("ldstr \"!\"", StringComparison.Ordinal) ||
+                line.Contains("ldstr \"*\"", StringComparison.Ordinal) ||
+                line.Contains("flip", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("System.String::StartsWith", StringComparison.Ordinal) ||
+                line.Contains("System.String::EndsWith", StringComparison.Ordinal) ||
+                line.Contains("System.String::get_Chars", StringComparison.Ordinal);
+            if (!hit)
+                continue;
+            for (var j = Math.Max(0, i - 3); j <= Math.Min(lines.Length - 1, i + 3); j++)
+                hitIndexes.Add(j);
+        }
+
+        if (hitIndexes.Count == 0)
+            continue;
+
+        var methodName = md.GetString(method.Name);
+        var owner = methodOwners.TryGetValue(methodHandle, out var ownerName) ? ownerName : "<unknown>";
+        output.AppendLine();
+        output.AppendLine($"## {assemblyName} :: {owner}::{methodName}");
+        foreach (var i in hitIndexes.Order())
+            output.AppendLine(lines[i]);
     }
 }
 
