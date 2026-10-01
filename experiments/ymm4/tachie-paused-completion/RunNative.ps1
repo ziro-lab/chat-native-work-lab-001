@@ -86,13 +86,19 @@ function Close-KnownAssociationInformation([IntPtr]$Window,$Message) {
 }
 function Run-Phase([string]$Phase) {
  $destination=Join-Path $OutputDir $Phase;New-Item -ItemType Directory -Path $destination -Force | Out-Null
+ # Start every phase from the pristine official host plus this probe; imported character/settings state is never shared.
+ $phaseHost=Join-Path $WorkDir ('host-'+$Phase)
+ if(Test-Path $phaseHost){throw 'Phase host already exists; refusing to reuse modified settings'}
+ Copy-Item -LiteralPath $Ymm4Dir -Destination $phaseHost -Recurse
+ $phaseExe=Join-Path $phaseHost 'YukkuriMovieMaker.exe'
+ if((Get-FileHash -LiteralPath $phaseExe).Hash -ne (Get-FileHash -LiteralPath $exe).Hash){throw 'Phase official host hash mismatch'}
  $env:LAB_PAUSED_OUTPUT=$destination;$env:LAB_PAUSED_WORK=$WorkDir;$env:LAB_PAUSED_PHASE=$Phase
  $arguments=@();if($Phase -ne 'seed'){$arguments=@('"'+(Join-Path $WorkDir 'synthetic.ymmp')+'"')}
  $started=[DateTimeOffset]::UtcNow;$clock=[Diagnostics.Stopwatch]::StartNew();$snapshots=@();$dialogs=@();$actions=@();$knownHandles=@{};$lastWindowSignature='';$lastEventCount=-1;$quietSince=$null;$boundary=''
  $result=Join-Path $destination 'result.json';$eventsPath=Join-Path $destination 'plugin-events.jsonl';$barrier=Join-Path $destination 'baseline-permitted.json';$windows=@();$events=@()
  # Visible windows are required for real desktop preview evidence on this isolated CI desktop.
- if($arguments.Count){$process=Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $Ymm4Dir -WindowStyle Normal -PassThru}
- else{$process=Start-Process -FilePath $exe -WorkingDirectory $Ymm4Dir -WindowStyle Normal -PassThru}
+ if($arguments.Count){$process=Start-Process -FilePath $phaseExe -ArgumentList $arguments -WorkingDirectory $phaseHost -WindowStyle Normal -PassThru}
+ else{$process=Start-Process -FilePath $phaseExe -WorkingDirectory $phaseHost -WindowStyle Normal -PassThru}
  try{
   while($clock.Elapsed.TotalSeconds -lt 120){
    $process.Refresh();$windows=@(Window-Inventory $process.Id)
@@ -144,7 +150,7 @@ function Run-Phase([string]$Phase) {
   return Get-Content -LiteralPath $result -Raw|ConvertFrom-Json
  }finally{
   $process.Refresh();$exitedBeforeCleanup=$process.HasExited;$exitCode=if($exitedBeforeCleanup){$process.ExitCode}else{$null}
-  @{schema='lab.paused-tachie-startup.v1';phase=$Phase;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;startedUtc=$started.ToString('o');finishedUtc=[DateTimeOffset]::UtcNow.ToString('o');elapsedMs=[int64]$clock.Elapsed.TotalMilliseconds;processId=$process.Id;boundary=$boundary;exitedBeforeCleanup=$exitedBeforeCleanup;exitCodeBeforeCleanup=$exitCode;forcedCleanup=(-not $exitedBeforeCleanup);pluginConstructorSeen=(@($events|Where-Object name -eq 'plugin-constructed').Count -gt 0);cultureCallbackSeen=(@($events|Where-Object name -eq 'plugin-set-culture').Count -gt 0);dispatcherEntered=(@($events|Where-Object name -eq 'plugin-dispatch-enter').Count -gt 0);lastPluginStage=($events|Select-Object -Last 1).name;projectFileExists=(Test-Path (Join-Path $WorkDir 'synthetic.ymmp'));snapshots=$snapshots;dialogs=$dialogs;actions=$actions}|ConvertTo-Json -Depth 14|Set-Content -LiteralPath (Join-Path $destination 'startup.json') -Encoding utf8
+  @{schema='lab.paused-tachie-startup.v1';freshHostPerPhase=$true;hostExeSha256=(Get-FileHash -LiteralPath $phaseExe).Hash;phase=$Phase;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;startedUtc=$started.ToString('o');finishedUtc=[DateTimeOffset]::UtcNow.ToString('o');elapsedMs=[int64]$clock.Elapsed.TotalMilliseconds;processId=$process.Id;boundary=$boundary;exitedBeforeCleanup=$exitedBeforeCleanup;exitCodeBeforeCleanup=$exitCode;forcedCleanup=(-not $exitedBeforeCleanup);pluginConstructorSeen=(@($events|Where-Object name -eq 'plugin-constructed').Count -gt 0);cultureCallbackSeen=(@($events|Where-Object name -eq 'plugin-set-culture').Count -gt 0);dispatcherEntered=(@($events|Where-Object name -eq 'plugin-dispatch-enter').Count -gt 0);lastPluginStage=($events|Select-Object -Last 1).name;projectFileExists=(Test-Path (Join-Path $WorkDir 'synthetic.ymmp'));snapshots=$snapshots;dialogs=$dialogs;actions=$actions}|ConvertTo-Json -Depth 14|Set-Content -LiteralPath (Join-Path $destination 'startup.json') -Encoding utf8
   if(-not $exitedBeforeCleanup){Stop-Process -Id $process.Id -Force};[void]$process.WaitForExit(5000)
  }
 }
