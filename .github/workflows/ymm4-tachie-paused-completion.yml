@@ -1,0 +1,129 @@
+name: YMM4 paused preparation frame refresh
+
+on:
+  pull_request:
+    paths:
+      - 'experiments/ymm4/tachie-paused-completion/**'
+      - '.github/workflows/ymm4-tachie-paused-completion.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tachie-paused-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-preview:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Download current official stable Lite host and record identity
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Path out/evidence -Force | Out-Null
+          $release=gh api repos/manju-summoner/YukkuriMovieMaker4/releases/latest | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0 -or $release.prerelease -or $release.draft){throw 'No official stable release'}
+          $assets=@($release.assets|Where-Object name -match '_Lite\.zip$')
+          if($assets.Count -ne 1){throw 'Official Lite asset selection is ambiguous'}
+          $asset=$assets[0]
+          if($asset.browser_download_url -notlike 'https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/*'){throw 'Unexpected official host download origin'}
+          curl.exe -L --fail --retry 3 --silent --show-error -o out/host.zip $asset.browser_download_url
+          if($LASTEXITCODE -ne 0){throw 'Official host download failed'}
+          $zipHash=(Get-FileHash out/host.zip).Hash
+          if($release.tag_name -eq 'v4.56.1.0' -and $zipHash -ne '49C0ED689F545737B7CE939971BFC625962E00791C57883DC8E6F058AA336C5A'){throw 'Known official ZIP hash mismatch'}
+          Expand-Archive -LiteralPath out/host.zip -DestinationPath out/host
+          $executables=@(Get-ChildItem out/host -Recurse -Filter YukkuriMovieMaker.exe)
+          if($executables.Count -ne 1){throw 'Host executable selection ambiguous'}
+          $exe=$executables[0]
+          $head=git rev-parse HEAD
+          @{sourceHead=$head;workflowEvent=$env:GITHUB_EVENT_NAME;eventSha=$env:GITHUB_SHA;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;officialRelease=$release.tag_name;releasePublished=$release.published_at;asset=$asset.name;download=$asset.browser_download_url;zipSha256=$zipHash;hostExeSha256=(Get-FileHash $exe.FullName).Hash;hostVersion=$exe.VersionInfo.FileVersion;sdk=(dotnet --version)}|ConvertTo-Json|Set-Content out/evidence/host-identity.json -Encoding utf8
+          "YMM4_DIR=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "SOURCE_HEAD=$head" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build only the independent synthetic probe
+        shell: pwsh
+        run: |
+          dotnet build experiments/ymm4/tachie-paused-completion/LiveProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/evidence/build.log
+          if($LASTEXITCODE -ne 0){throw 'Independent probe build failed'}
+          dotnet run --project experiments/ymm4/tachie-paused-completion/checks/FrameRefreshChecks.csproj -c Release -- out/evidence/frame-guard-checks.json
+          if($LASTEXITCODE -ne 0){throw 'Frame guards failed'}
+          $destination=Join-Path $env:YMM4_DIR 'user/plugin/LabTachiePausedNotice'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Copy-Item -LiteralPath out/probe/Lab.TachiePausedNotice.dll -Destination $destination
+
+      - name: Observe stopped real preview with notification and no-notification control
+        shell: pwsh
+        run: |
+          ./experiments/ymm4/tachie-paused-completion/RunNative.ps1 -Ymm4Dir $env:YMM4_DIR -OutputDir (Join-Path $PWD 'out/evidence') -WorkDir (Join-Path $PWD 'out/synthetic-work')
+
+      - name: Upload only approved evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ymm4-paused-tachie-notice
+          path: |
+            out/evidence/host-identity.json
+            out/evidence/build.log
+            out/evidence/dialog-decisions.log
+            out/evidence/summary.json
+            out/evidence/seed/result.json
+            out/evidence/seed/startup.json
+            out/evidence/seed/plugin-events.jsonl
+            out/evidence/frame-guard-checks.json
+            out/evidence/control-start/result.json
+            out/evidence/control-start/startup.json
+            out/evidence/control-start/plugin-events.jsonl
+            out/evidence/control-start/baseline-permitted.json
+            out/evidence/control-start/baseline.png
+            out/evidence/control-start/after.png
+            out/evidence/same-start/result.json
+            out/evidence/same-start/startup.json
+            out/evidence/same-start/plugin-events.jsonl
+            out/evidence/same-start/baseline-permitted.json
+            out/evidence/same-start/baseline.png
+            out/evidence/same-start/after.png
+            out/evidence/routed-nudge-start/result.json
+            out/evidence/routed-nudge-start/startup.json
+            out/evidence/routed-nudge-start/plugin-events.jsonl
+            out/evidence/routed-nudge-start/baseline-permitted.json
+            out/evidence/routed-nudge-start/baseline.png
+            out/evidence/routed-nudge-start/after.png
+            out/evidence/nudge-start/result.json
+            out/evidence/nudge-start/startup.json
+            out/evidence/nudge-start/plugin-events.jsonl
+            out/evidence/nudge-start/baseline-permitted.json
+            out/evidence/nudge-start/baseline.png
+            out/evidence/nudge-start/after.png
+            out/evidence/control-end/result.json
+            out/evidence/control-end/startup.json
+            out/evidence/control-end/plugin-events.jsonl
+            out/evidence/control-end/baseline-permitted.json
+            out/evidence/control-end/baseline.png
+            out/evidence/control-end/after.png
+            out/evidence/nudge-end/result.json
+            out/evidence/nudge-end/startup.json
+            out/evidence/nudge-end/plugin-events.jsonl
+            out/evidence/nudge-end/baseline-permitted.json
+            out/evidence/nudge-end/baseline.png
+            out/evidence/nudge-end/after.png
+            out/evidence/nudge-error-start/result.json
+            out/evidence/nudge-error-start/startup.json
+            out/evidence/nudge-error-start/plugin-events.jsonl
+            out/evidence/nudge-error-start/baseline-permitted.json
+            out/evidence/nudge-error-start/baseline.png
+            out/evidence/nudge-error-start/after.png
+          if-no-files-found: warn
+          retention-days: 14
