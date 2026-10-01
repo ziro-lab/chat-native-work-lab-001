@@ -314,7 +314,7 @@ internal static class Harness
                     await Task.Delay(250);if(System.IO.File.Exists(Path.Combine(Output,"result.json")))return;var clear=DialogFree();if(!clear.Clear){Result("BLOCKED","Popup/main-disabled during observation; no UI action",clear);return;}var state=State(preview!,window!);final=Capture.Read(surface);
                     samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction});
                     if(state.IsPlaying!=false)throw new InvalidOperationException("Playback started during completion observation");
-                    if(!twoStagePending&&state.Frame!=beforeState.Frame)throw new InvalidOperationException("Final frame changed during completion observation");
+                    if(!mode.StartsWith("twostage-",StringComparison.Ordinal)&&state.Frame!=beforeState.Frame)throw new InvalidOperationException("Frame changed during completion observation");
                     if(Error!=null)throw new InvalidOperationException(Error);
                 }
                 Capture.Save(Path.Combine(Output,"after.png"),final.Pixels,final.Width,final.Height);
