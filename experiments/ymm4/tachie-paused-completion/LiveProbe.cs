@@ -113,7 +113,7 @@ internal sealed class SyntheticSource:ITachieSource2
         var p=description.Tachie.ItemParameter as ItemParameter;
         if(p==null)throw new InvalidOperationException("Host did not supply probe parameter");
         if(parameter==null){parameter=p;p.ObserveUndo();}
-        Harness.Parameter=p;Harness.Connect(Id,p);if(description.Usage==TimelineSourceUsage.Paused)Volatile.Write(ref Harness.LastHostFrame,description.TimelinePosition.Frame);
+        Harness.Parameter=p;Harness.Connect(Id,p);Volatile.Write(ref Harness.LastHostUsage,(int)description.Usage);if(description.Usage==TimelineSourceUsage.Paused)Volatile.Write(ref Harness.LastHostFrame,description.TimelinePosition.Frame);
         Harness.Log("host-update",new{Id,usage=description.Usage.ToString(),position=description.TimelinePosition.Frame,ready=p.Ready});
         if(p.Ready&&!applied){var next=Bitmap(p.Pixels!);transform.SetInput(0,next,true);bitmap.Dispose();bitmap=next;applied=true;Harness.Log("gpu-input-applied",new{Id});}
     }
@@ -170,7 +170,7 @@ internal static class Harness
     static readonly object gate=new();static readonly List<object> events=[];
     internal static int NextSource;internal static ItemParameter? Parameter;internal static string? Error;internal static TimelineToolInfo? Info;
     private static readonly Dictionary<int,ItemParameter> activeOwners=[];
-    internal static int LastHostFrame=-1;
+    internal static int LastHostFrame=-1;internal static int LastHostUsage=(int)TimelineSourceUsage.Paused;
     private static long navigationVersion;private static FrameActionResult? frameAction;private static int frameActionCalls;
     private static volatile bool twoStagePending;
     internal static void Connect(int id,ItemParameter parameter){lock(gate)activeOwners[id]=parameter;}
@@ -206,7 +206,7 @@ internal static class Harness
         var original=access.Frame;var scope=access.Scope;var version=access.NavigationVersion;
         if(original<0||original>access.LastFrame||access.LastFrame<1){frameAction=new("SKIPPED_BOUNDARY",original,null,original,0,null);return;}
         var target=original<access.LastFrame?original+1:original-1;var writes=0;string? error=null;
-        bool OwnerStillCurrent()=>Info!=null&&ReferenceEquals(scope,access.Scope)&&Public(preview,"IsPlaying") is false&&Info.Timeline.Items.OfType<TachieItem>().Any(x=>ReferenceEquals(x.TachieItemParameter,owner));
+        bool OwnerStillCurrent()=>Info!=null&&ReferenceEquals(scope,access.Scope)&&Info.Timeline.Items.OfType<TachieItem>().Any(x=>ReferenceEquals(x.TachieItemParameter,owner));
         twoStagePending=true;
         try
         {
@@ -222,7 +222,9 @@ internal static class Harness
             }
             if(Volatile.Read(ref LastHostFrame)!=target)
             {frameAction=new("TARGET_UPDATE_TIMEOUT",original,target,access.Frame,writes,null);return;}
-            Log("two-stage-target-update-observed",new{original,target,elapsedMs=wait.ElapsedMilliseconds});
+            if((TimelineSourceUsage)Volatile.Read(ref LastHostUsage)!=TimelineSourceUsage.Paused)
+            {frameAction=new("TARGET_UPDATE_NOT_PAUSED",original,target,access.Frame,writes,null);return;}
+            Log("two-stage-target-update-observed",new{original,target,elapsedMs=wait.ElapsedMilliseconds,usage=((TimelineSourceUsage)Volatile.Read(ref LastHostUsage)).ToString()});
             if(!OwnerStillCurrent()||access.Frame!=target||access.NavigationVersion!=version+1)
             {frameAction=new("STALE_BEFORE_RESTORE",original,target,access.Frame,writes,null);return;}
             writes++;access.Frame=original;
