@@ -1,3 +1,4 @@
+using System.IO;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -258,10 +259,13 @@ public sealed class PluginEntry : ILocalizePlugin
                 }
 
                 var load = editorType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == "LoadItemsAsync" && m.GetParameters().Length == 0);
+                    .FirstOrDefault(m =>
+                        m.Name == "LoadItemsAsync" &&
+                        m.GetParameters().Length == 1 &&
+                        m.GetParameters()[0].ParameterType == typeof(string));
                 if (load is not null)
                 {
-                    var returned = load.Invoke(vm, null);
+                    var returned = load.Invoke(vm, [fixture]);
                     if (returned is Task task)
                         task.GetAwaiter().GetResult();
                 }
