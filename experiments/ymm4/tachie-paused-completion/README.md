@@ -43,3 +43,11 @@ Artifact upload is a literal allowlist: host identity JSON, minimal build/dialog
 Workflow: `.github/workflows/ymm4-tachie-paused-completion.yml` (pull_request or explicit workflow_dispatch). It checks out the PR source HEAD, not a synthetic merge commit, and records both checkout and event SHA. Local API build is useful but is **not** live-player evidence. `RunNative.ps1` requires a dedicated official host directory plus separate work/evidence directories; never use an everyday installation.
 
 Observe exact run/commit and downloaded evidence before recording a result here. A build-only success or a source-ready signal does not prove a stopped preview changed.
+
+## Startup diagnostics and baseline barrier
+
+Constructor, culture callback, dispatcher entry, synthetic project construction/save, source creation and host Update are timestamped in the per-phase minimal plugin event log. Startup JSON separately records native process exit and exit code before forced cleanup, a wall-clock deadline with the host still alive, same-PID visible HWND/owner/thread/class/enabled state, and public UI Automation dialog body. Unknown consent is never accepted. The known association prompt is declined only before baseline permission; all other overlay windows keep the barrier closed.
+
+After a live owner-matched red preview requests baseline, the outer runner requires three seconds with exactly one enabled main window and no visible dialog. It writes a permission record, after which it sends no UI actions and blocks on any popup. The in-process observer independently verifies main-window native/WPF enabled state and no additional visible dialog before and throughout capture. A notification phase is run only after a valid control. Earlier raw no-repaint labels with missing controls or modal baselines are not accepted conclusions.
+
+Artifacts additionally allow exact per-phase startup JSON, plugin-events JSONL and control/notify baseline permission JSON; no wildcard upload is used. Source/run attempt identity is recorded.

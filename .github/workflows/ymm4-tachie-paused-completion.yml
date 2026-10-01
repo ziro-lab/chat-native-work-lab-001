@@ -49,7 +49,7 @@ jobs:
           if($executables.Count -ne 1){throw 'Host executable selection ambiguous'}
           $exe=$executables[0]
           $head=git rev-parse HEAD
-          @{sourceHead=$head;workflowEvent=$env:GITHUB_EVENT_NAME;eventSha=$env:GITHUB_SHA;runId=$env:GITHUB_RUN_ID;officialRelease=$release.tag_name;releasePublished=$release.published_at;asset=$asset.name;download=$asset.browser_download_url;zipSha256=$zipHash;hostExeSha256=(Get-FileHash $exe.FullName).Hash;hostVersion=$exe.VersionInfo.FileVersion;sdk=(dotnet --version)}|ConvertTo-Json|Set-Content out/evidence/host-identity.json -Encoding utf8
+          @{sourceHead=$head;workflowEvent=$env:GITHUB_EVENT_NAME;eventSha=$env:GITHUB_SHA;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;officialRelease=$release.tag_name;releasePublished=$release.published_at;asset=$asset.name;download=$asset.browser_download_url;zipSha256=$zipHash;hostExeSha256=(Get-FileHash $exe.FullName).Hash;hostVersion=$exe.VersionInfo.FileVersion;sdk=(dotnet --version)}|ConvertTo-Json|Set-Content out/evidence/host-identity.json -Encoding utf8
           "YMM4_DIR=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "SOURCE_HEAD=$head" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -78,10 +78,18 @@ jobs:
             out/evidence/dialog-decisions.log
             out/evidence/summary.json
             out/evidence/seed/result.json
+            out/evidence/seed/startup.json
+            out/evidence/seed/plugin-events.jsonl
             out/evidence/control/result.json
+            out/evidence/control/startup.json
+            out/evidence/control/plugin-events.jsonl
+            out/evidence/control/baseline-permitted.json
             out/evidence/control/baseline.png
             out/evidence/control/after.png
             out/evidence/notify/result.json
+            out/evidence/notify/startup.json
+            out/evidence/notify/plugin-events.jsonl
+            out/evidence/notify/baseline-permitted.json
             out/evidence/notify/baseline.png
             out/evidence/notify/after.png
           if-no-files-found: warn

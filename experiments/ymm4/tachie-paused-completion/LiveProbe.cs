@@ -125,25 +125,29 @@ internal static class Fixture
     internal static byte[] Solid(byte b,byte g,byte r){var bytes=new byte[256*128*4];for(var i=0;i<bytes.Length;i+=4){bytes[i]=b;bytes[i+1]=g;bytes[i+2]=r;bytes[i+3]=255;}return bytes;}
     internal static void Seed(string directory)
     {
-        Directory.CreateDirectory(directory);var png=Path.Combine(directory,"synthetic-green.png");
+        Harness.Log("seed-enter",new{});Directory.CreateDirectory(directory);var png=Path.Combine(directory,"synthetic-green.png");
         Capture.Save(png,Solid(0,255,0),256,128);
-        var parameter=new ItemParameter{File=png};
+        Harness.Log("seed-png-written",new{});var parameter=new ItemParameter{File=png};
         var character=new Character{Name="Lab synthetic",TachieType=typeof(SyntheticTachie),TachieCharacterParameter=new CharacterParameter(),TachieDefaultItemParameter=new ItemParameter{File=png},TachieDefaultFaceParameter=new FaceParameter()};
         var item=new TachieItem(character){Frame=0,Length=300,Layer=0,TachieItemParameter=parameter};
         var timeline=new Timeline{Name="Synthetic stopped player",Items=ImmutableList.Create<IItem>(item)};
         timeline.VideoInfo.Width=256;timeline.VideoInfo.Height=128;timeline.VideoInfo.FPS=30;timeline.VideoInfo.BackgroundColor=System.Windows.Media.Colors.Black;timeline.RefreshTimelineLengthAndMaxLayer();
         var path=Path.Combine(directory,"synthetic.ymmp");
         var project=new Project(new[]{character},path);project.Timelines.Clear();project.Timelines.Add(timeline);
-        NativeJson.Save(project,path,null);
+        Harness.Log("seed-project-created",new{itemCount=timeline.Items.Count});NativeJson.Save(project,path,null);Harness.Log("seed-project-saved",new{bytes=new FileInfo(path).Length});
     }
 }
 public sealed class Startup:ILocalizePlugin
 {
+    public Startup(){Harness.Log("plugin-constructed",new{});}
     static bool started;public string Name=>"Lab paused completion notice observer";
     public void SetCulture(CultureInfo culture)
     {
+        Harness.Log("plugin-set-culture",new{dispatcherAvailable=Application.Current!=null});
         if(started||string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")))return;started=true;
-        Application.Current.Dispatcher.BeginInvoke(new Action(()=>Harness.Start()),DispatcherPriority.ApplicationIdle);
+        Harness.Log("plugin-dispatch-scheduled",new{priority="Normal"});
+        var app=Application.Current;if(app==null){Harness.Log("plugin-no-application",new{});return;}
+        app.Dispatcher.BeginInvoke(new Action(()=>Harness.Start()),DispatcherPriority.Normal);
     }
 }
 public sealed class ObserverTool:IToolPlugin
@@ -154,7 +158,7 @@ public sealed class ObserverView:UserControl{public ObserverView(){Content=new T
 public sealed class ObserverVm:ITimelineToolViewModel,IToolViewModel
 {
     public string Title=>"Lab paused observer";public bool CanSuspend=>false;
-    public void SetTimelineToolInfo(TimelineToolInfo info)=>Harness.Info=info;
+    public void SetTimelineToolInfo(TimelineToolInfo info){Harness.Info=info;Harness.Log("timeline-tool-connected",new{items=info.Timeline.Items.Count,syntheticItems=info.Timeline.Items.OfType<TachieItem>().Count(x=>x.TachieItemParameter is ItemParameter)});}
     public ToolState SaveState()=>new(){Title=Title};public void LoadState(ToolState state){}
     public event PropertyChangedEventHandler? PropertyChanged{add{}remove{}}
     public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested{add{}remove{}}
@@ -164,10 +168,14 @@ internal static class Harness
     static readonly object gate=new();static readonly List<object> events=[];
     internal static int NextSource;internal static ItemParameter? Parameter;internal static string? Error;internal static TimelineToolInfo? Info;
     static string Output=>Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")!;
-    internal static void Log(string name,object details){lock(gate)events.Add(new{milliseconds=Environment.TickCount64,name,details});}
+    internal static void Log(string name,object details)
+    {
+        var entry=new{utc=DateTimeOffset.UtcNow,milliseconds=Environment.TickCount64,name,details};
+        lock(gate){events.Add(entry);if(!string.IsNullOrEmpty(Output)){Directory.CreateDirectory(Output);System.IO.File.AppendAllText(Path.Combine(Output,"plugin-events.jsonl"),System.Text.Json.JsonSerializer.Serialize(entry)+"\n");}}
+    }
     internal static void Start()
     {
-        _=Run();
+        Log("plugin-dispatch-enter",new{});_=Run();
         async Task Run()
         {
             try
@@ -178,28 +186,29 @@ internal static class Harness
                 FrameworkElement? surface=null;object? preview=null;Window? window=null;Capture.Frame? baseline=null;
                 var candidates=new List<object>();
                 var toolOpened=false;
-                for(var i=0;i<100;i++)
+                var startupDeadline=DateTimeOffset.UtcNow.AddSeconds(100);
+                for(var i=0;DateTimeOffset.UtcNow<startupDeadline;i++)
                 {
                     if(Error!=null)throw new InvalidOperationException(Error);
-                    foreach(Window dialog in Application.Current.Windows)
-                    if(dialog.Title is "Confirm" or "確認" or "Terms" or "License" or "利用規約")
-                    {
-                        // The outer runner may only decline a fully identified association prompt before baseline.
-                        // Other dialogs are blocked there without an input action; this in-process observer waits.
-                        await Task.Delay(250);
-                    }
+                    if(System.IO.File.Exists(Path.Combine(Output,"result.json")))return;
+                    if(!DialogFree().Clear){await Task.Delay(250);continue;}
                     // Do not activate a Tool while ordinary command-line project opening is still starting.
                     if(!toolOpened&&Parameter!=null)toolOpened=OpenObserverTool();
                     (surface,preview,window)=FindSurface(candidates);
                     if(surface!=null&&Parameter!=null&&Info?.Timeline.Items.OfType<TachieItem>().Any(item=>ReferenceEquals(item.TachieItemParameter,Parameter))==true)
                     {
                         baseline=Capture.Read(surface);
-                        if(baseline.RedFraction>.65)break;
+                        if(baseline.RedFraction>.95)
+                        {
+                            if(!System.IO.File.Exists(Path.Combine(Output,"baseline-requested.txt"))){System.IO.File.WriteAllText(Path.Combine(Output,"baseline-requested.txt"),"Public live owner matched; awaiting outer dialog-free barrier");Log("baseline-barrier-requested",new{});}
+                            if(System.IO.File.Exists(Path.Combine(Output,"baseline-permitted.json"))&&DialogFree().Clear)break;
+                        }
                     }
                     await Task.Delay(250);
                 }
-                if(surface==null||Parameter==null||Info==null||baseline==null||baseline.RedFraction<=.65)
+                if(surface==null||Parameter==null||Info==null||baseline==null||baseline.RedFraction<=.95||!System.IO.File.Exists(Path.Combine(Output,"baseline-permitted.json"))||!DialogFree().Clear)
                 {Result("BLOCKED","No live player with verified red synthetic preview baseline",new{candidates,sourceCount=NextSource,toolOpened,toolInfoAvailable=Info!=null,liveOwnerMatched=Info?.Timeline.Items.OfType<TachieItem>().Any(item=>ReferenceEquals(item.TachieItemParameter,Parameter)),baselineRed=baseline?.RedFraction,baselineGreen=baseline?.GreenFraction});return;}
+                var dialogState=DialogFree();if(!dialogState.Clear){Result("BLOCKED","Popup/main-disabled at baseline",dialogState);return;}
                 var beforeState=State(preview!,window!);Capture.Save(Path.Combine(Output,"baseline.png"),baseline.Pixels,baseline.Width,baseline.Height);
                 if(beforeState.IsPlaying!=false||beforeState.Frame==null)
                 {Result("BLOCKED","Cannot independently establish paused state and frame through public UI surface",new{beforeState});return;}
@@ -207,14 +216,14 @@ internal static class Harness
                 var historyEvents=0;EventHandler historyObserver=(_,_)=>historyEvents++;Info.UndoRedoManager.HistoryChanged+=historyObserver;
                 var undoableBefore=Info.UndoRedoManager.IsUndoable;var redoableBefore=Info.UndoRedoManager.IsRedoable;
                 int updateBefore;lock(gate)updateBefore=events.Count;
-                Log("baseline-established",new{notify,beforeState});
+                Log("baseline-established",new{notify,beforeState,dialogState,barrier=System.Text.Json.JsonSerializer.Deserialize<JsonElement>(System.IO.File.ReadAllText(Path.Combine(Output,"baseline-permitted.json")))});
                 System.IO.File.WriteAllText(Path.Combine(Output,"observing.txt"),"No UI interaction beyond this marker");
                 owner.Arm(notify,Application.Current.Dispatcher);
                 // From this point there is no seek, play, selection, edit, command or direct host Update.
                 Capture.Frame final=baseline;var samples=new List<object>();
                 for(var i=0;i<36;i++)
                 {
-                    await Task.Delay(250);var state=State(preview!,window!);final=Capture.Read(surface);
+                    await Task.Delay(250);if(System.IO.File.Exists(Path.Combine(Output,"result.json")))return;var clear=DialogFree();if(!clear.Clear){Result("BLOCKED","Popup/main-disabled during observation; no UI action",clear);return;}var state=State(preview!,window!);final=Capture.Read(surface);
                     samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction});
                     if(state.IsPlaying!=false||state.Frame!=beforeState.Frame)throw new InvalidOperationException("Frame/paused state changed during completion observation");
                     if(Error!=null)throw new InvalidOperationException(Error);
@@ -230,11 +239,23 @@ internal static class Harness
                 var stayedRed=final.RedFraction>.65&&final.GreenFraction<.05;
                 var validPixels=changed||stayedRed;
                 var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!undoUnchanged?"FAIL":notify?changed?"PASS_NOTIFY_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
-                Result(status,"Real stopped player; completion-only observation",new{notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
+                Result(status,"Real stopped player; completion-only observation",new{notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
             }
             catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,new{stack=e.StackTrace?.Split('\n').Take(8).ToArray()});}
         }
     }
+    internal sealed record WindowEvidence(string Title,string Type,bool Enabled,bool Main,long Handle);
+    internal sealed record DialogEvidence(bool Clear,WindowEvidence[] Windows);
+    static DialogEvidence DialogFree()
+    {
+        var rows=Application.Current.Windows.Cast<Window>().Where(w=>w.IsVisible).Select(w=>
+        {
+            var handle=new WindowInteropHelper(w).Handle;
+            return new WindowEvidence(Path.GetFileName(w.Title),w.GetType().FullName??"",w.IsEnabled&&IsWindowEnabled(handle),w.DataContext?.GetType().FullName=="YukkuriMovieMaker.ViewModels.MainViewModel",handle.ToInt64());
+        }).ToArray();
+        return new(rows.Any(x=>x.Main&&x.Enabled)&&rows.All(x=>x.Main||x.Title=="Lab paused observer"),rows);
+    }
+    [DllImport("user32.dll")]static extern bool IsWindowEnabled(IntPtr window);
     internal record Snapshot(bool? IsPlaying,string? Frame,string Title);
     static Snapshot State(object preview,Window window)
     {
@@ -286,7 +307,7 @@ internal static class Harness
     static void Result(string status,string reason,object? observation)
     {
         Directory.CreateDirectory(Output);object[] traffic;lock(gate)traffic=events.ToArray();
-        System.IO.File.WriteAllText(Path.Combine(Output,"result.json"),System.Text.Json.JsonSerializer.Serialize(new{schema="lab.paused-tachie-notice.v1",status,reason,phase=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE"),sourceHead=Environment.GetEnvironmentVariable("SOURCE_HEAD"),runId=Environment.GetEnvironmentVariable("GITHUB_RUN_ID"),assemblySha256=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(typeof(Startup).Assembly.Location))),observation,events=traffic,privateInvocation=false,directHostUpdate=false},new JsonSerializerOptions{WriteIndented=true}));
+        System.IO.File.WriteAllText(Path.Combine(Output,"result.json"),System.Text.Json.JsonSerializer.Serialize(new{schema="lab.paused-tachie-notice.v1",status,reason,phase=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE"),sourceHead=Environment.GetEnvironmentVariable("SOURCE_HEAD"),runId=Environment.GetEnvironmentVariable("GITHUB_RUN_ID"),runAttempt=Environment.GetEnvironmentVariable("GITHUB_RUN_ATTEMPT"),assemblySha256=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(typeof(Startup).Assembly.Location))),observation,events=traffic,privateInvocation=false,directHostUpdate=false},new JsonSerializerOptions{WriteIndented=true}));
     }
 }
 internal static class Capture
