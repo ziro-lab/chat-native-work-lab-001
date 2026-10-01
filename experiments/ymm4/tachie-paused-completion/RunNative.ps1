@@ -9,10 +9,20 @@ catch{$script:uiaError=$_.Exception.Message}
 function Read-DialogText([IntPtr]$Window) {
  if(-not $script:uiaAvailable){return @{available=$false;error=$script:uiaError;text=@()}}
  try{
+  Start-Sleep -Milliseconds 1000 # Read only after accessible peers have had time to initialize.
   $root=[System.Windows.Automation.AutomationElement]::FromHandle($Window)
   $elements=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-  $text=@();foreach($element in $elements){if($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text -and $element.Current.Name){$text+=$element.Current.Name;if($text.Count -ge 12){break}}}
-  return @{available=$true;text=$text}
+  $text=@();$controls=@()
+  foreach($element in $elements){
+   if($controls.Count -lt 24){$controls+=@{type=$element.Current.ControlType.ProgrammaticName;name=$element.Current.Name}}
+   if($element.Current.Name){$text+=$element.Current.Name}
+   $pattern=$null
+   if($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)){$value=$pattern.DocumentRange.GetText(2048);if($value){$text+=$value}}
+   $pattern=$null
+   if($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$value=$pattern.Current.Value;if($value){$text+=$value}}
+   if($text.Count -ge 24){break}
+  }
+  return @{available=$true;descendantCount=$elements.Count;text=@($text|Select-Object -Unique);controls=$controls}
  }catch{return @{available=$false;error=$_.Exception.Message;text=@()}}
 }
 Add-Type -TypeDefinition @'
