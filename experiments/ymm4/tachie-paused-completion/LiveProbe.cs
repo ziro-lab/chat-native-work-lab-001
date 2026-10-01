@@ -26,6 +26,7 @@ using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Plugin.Tachie;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
+using YukkuriMovieMaker.Settings;
 using NativeJson=YukkuriMovieMaker.Json.Json;
 
 namespace Lab.TachiePausedNotice;
@@ -183,7 +184,13 @@ internal static class Harness
     {if(e.PropertyName==nameof(Timeline.CurrentFrame)){navigationVersion++;Log("timeline-frame-changed",new{frame=Info?.Timeline.CurrentFrame,navigationVersion});}}
     sealed class FrameAccess(ItemParameter owner,object preview):IFrameAccess
     {
-        public int Frame{get=>Info?.Timeline.CurrentFrame??-1;set{if(Info!=null)Info.Timeline.CurrentFrame=value;}}
+        public int Frame{get=>Info?.Timeline.CurrentFrame??-1;set{
+            var command=CommandSettings.Default.GetCommand(CommandType.SeekWithoutSnap);
+            var target=Application.Current.MainWindow;
+            if(command==null||target==null||!command.CanExecute(value,target))throw new InvalidOperationException("Public SeekWithoutSnap unavailable");
+            command.Execute(value,target);
+            Log("public-seek-command-issued",new{frame=value,command="SeekWithoutSnap",completionAwaitable=false});
+        }}
         public int LastFrame=>Info!.Timeline.Length-1;
         static readonly object MissingScope=new();public object Scope=>Info?.Timeline??MissingScope;
         public long NavigationVersion=>navigationVersion;

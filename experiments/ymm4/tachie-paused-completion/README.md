@@ -1,4 +1,29 @@
-# Stopped preparation: same-frame assignment and one-frame round trip
+# Public routed command follow-up
+
+The current protocol tests control-start and same-start using only
+`CommandSettings.Default.GetCommand(CommandType.SeekWithoutSnap).Execute(int, MainWindow)`.
+The command class and enum are exported host members in YMM4.dll; this is a
+version-sensitive public WPF route, not a stable Plugin.dll refresh contract.
+No internal PreviewViewModel/MainViewModel method is invoked. No key settings
+are initialized, modified, or saved by the probe.
+
+Prior source `0865a05c8bd1edcd63c7d9698bef4f2d0c9e017d`, run `36894158801`,
+observed no repaint for direct `Timeline.CurrentFrame` same assignment and
+same-turn `0 -> 1 -> 0` (1.4543 ms / 15.2083 ms). Undo, selection, parameter,
+timeline serialization, input project bytes remained unchanged. End baseline
+was BLOCKED: Timeline field reached 299 but actual callbacks stayed at 0.
+Overall run was BLOCKED, not a complete negative boundary suite.
+
+Static metadata identifies the routed command's integer frame parameter and
+async-void handler. Execute provides no awaitable completion. Consequently
+the follow-up never performs a temporary move/restore through this command:
+the original synchronous guard's assumptions do not cover queued seeks.
+If the same command redraws, the 1-frame fallback is unnecessary for this case.
+If it does not, async restore ownership must be designed and tested separately.
+The adversarial 12-case / 14-assertion checks still cover the synchronous guard
+helper only, not live command completion, audio, or user races.
+
+# Prior direct Timeline setter protocol
 
 Question: after a synthetic Tachie preparation completes, does the public `Timeline.CurrentFrame` setter refresh a real stopped player when assigned the same value, or when moved by one frame and immediately restored in one UI turn?
 
@@ -6,7 +31,7 @@ The earlier one-owner-parameter-notice experiment completed a valid negative on 
 
 ## Public route and limits
 
-The official 4.56.1.0 public `Timeline.CurrentFrame` setter's inspected IL returns immediately for an equal value, without PropertyChanged. For a different value it updates the field and emits CurrentFrame PropertyChanged. This static fact does not establish player refresh. The public TimelineViewModel.ScrollFrame method scrolls the viewport; it is not used as Seek. PreviewViewModel has SeekAsync methods but is an internal type; no such method is invoked here. The experiment only assigns the plugin-facing public Timeline property obtained from TimelineToolInfo.
+The official 4.56.1.0 public `Timeline.CurrentFrame` setter's inspected IL returns immediately for an equal value, without PropertyChanged. For a different value it updates the field and emits CurrentFrame PropertyChanged. This static fact does not establish player refresh. The public TimelineViewModel.ScrollFrame method scrolls the viewport; it is not used as Seek. PreviewViewModel has SeekAsync methods but is an internal type; no such method is invoked here. The experiment only assigns the version-sensitive public host Timeline property obtained from TimelineToolInfo.
 
 ## Protocol
 
