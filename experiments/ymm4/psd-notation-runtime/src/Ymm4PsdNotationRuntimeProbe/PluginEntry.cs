@@ -88,17 +88,21 @@ public sealed class PluginEntry : ILocalizePlugin
             byName.TryGetValue("PlainVisible", out var plainVisible) && plainVisible.IsEnabled,
             plainVisible is null ? "PlainVisible was not found." : $"PlainVisible IsEnabled={plainVisible.IsEnabled}"));
 
+        byName.TryGetValue("*StarA", out var starA);
+        byName.TryGetValue("*StarB", out var starB);
+        byName.TryGetValue("!BangHidden", out var bang);
+
         checks.Add(Check(
             "star-pair-not-auto-exclusive-at-file-model",
-            byName.TryGetValue("*StarA", out var starA) &&
-            byName.TryGetValue("*StarB", out var starB) &&
+            starA is not null &&
+            starB is not null &&
             starA.IsEnabled &&
             starB.IsEnabled,
             $"*StarA={starA?.IsEnabled.ToString() ?? "missing"}, *StarB={starB?.IsEnabled.ToString() ?? "missing"}"));
 
         checks.Add(Check(
             "bang-not-auto-forced-at-file-model",
-            byName.TryGetValue("!BangHidden", out var bang) &&
+            bang is not null &&
             !bang.IsEnabled,
             $"!BangHidden={bang?.IsEnabled.ToString() ?? "missing"}"));
 
