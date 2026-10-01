@@ -111,17 +111,17 @@ function Run-Phase([string]$Phase) {
    if(Test-Path $result){$boundary='plugin-result';break}
    if($process.HasExited){$boundary='host-exited-before-result';break}
    $locked=(Test-Path $barrier)
-   $popups=@($windows|Where-Object {$_.title -and $_.title -notlike 'YukkuriMovieMaker v*' -and $_.title -ne 'Lab paused observer'})
+   $popups=@($windows|Where-Object {$_.title -and $_.title -notmatch '^(YukkuriMovieMaker|ゆっくりMovieMaker) v' -and $_.title -ne 'Lab paused observer'})
    foreach($w in $popups){
     $key=[string]$w.handle
     if($locked){$boundary='popup-after-baseline-permission';@{status='BLOCKED';phase=$Phase;reason='Popup after baseline permission; no UI action';windows=$windows}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $result -Encoding utf8;break}
     if(-not $knownHandles.ContainsKey($key)){
      Start-Sleep -Milliseconds 400
-     if($w.title -like '*About YukkuriMovieMaker*' -or $w.title -like '*Check for updates*' -or $w.class -eq 'YMM4SplashWindow'){$message=@{available=$true;text=@();purpose='known startup/information title; no full changelog extraction'}}
+     if($w.title -like '*About YukkuriMovieMaker*' -or $w.title -eq 'ゆっくりMovieMakerについて' -or $w.title -like '*Check for updates*' -or $w.class -eq 'YMM4SplashWindow'){$message=@{available=$true;text=@();purpose='known startup/information title; no full changelog extraction'}}
      else{$message=Read-DialogText ([IntPtr]$w.handle)}
      $dialog=@{utc=[DateTimeOffset]::UtcNow.ToString('o');elapsedMs=[int64]$clock.Elapsed.TotalMilliseconds;origin=@{processId=$w.processId;threadId=$w.threadId;handle=$w.handle;owner=$w.owner;class=$w.class;title=$w.title;exe='YukkuriMovieMaker.exe'};message=$message}
      $dialogs+=$dialog;$knownHandles[$key]=$message;$decision='observed-only'
-     if($w.title -like '*Check for updates*' -or $w.title -like '*About YukkuriMovieMaker*'){
+     if($w.title -like '*Check for updates*' -or $w.title -like '*About YukkuriMovieMaker*' -or $w.title -eq 'ゆっくりMovieMakerについて'){
       [void][PausedNoticeWindows]::PostMessage([IntPtr]$w.handle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero);$decision='close-known-information-before-permission'
      }elseif($w.title -match '^(Confirm|確認)$' -and (Decline-Association ([IntPtr]$w.handle) $message)){$decision='decline-exact-file-association-No-before-permission'}
      elseif($w.title -eq 'Notification' -and (Close-KnownAssociationInformation ([IntPtr]$w.handle) $message)){$decision='close-exact-future-association-information-OK-before-permission'}
@@ -133,7 +133,7 @@ function Run-Phase([string]$Phase) {
     }
    }
    if(Test-Path $result){if(-not $boundary){$boundary='plugin-result'};break}
-   $main=@($windows|Where-Object title -like 'YukkuriMovieMaker v*')
+   $main=@($windows|Where-Object title -match '^(YukkuriMovieMaker|ゆっくりMovieMaker) v')
    $clear=$popups.Count -eq 0 -and $main.Count -eq 1 -and $main[0].enabled
    if($clear){if($null -eq $quietSince){$quietSince=$clock.Elapsed.TotalSeconds}}else{$quietSince=$null}
    if($Phase -ne 'seed' -and -not $locked -and (Test-Path (Join-Path $destination 'baseline-requested.txt')) -and $null -ne $quietSince -and $clock.Elapsed.TotalSeconds-$quietSince -ge 3){
