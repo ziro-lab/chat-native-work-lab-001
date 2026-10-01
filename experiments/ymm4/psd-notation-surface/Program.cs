@@ -1,6 +1,8 @@
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
+using System.Reflection.Emit;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -16,6 +18,8 @@ Directory.CreateDirectory(output);
 
 var notationTokens = new[] { "*", "!", ":flip", ":flipx", ":flipy", ":flipxy", "PSDTool", "%2f", "%25" };
 var assemblyResults = new List<AssemblyResult>();
+var targetIlDump = new StringBuilder();
+var opcodeMap = BuildOpcodeMap();
 
 foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
     .Where(p => p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
@@ -158,6 +162,11 @@ foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirec
             }
         }
 
+        if (capturePsdSurface)
+        {
+            DumpTargetIl(pe, md, methodOwners, assemblyName, opcodeMap, targetIlDump);
+        }
+
         if (psdRelated || literalHits.Count > 0)
         {
             assemblyResults.Add(new AssemblyResult(
@@ -217,6 +226,7 @@ foreach (var a in result.Assemblies)
 
 var summaryPath = Path.Combine(output, "summary.txt");
 File.WriteAllText(summaryPath, summary.ToString(), new UTF8Encoding(false));
+File.WriteAllText(Path.Combine(output, "target-il.txt"), targetIlDump.ToString(), new UTF8Encoding(false));
 Console.Write(summary.ToString());
 
 if (result.Assemblies.Length == 0)
@@ -253,6 +263,266 @@ static int IndexOf(byte[] haystack, byte[] needle)
     }
     return -1;
 }
+
+
+static Dictionary<ushort, OpCode> BuildOpcodeMap()
+{
+    var map = new Dictionary<ushort, OpCode>();
+    foreach (var field in typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static))
+    {
+        if (field.GetValue(null) is OpCode op)
+            map[unchecked((ushort)op.Value)] = op;
+    }
+    return map;
+}
+
+static void DumpTargetIl(
+    PEReader pe,
+    MetadataReader md,
+    Dictionary<MethodDefinitionHandle, string> methodOwners,
+    string assemblyName,
+    Dictionary<ushort, OpCode> opcodeMap,
+    StringBuilder output)
+{
+    foreach (var methodHandle in md.MethodDefinitions)
+    {
+        var method = md.GetMethodDefinition(methodHandle);
+        if (method.RelativeVirtualAddress == 0)
+            continue;
+
+        var methodName = md.GetString(method.Name);
+        var owner = methodOwners.TryGetValue(methodHandle, out var ownerName) ? ownerName : "<unknown>";
+
+        var target =
+            (owner.EndsWith(".PsdFolder", StringComparison.Ordinal) &&
+                methodName is "Parse" or "SetEnableItems" or "GetEnableItems" or "ResolveItem" or "SetActiveLayers") ||
+            (owner.EndsWith(".SwitchLayerCommand", StringComparison.Ordinal) && methodName == "Execute") ||
+            (owner.EndsWith(".ShiftLayerCommand", StringComparison.Ordinal) && methodName == "Execute") ||
+            (owner.Contains("PsdItemViewModel", StringComparison.Ordinal) &&
+                methodName is ".ctor" or "set_IsEnabled" or "UpdateEnable") ||
+            (owner.EndsWith(".PsdFolderViewModel", StringComparison.Ordinal) && methodName == "UpdateEnable") ||
+            (owner.EndsWith(".PsdLayerEditorViewModel", StringComparison.Ordinal) &&
+                methodName is "UpdateViewModels" or "Resolve") ||
+            (owner.EndsWith(".PsdTachieSource", StringComparison.Ordinal) && methodName == "Update");
+
+        if (!target)
+            continue;
+
+        MethodBodyBlock body;
+        try
+        {
+            body = pe.GetMethodBody(method.RelativeVirtualAddress);
+        }
+        catch
+        {
+            continue;
+        }
+
+        var il = body.GetILBytes();
+        if (il is null || il.Length == 0)
+            continue;
+
+        output.AppendLine();
+        output.AppendLine($"## {assemblyName} :: {owner}::{methodName}");
+        foreach (var line in DecodeIl(il, md, methodOwners, opcodeMap))
+            output.AppendLine(line);
+    }
+}
+
+static IEnumerable<string> DecodeIl(
+    byte[] il,
+    MetadataReader md,
+    Dictionary<MethodDefinitionHandle, string> methodOwners,
+    Dictionary<ushort, OpCode> opcodeMap)
+{
+    var p = 0;
+    while (p < il.Length)
+    {
+        var start = p;
+        ushort key = il[p++];
+        if (key == 0xFE)
+        {
+            if (p >= il.Length)
+                yield break;
+            key = (ushort)(0xFE00 | il[p++]);
+        }
+
+        if (!opcodeMap.TryGetValue(key, out var op))
+        {
+            yield return $"{start:X4}: <unknown 0x{key:X4}>";
+            yield break;
+        }
+
+        string operand = "";
+        try
+        {
+            switch (op.OperandType)
+            {
+                case OperandType.InlineNone:
+                    break;
+                case OperandType.ShortInlineI:
+                    operand = unchecked((sbyte)il[p]).ToString();
+                    p += 1;
+                    break;
+                case OperandType.InlineI:
+                    operand = ReadI4(il, p).ToString();
+                    p += 4;
+                    break;
+                case OperandType.InlineI8:
+                    operand = BitConverter.ToInt64(il, p).ToString();
+                    p += 8;
+                    break;
+                case OperandType.ShortInlineR:
+                    operand = BitConverter.ToSingle(il, p).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    p += 4;
+                    break;
+                case OperandType.InlineR:
+                    operand = BitConverter.ToDouble(il, p).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    p += 8;
+                    break;
+                case OperandType.ShortInlineVar:
+                    operand = il[p].ToString();
+                    p += 1;
+                    break;
+                case OperandType.InlineVar:
+                    operand = BitConverter.ToUInt16(il, p).ToString();
+                    p += 2;
+                    break;
+                case OperandType.ShortInlineBrTarget:
+                    {
+                        var delta = unchecked((sbyte)il[p]);
+                        p += 1;
+                        operand = $"IL_{p + delta:X4}";
+                        break;
+                    }
+                case OperandType.InlineBrTarget:
+                    {
+                        var delta = ReadI4(il, p);
+                        p += 4;
+                        operand = $"IL_{p + delta:X4}";
+                        break;
+                    }
+                case OperandType.InlineSwitch:
+                    {
+                        var count = ReadI4(il, p);
+                        p += 4;
+                        var baseOffset = p + count * 4;
+                        var targets = new List<string>(Math.Max(count, 0));
+                        for (var i = 0; i < count; i++)
+                        {
+                            var delta = ReadI4(il, p);
+                            p += 4;
+                            targets.Add($"IL_{baseOffset + delta:X4}");
+                        }
+                        operand = string.Join(", ", targets);
+                        break;
+                    }
+                case OperandType.InlineString:
+                    {
+                        var token = ReadI4(il, p);
+                        p += 4;
+                        try
+                        {
+                            operand = Quote(md.GetUserString(MetadataTokens.UserStringHandle(token & 0x00FFFFFF)));
+                        }
+                        catch
+                        {
+                            operand = $"0x{token:X8}";
+                        }
+                        break;
+                    }
+                case OperandType.InlineMethod:
+                case OperandType.InlineField:
+                case OperandType.InlineType:
+                case OperandType.InlineTok:
+                case OperandType.InlineSig:
+                    {
+                        var token = ReadI4(il, p);
+                        p += 4;
+                        operand = ResolveToken(md, methodOwners, token);
+                        break;
+                    }
+                default:
+                    operand = $"<operand {op.OperandType}>";
+                    yield return $"{start:X4}: {op.Name} {operand}";
+                    yield break;
+            }
+        }
+        catch
+        {
+            yield return $"{start:X4}: {op.Name} <decode-error>";
+            yield break;
+        }
+
+        yield return string.IsNullOrEmpty(operand)
+            ? $"{start:X4}: {op.Name}"
+            : $"{start:X4}: {op.Name} {operand}";
+    }
+}
+
+static int ReadI4(byte[] data, int offset)
+    => data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24);
+
+static string ResolveToken(MetadataReader md, Dictionary<MethodDefinitionHandle, string> owners, int token)
+{
+    try
+    {
+        var handle = MetadataTokens.EntityHandle(token);
+        return handle.Kind switch
+        {
+            HandleKind.MethodDefinition => ResolveMethod(md, owners, (MethodDefinitionHandle)handle),
+            HandleKind.MemberReference => ResolveMemberRef(md, (MemberReferenceHandle)handle),
+            HandleKind.TypeReference => ResolveTypeRef(md, (TypeReferenceHandle)handle),
+            HandleKind.TypeDefinition => ResolveTypeDef(md, (TypeDefinitionHandle)handle),
+            HandleKind.FieldDefinition => md.GetString(md.GetFieldDefinition((FieldDefinitionHandle)handle).Name),
+            HandleKind.MethodSpecification => "MethodSpec:" + ResolveToken(md, owners, MetadataTokens.GetToken(md.GetMethodSpecification((MethodSpecificationHandle)handle).Method)),
+            _ => $"0x{token:X8}:{handle.Kind}"
+        };
+    }
+    catch
+    {
+        return $"0x{token:X8}";
+    }
+}
+
+static string ResolveMethod(MetadataReader md, Dictionary<MethodDefinitionHandle, string> owners, MethodDefinitionHandle h)
+{
+    var m = md.GetMethodDefinition(h);
+    var owner = owners.TryGetValue(h, out var o) ? o : "<unknown>";
+    return owner + "::" + md.GetString(m.Name);
+}
+
+static string ResolveMemberRef(MetadataReader md, MemberReferenceHandle h)
+{
+    var mr = md.GetMemberReference(h);
+    return ResolveParent(md, mr.Parent) + "::" + md.GetString(mr.Name);
+}
+
+static string ResolveParent(MetadataReader md, EntityHandle h)
+    => h.Kind switch
+    {
+        HandleKind.TypeReference => ResolveTypeRef(md, (TypeReferenceHandle)h),
+        HandleKind.TypeDefinition => ResolveTypeDef(md, (TypeDefinitionHandle)h),
+        _ => h.Kind.ToString()
+    };
+
+static string ResolveTypeRef(MetadataReader md, TypeReferenceHandle h)
+{
+    var t = md.GetTypeReference(h);
+    var ns = md.GetString(t.Namespace);
+    var name = md.GetString(t.Name);
+    return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
+}
+
+static string ResolveTypeDef(MetadataReader md, TypeDefinitionHandle h)
+{
+    var t = md.GetTypeDefinition(h);
+    var ns = md.GetString(t.Namespace);
+    var name = md.GetString(t.Name);
+    return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
+}
+
+static string Quote(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
 
 sealed record ProbeResult(string Root, DateTimeOffset ScannedAtUtc, string[] Tokens, AssemblyResult[] Assemblies);
 sealed record AssemblyResult(
