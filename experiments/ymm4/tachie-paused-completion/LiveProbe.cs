@@ -206,6 +206,7 @@ internal static class Harness
         var original=access.Frame;var scope=access.Scope;var version=access.NavigationVersion;
         if(original<0||original>access.LastFrame||access.LastFrame<1){frameAction=new("SKIPPED_BOUNDARY",original,null,original,0,null);return;}
         var target=original<access.LastFrame?original+1:original-1;var writes=0;string? error=null;
+        bool OwnerStillCurrent()=>Info!=null&&ReferenceEquals(scope,access.Scope)&&Public(preview,"IsPlaying") is false&&Info.Timeline.Items.OfType<TachieItem>().Any(x=>ReferenceEquals(x.TachieItemParameter,owner));
         twoStagePending=true;
         try
         {
@@ -215,21 +216,21 @@ internal static class Harness
             var wait=System.Diagnostics.Stopwatch.StartNew();
             while(wait.ElapsedMilliseconds<3000&&Volatile.Read(ref LastHostFrame)!=target)
             {
-                if(!access.CanAct||!ReferenceEquals(scope,access.Scope)||access.Frame!=target||access.NavigationVersion!=version+1)
+                if(!OwnerStillCurrent()||access.Frame!=target||access.NavigationVersion!=version+1)
                 {frameAction=new("INTERVENING_STATE",original,target,access.Frame,writes,null);return;}
                 await Task.Delay(20);
             }
             if(Volatile.Read(ref LastHostFrame)!=target)
             {frameAction=new("TARGET_UPDATE_TIMEOUT",original,target,access.Frame,writes,null);return;}
             Log("two-stage-target-update-observed",new{original,target,elapsedMs=wait.ElapsedMilliseconds});
-            if(!access.CanAct||!ReferenceEquals(scope,access.Scope)||access.Frame!=target||access.NavigationVersion!=version+1)
+            if(!OwnerStillCurrent()||access.Frame!=target||access.NavigationVersion!=version+1)
             {frameAction=new("STALE_BEFORE_RESTORE",original,target,access.Frame,writes,null);return;}
             writes++;access.Frame=original;
             if(access.Frame!=original){frameAction=new("RESTORE_NOT_APPLIED",original,target,access.Frame,writes,null);return;}
             var restore=System.Diagnostics.Stopwatch.StartNew();
             while(restore.ElapsedMilliseconds<3000&&Volatile.Read(ref LastHostFrame)!=original)
             {
-                if(!access.CanAct||!ReferenceEquals(scope,access.Scope)||access.Frame!=original||access.NavigationVersion!=version+2)
+                if(!OwnerStillCurrent()||access.Frame!=original||access.NavigationVersion!=version+2)
                 {frameAction=new("INTERVENING_AFTER_RESTORE",original,target,access.Frame,writes,null);return;}
                 await Task.Delay(20);
             }
