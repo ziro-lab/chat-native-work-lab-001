@@ -132,8 +132,9 @@ internal static class Fixture
         var item=new TachieItem(character){Frame=0,Length=300,Layer=0,TachieItemParameter=parameter};
         var timeline=new Timeline{Name="Synthetic stopped player",Items=ImmutableList.Create<IItem>(item)};
         timeline.VideoInfo.Width=256;timeline.VideoInfo.Height=128;timeline.VideoInfo.FPS=30;timeline.VideoInfo.BackgroundColor=System.Windows.Media.Colors.Black;timeline.RefreshTimelineLengthAndMaxLayer();
-        var project=new Project(new[]{character},Path.Combine(directory,"synthetic.ymmp"));project.Timelines.Clear();project.Timelines.Add(timeline);
-        NativeJson.Save(project,project.FilePath,null);
+        var path=Path.Combine(directory,"synthetic.ymmp");
+        var project=new Project(new[]{character},path);project.Timelines.Clear();project.Timelines.Add(timeline);
+        NativeJson.Save(project,path,null);
     }
 }
 public sealed class Startup:ILocalizePlugin
@@ -202,6 +203,7 @@ internal static class Harness
                 var undoableBefore=Info.UndoRedoManager.IsUndoable;var redoableBefore=Info.UndoRedoManager.IsRedoable;
                 int updateBefore;lock(gate)updateBefore=events.Count;
                 Log("baseline-established",new{notify,beforeState});
+                System.IO.File.WriteAllText(Path.Combine(Output,"observing.txt"),"No UI interaction beyond this marker");
                 owner.Arm(notify,Application.Current.Dispatcher);
                 // From this point there is no seek, play, selection, edit, command or direct host Update.
                 Capture.Frame final=baseline;var samples=new List<object>();
@@ -225,7 +227,7 @@ internal static class Harness
                 var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!undoUnchanged?"FAIL":notify?changed?"PASS_NOTIFY_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
                 Result(status,"Real stopped player; completion-only observation",new{notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
             }
-            catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,null);}
+            catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,new{stack=e.StackTrace?.Split('\n').Take(8).ToArray()});}
         }
     }
     internal record Snapshot(bool? IsPlaying,string? Frame,string Title);

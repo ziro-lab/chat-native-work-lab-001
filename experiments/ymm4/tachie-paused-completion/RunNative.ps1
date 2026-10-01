@@ -14,14 +14,17 @@ public static class PausedNoticeWindows {
  [DllImport("user32.dll")]public static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);
 }
 '@
-function Inspect-Dialogs([int]$TaskProcess) {
+function Inspect-Dialogs([int]$TaskProcess,[bool]$Observing) {
  $script:unknown=@()
  $visit=[PausedNoticeWindows+Visit]{param([IntPtr]$window,[IntPtr]$parameter)
   $nativeProcess=[uint32]0;[void][PausedNoticeWindows]::GetWindowThreadProcessId($window,[ref]$nativeProcess)
   if($nativeProcess -eq $TaskProcess -and [PausedNoticeWindows]::IsWindowVisible($window)){
    $text=[Text.StringBuilder]::new(512);[void][PausedNoticeWindows]::GetWindowText($window,$text,$text.Capacity);$title=$text.ToString()
    # These known informational windows may be dismissed. No Enter, consent button or unknown Confirm is ever accepted.
-   if($title -like '*Check for updates*' -or $title -like '*About YukkuriMovieMaker*') {[void][PausedNoticeWindows]::PostMessage($window,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)}
+   if($title -like '*Check for updates*' -or $title -like '*About YukkuriMovieMaker*') {
+    if($Observing){$script:unknown+=('Popup during observation; no Close sent: '+$title)}
+    else{[void][PausedNoticeWindows]::PostMessage($window,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)}
+   }
    elseif($title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){$script:unknown+=$title}
   };return $true
  }
@@ -39,7 +42,7 @@ function Run-Phase([string]$Phase) {
   $result=Join-Path $destination 'result.json'
   for($i=0;$i -lt 160;$i++){
    if(Test-Path $result){break}
-   $unknown=@(Inspect-Dialogs $process.Id)
+   $unknown=@(Inspect-Dialogs $process.Id (Test-Path (Join-Path $destination 'observing.txt')))
    if($unknown.Count){@{status='BLOCKED';reason='Unrecognized consent/Confirm dialog; no response sent';dialogTitles=$unknown;phase=$Phase}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $result -Encoding utf8;break}
    if($process.HasExited){break};Start-Sleep -Milliseconds 250
   }
