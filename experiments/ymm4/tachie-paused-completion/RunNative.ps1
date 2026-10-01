@@ -158,14 +158,15 @@ $rows=@()
 try{
  $seed=Run-Phase 'seed';$rows+=$seed
  if($seed.status -eq 'SEEDED'){
-  foreach($phase in @('control-start','same-start','nudge-start','control-end','nudge-end','nudge-error-start')){
-   Start-Sleep -Seconds 1;$row=Run-Phase $phase;$rows+=$row
-   if($phase -eq 'same-start' -and $row.status -eq 'PASS_FRAME_ACTION_REPAINT'){break}
-   if($row.status -in @('BLOCKED','FAIL','OBSERVED_CONTROL_REPAINT')){break}
+  Start-Sleep -Seconds 1;$control=Run-Phase 'control-start';$rows+=$control
+  if($control.status -eq 'PASS_CONTROL_NO_REPAINT'){
+   Start-Sleep -Seconds 1;$two=Run-Phase 'twostage-start';$rows+=$two
   }
  }
- $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif(($rows|Where-Object phase -like 'same-*').status -contains 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_SAME_ASSIGN_REPAINT'}elseif($rows.status -contains 'FAIL' -or $rows.Count -ne 7){'INCONCLUSIVE_OR_FAILED'}elseif(($rows|Where-Object phase -like 'control-*').status -contains 'OBSERVED_CONTROL_REPAINT'){'INCONCLUSIVE_OR_FAILED'}elseif(($rows|Where-Object phase -like 'same-*').status -contains 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_SAME_ASSIGN_REPAINT'}elseif(($rows|Where-Object phase -like 'nudge-*').status -contains 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_NUDGE_REPAINT'}else{'VALID_NEGATIVE_FRAME_ACTIONS'}
- @{schema='lab.paused-frame-refresh.summary.v1';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});publicRoute='Timeline.CurrentFrame';sameUiTurnRoundTrip=$true;notificationRequiresValidControl=$true;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;transientFlickerProvenAbsent=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
+ $controlStatus=($rows|Where-Object phase -eq 'control-start').status
+ $twoStatus=($rows|Where-Object phase -eq 'twostage-start').status
+ $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif($rows.status -contains 'FAIL'){'INCONCLUSIVE_OR_FAILED'}elseif($controlStatus -eq 'PASS_CONTROL_NO_REPAINT' -and $twoStatus -eq 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_TWO_STAGE_NUDGE_REPAINT'}elseif($controlStatus -eq 'PASS_CONTROL_NO_REPAINT' -and $twoStatus -eq 'OBSERVED_NO_REPAINT'){'VALID_NEGATIVE_TWO_STAGE_NUDGE'}else{'INCONCLUSIVE_OR_FAILED'}
+ @{schema='lab.paused-two-stage-frame-refresh.summary.v1';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});publicRoute='Timeline.CurrentFrame';restoreWaitsForRealSourceUpdate=$true;notificationUsed=$false;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;transientFlickerProvenAbsent=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
  Get-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Raw
- if($status -notin @('OBSERVED_SAME_ASSIGN_REPAINT','OBSERVED_NUDGE_REPAINT','VALID_NEGATIVE_FRAME_ACTIONS')){throw "Probe outcome: $status"}
+ if($status -notin @('OBSERVED_TWO_STAGE_NUDGE_REPAINT','VALID_NEGATIVE_TWO_STAGE_NUDGE')){throw "Probe outcome: $status"}
 }finally{Remove-Item Env:LAB_PAUSED_OUTPUT,Env:LAB_PAUSED_WORK,Env:LAB_PAUSED_PHASE -ErrorAction SilentlyContinue}

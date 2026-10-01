@@ -101,6 +101,12 @@ jobs:
             out/evidence/nudge-start/baseline-permitted.json
             out/evidence/nudge-start/baseline.png
             out/evidence/nudge-start/after.png
+            out/evidence/twostage-start/result.json
+            out/evidence/twostage-start/startup.json
+            out/evidence/twostage-start/plugin-events.jsonl
+            out/evidence/twostage-start/baseline-permitted.json
+            out/evidence/twostage-start/baseline.png
+            out/evidence/twostage-start/after.png
             out/evidence/control-end/result.json
             out/evidence/control-end/startup.json
             out/evidence/control-end/plugin-events.jsonl

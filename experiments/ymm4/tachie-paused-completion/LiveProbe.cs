@@ -172,6 +172,7 @@ internal static class Harness
     private static readonly Dictionary<int,ItemParameter> activeOwners=[];
     internal static int LastHostFrame=-1;
     private static long navigationVersion;private static FrameActionResult? frameAction;private static int frameActionCalls;
+    private static volatile bool twoStagePending;
     internal static void Connect(int id,ItemParameter parameter){lock(gate)activeOwners[id]=parameter;}
     internal static void Disconnect(int id){lock(gate)activeOwners.Remove(id);}
     internal static void SetInfo(TimelineToolInfo info)
@@ -197,6 +198,47 @@ internal static class Harness
         frameAction=mode.StartsWith("same-",StringComparison.Ordinal)?FrameRefresh.Same(access):FrameRefresh.Nudge(access,mode.Contains("error",StringComparison.Ordinal)?()=>throw new InvalidOperationException("Injected after temporary move"):null);
         Log("completion-frame-action",new{mode,frameAction,frameActionCalls,actionElapsedMs=clock.Elapsed.TotalMilliseconds,sameUiTurn=true});
     }
+    static async void CompleteTwoStageFrameAction(ItemParameter owner,object preview,string mode)
+    {
+        Application.Current.Dispatcher.VerifyAccess();if(++frameActionCalls!=1)throw new InvalidOperationException("Frame refresh reentered");
+        var access=new FrameAccess(owner,preview);
+        if(!access.CanAct){frameAction=new("SKIPPED_STATE",null,null,access.Frame,0,null);return;}
+        var original=access.Frame;var scope=access.Scope;var version=access.NavigationVersion;
+        if(original<0||original>access.LastFrame||access.LastFrame<1){frameAction=new("SKIPPED_BOUNDARY",original,null,original,0,null);return;}
+        var target=original<access.LastFrame?original+1:original-1;var writes=0;string? error=null;
+        twoStagePending=true;
+        try
+        {
+            writes++;access.Frame=target;
+            if(access.Frame!=target){frameAction=new("MOVE_NOT_APPLIED",original,target,access.Frame,writes,null);return;}
+            Log("two-stage-frame-moved",new{original,target,version,hostFrame=Volatile.Read(ref LastHostFrame)});
+            var wait=System.Diagnostics.Stopwatch.StartNew();
+            while(wait.ElapsedMilliseconds<3000&&Volatile.Read(ref LastHostFrame)!=target)
+            {
+                if(!access.CanAct||!ReferenceEquals(scope,access.Scope)||access.Frame!=target||access.NavigationVersion!=version+1)
+                {frameAction=new("INTERVENING_STATE",original,target,access.Frame,writes,null);return;}
+                await Task.Delay(20);
+            }
+            if(Volatile.Read(ref LastHostFrame)!=target)
+            {frameAction=new("TARGET_UPDATE_TIMEOUT",original,target,access.Frame,writes,null);return;}
+            Log("two-stage-target-update-observed",new{original,target,elapsedMs=wait.ElapsedMilliseconds});
+            if(!access.CanAct||!ReferenceEquals(scope,access.Scope)||access.Frame!=target||access.NavigationVersion!=version+1)
+            {frameAction=new("STALE_BEFORE_RESTORE",original,target,access.Frame,writes,null);return;}
+            writes++;access.Frame=original;
+            if(access.Frame!=original){frameAction=new("RESTORE_NOT_APPLIED",original,target,access.Frame,writes,null);return;}
+            var restore=System.Diagnostics.Stopwatch.StartNew();
+            while(restore.ElapsedMilliseconds<3000&&Volatile.Read(ref LastHostFrame)!=original)
+            {
+                if(!access.CanAct||!ReferenceEquals(scope,access.Scope)||access.Frame!=original||access.NavigationVersion!=version+2)
+                {frameAction=new("INTERVENING_AFTER_RESTORE",original,target,access.Frame,writes,null);return;}
+                await Task.Delay(20);
+            }
+            frameAction=new(Volatile.Read(ref LastHostFrame)==original?"RESTORED_AFTER_HOST_ACK":"RESTORE_UPDATE_TIMEOUT",original,target,access.Frame,writes,error);
+            Log("two-stage-frame-action-complete",new{mode,frameAction,targetWaitMs=wait.ElapsedMilliseconds,restoreWaitMs=restore.ElapsedMilliseconds,hostFrame=Volatile.Read(ref LastHostFrame)});
+        }
+        catch(Exception e){error=e.GetType().Name+": "+e.Message;frameAction=new("TWO_STAGE_ERROR",original,target,access.Frame,writes,error);}
+        finally{twoStagePending=false;}
+    }
     static string Output=>Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")!;
     internal static void Log(string name,object details)
     {
@@ -213,7 +255,7 @@ internal static class Harness
                 if(Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")=="seed")
                 {Fixture.Seed(Environment.GetEnvironmentVariable("LAB_PAUSED_WORK")!);Result("SEEDED","Synthetic normal project generated",null);return;}
                 var mode=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")!;var notify=false;
-                var frameMode=mode.StartsWith("same-",StringComparison.Ordinal)||mode.StartsWith("nudge-",StringComparison.Ordinal);
+                var frameMode=mode.StartsWith("same-",StringComparison.Ordinal)||mode.StartsWith("nudge-",StringComparison.Ordinal)||mode.StartsWith("twostage-",StringComparison.Ordinal);
                 FrameworkElement? surface=null;object? preview=null;Window? window=null;Capture.Frame? baseline=null;
                 var candidates=new List<object>();
                 var toolOpened=false;var initialFrameSet=false;
@@ -259,14 +301,17 @@ internal static class Harness
                 int updateBefore;lock(gate)updateBefore=events.Count;
                 Log("baseline-established",new{notify,beforeState,dialogState,barrier=System.Text.Json.JsonSerializer.Deserialize<JsonElement>(System.IO.File.ReadAllText(Path.Combine(Output,"baseline-permitted.json")))});
                 System.IO.File.WriteAllText(Path.Combine(Output,"observing.txt"),"No UI interaction beyond this marker");
-                owner.Arm(notify,Application.Current.Dispatcher,frameMode?()=>CompleteFrameAction(owner,preview!,mode):null);
-                // After CPU readiness, only the explicitly requested public same-frame assignment or synchronous one-frame round trip may run. No host Update, play, selection or persisted edit is forced.
+                Action? completionAction=null;
+                if(frameMode)completionAction=()=>{if(mode.StartsWith("twostage-",StringComparison.Ordinal))CompleteTwoStageFrameAction(owner,preview!,mode);else CompleteFrameAction(owner,preview!,mode);};
+                owner.Arm(notify,Application.Current.Dispatcher,completionAction);
+                // Two-stage mode waits for a real host Source Update at the neighboring frame before restoring. It never invokes host Update directly.
                 Capture.Frame final=baseline;var samples=new List<object>();
                 for(var i=0;i<36;i++)
                 {
                     await Task.Delay(250);if(System.IO.File.Exists(Path.Combine(Output,"result.json")))return;var clear=DialogFree();if(!clear.Clear){Result("BLOCKED","Popup/main-disabled during observation; no UI action",clear);return;}var state=State(preview!,window!);final=Capture.Read(surface);
                     samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction});
-                    if(state.IsPlaying!=false||state.Frame!=beforeState.Frame)throw new InvalidOperationException("Frame/paused state changed during completion observation");
+                    if(state.IsPlaying!=false)throw new InvalidOperationException("Playback started during completion observation");
+                    if(!Volatile.Read(ref twoStagePending)&&state.Frame!=beforeState.Frame)throw new InvalidOperationException("Final frame changed during completion observation");
                     if(Error!=null)throw new InvalidOperationException(Error);
                 }
                 Capture.Save(Path.Combine(Output,"after.png"),final.Pixels,final.Width,final.Height);
@@ -276,7 +321,7 @@ internal static class Harness
                 var timelineUnchanged=JsonConvert.SerializeObject(Info.Timeline)==timelineBefore;
                 var selectedUnchanged=selectedBefore.SequenceEqual(Info.Timeline.SelectedItems.Select(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode));
                 var inputProjectUnchanged=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(inputProject)))==projectHashBefore;
-                var frameActionValid=!frameMode||frameActionCalls==1&&frameAction?.Final==Info.Timeline.CurrentFrame&&(mode.StartsWith("same-",StringComparison.Ordinal)?frameAction.Status=="SAME_ASSIGNED":mode.Contains("error",StringComparison.Ordinal)?frameAction.Status=="ERROR_RESTORED":frameAction.Status=="RESTORED");
+                var frameActionValid=!frameMode||frameActionCalls==1&&frameAction?.Final==Info.Timeline.CurrentFrame&&(mode.StartsWith("same-",StringComparison.Ordinal)?frameAction.Status=="SAME_ASSIGNED":mode.StartsWith("twostage-",StringComparison.Ordinal)?frameAction.Status=="RESTORED_AFTER_HOST_ACK":mode.Contains("error",StringComparison.Ordinal)?frameAction.Status=="ERROR_RESTORED":frameAction.Status=="RESTORED");
                 var undoUnchanged=commandsBefore==owner.UndoCommands&&historyEvents==0&&undoableBefore==Info.UndoRedoManager.IsUndoable&&redoableBefore==Info.UndoRedoManager.IsRedoable;
                 Info.UndoRedoManager.HistoryChanged-=historyObserver;
                 var signalCorrect=owner.Ready&&owner.Notices==0&&frameActionValid;
