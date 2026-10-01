@@ -68,6 +68,22 @@ function Decline-Association([IntPtr]$Window,$Message) {
  }catch{}
  return $false
 }
+function Close-KnownAssociationInformation([IntPtr]$Window,$Message) {
+ $expected='If you want to associate in the future, please click Help (H) → Associate extension for YMM4 → Register to register the file.'
+ $matched=@($Message.text|Where-Object {($_ -replace '\s+',' ').Trim() -ceq $expected}).Count -gt 0
+ if(-not $Message.available -or -not $matched){return $false}
+ try{
+  $root=[System.Windows.Automation.AutomationElement]::FromHandle($Window)
+  $button=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'OK'))
+  if($null -eq $button){return $false}
+  $handle=[IntPtr]$button.Current.NativeWindowHandle
+  $class=[Text.StringBuilder]::new(64);[void][PausedNoticeWindows]::GetClassName($handle,$class,$class.Capacity)
+  if($handle -ne [IntPtr]::Zero -and $class.ToString() -eq 'Button'){
+   [void][PausedNoticeWindows]::PostMessage($handle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero);return $true
+  }
+ }catch{}
+ return $false
+}
 function Run-Phase([string]$Phase) {
  $destination=Join-Path $OutputDir $Phase;New-Item -ItemType Directory -Path $destination -Force | Out-Null
  $env:LAB_PAUSED_OUTPUT=$destination;$env:LAB_PAUSED_WORK=$WorkDir;$env:LAB_PAUSED_PHASE=$Phase
@@ -94,12 +110,15 @@ function Run-Phase([string]$Phase) {
     $key=[string]$w.handle
     if($locked){$boundary='popup-after-baseline-permission';@{status='BLOCKED';phase=$Phase;reason='Popup after baseline permission; no UI action';windows=$windows}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $result -Encoding utf8;break}
     if(-not $knownHandles.ContainsKey($key)){
-     Start-Sleep -Milliseconds 400;$message=Read-DialogText ([IntPtr]$w.handle)
+     Start-Sleep -Milliseconds 400
+     if($w.title -like '*About YukkuriMovieMaker*' -or $w.title -like '*Check for updates*' -or $w.class -eq 'YMM4SplashWindow'){$message=@{available=$true;text=@();purpose='known startup/information title; no full changelog extraction'}}
+     else{$message=Read-DialogText ([IntPtr]$w.handle)}
      $dialog=@{utc=[DateTimeOffset]::UtcNow.ToString('o');elapsedMs=[int64]$clock.Elapsed.TotalMilliseconds;origin=@{processId=$w.processId;threadId=$w.threadId;handle=$w.handle;owner=$w.owner;class=$w.class;title=$w.title;exe='YukkuriMovieMaker.exe'};message=$message}
      $dialogs+=$dialog;$knownHandles[$key]=$message;$decision='observed-only'
      if($w.title -like '*Check for updates*' -or $w.title -like '*About YukkuriMovieMaker*'){
       [void][PausedNoticeWindows]::PostMessage([IntPtr]$w.handle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero);$decision='close-known-information-before-permission'
      }elseif($w.title -match '^(Confirm|確認)$' -and (Decline-Association ([IntPtr]$w.handle) $message)){$decision='decline-exact-file-association-No-before-permission'}
+     elseif($w.title -eq 'Notification' -and (Close-KnownAssociationInformation ([IntPtr]$w.handle) $message)){$decision='close-exact-future-association-information-OK-before-permission'}
      elseif($w.title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){
       $boundary='unknown-consent';@{status='BLOCKED';phase=$Phase;reason='Unrecognized consent/Confirm dialog; no response sent';dialog=$dialog}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $result -Encoding utf8
      }
@@ -107,7 +126,7 @@ function Run-Phase([string]$Phase) {
      $actions[-1]|ConvertTo-Json -Compress|Add-Content -LiteralPath (Join-Path $OutputDir 'dialog-decisions.log')
     }
    }
-   if(Test-Path $result){break}
+   if(Test-Path $result){if(-not $boundary){$boundary='plugin-result'};break}
    $main=@($windows|Where-Object title -like 'YukkuriMovieMaker v*')
    $clear=$popups.Count -eq 0 -and $main.Count -eq 1 -and $main[0].enabled
    if($clear){if($null -eq $quietSince){$quietSince=$clock.Elapsed.TotalSeconds}}else{$quietSince=$null}
@@ -117,6 +136,7 @@ function Run-Phase([string]$Phase) {
    Start-Sleep -Milliseconds 250
   }
   $process.Refresh();$exitedBeforeCleanup=$process.HasExited;$exitCode=if($exitedBeforeCleanup){$process.ExitCode}else{$null}
+  if(Test-Path $eventsPath){$events=@(Get-Content -LiteralPath $eventsPath|ForEach-Object{try{$_|ConvertFrom-Json}catch{}})}
   if(-not(Test-Path $result)){
    if($exitedBeforeCleanup){$boundary='host-exited-before-result';$reason='Host exited before plugin result'}else{$boundary='phase-deadline-host-alive';$reason='Phase deadline reached while host remained alive'}
    @{status='BLOCKED';reason=$reason;phase=$Phase;exitCode=$exitCode;lastPluginStage=($events|Select-Object -Last 1).name;windows=$windows}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $result -Encoding utf8
