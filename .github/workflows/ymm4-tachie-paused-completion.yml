@@ -75,6 +75,7 @@ jobs:
           path: |
             out/evidence/host-identity.json
             out/evidence/build.log
+            out/evidence/dialog-decisions.log
             out/evidence/summary.json
             out/evidence/seed/result.json
             out/evidence/control/result.json

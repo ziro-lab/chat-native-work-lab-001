@@ -34,9 +34,9 @@ The probe uses bounded public-property reading on known preview DataContexts dis
 
 ## Dialogs and artifacts
 
-Only known informational About/update windows may receive Close before baseline; a popup during observation blocks instead of being closed. No Enter/accept action is sent to Confirm, terms, security or permission dialogs. Unrecognized consent requires a separate decision; the probe records BLOCKED and attempts to read its visible text through public Microsoft UI Automation. That read has no invoke/input action; unavailable UI Automation is recorded rather than installing software or bypassing the dialog.
+Only known informational About/update windows may receive Close before baseline; a popup during observation blocks instead of being closed. The recorded 4.56.1.0 file-association prompt may be **declined with its exact No button only before baseline**, after public UI Automation text matches the full purpose and all three `.ymmp/.ymmt/.ymme` extension descriptions. This does not accept an association, license or permission. The action and strict match are logged. No generic Enter/accept action is sent to Confirm, terms, security or permission dialogs. Other consent requires a separate decision: BLOCKED with public accessible text recorded. Unavailable UI Automation is recorded rather than installing software or bypassing the dialog.
 
-Artifact upload is a literal allowlist: host identity JSON, minimal build log, summary/phase JSON and four synthetic preview PNG paths. ZIPs, DLLs, generated `.ymmp`, material PNG, host settings, personal files and arbitrary directories are excluded. Runtime files are kept only on the ephemeral runner. The dedicated branch/Draft PR must not contain the older unpublished Lab branch or product code.
+Artifact upload is a literal allowlist: host identity JSON, minimal build/dialog-decision logs, summary/phase JSON and four synthetic preview PNG paths. ZIPs, DLLs, generated `.ymmp`, material PNG, host settings, personal files and arbitrary directories are excluded. Runtime files are kept only on the ephemeral runner. The dedicated branch/Draft PR must not contain the older unpublished Lab branch or product code.
 
 ## Reproduction and evidence identity
 

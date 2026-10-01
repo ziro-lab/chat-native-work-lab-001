@@ -183,7 +183,11 @@ internal static class Harness
                     if(Error!=null)throw new InvalidOperationException(Error);
                     foreach(Window dialog in Application.Current.Windows)
                     if(dialog.Title is "Confirm" or "確認" or "Terms" or "License" or "利用規約")
-                    {Result("BLOCKED","Unrecognized consent/Confirm; no response sent",new{dialog.Title,text=Elements(dialog).OfType<TextBlock>().Select(t=>t.Text).Where(t=>!string.IsNullOrWhiteSpace(t)).Take(12).ToArray()});return;}
+                    {
+                        // The outer runner may only decline a fully identified association prompt before baseline.
+                        // Other dialogs are blocked there without an input action; this in-process observer waits.
+                        await Task.Delay(250);
+                    }
                     if(!toolOpened)toolOpened=OpenObserverTool();
                     (surface,preview,window)=FindSurface(candidates);
                     if(surface!=null&&Parameter!=null&&Info?.Timeline.Items.OfType<TachieItem>().Any(item=>ReferenceEquals(item.TachieItemParameter,Parameter))==true)

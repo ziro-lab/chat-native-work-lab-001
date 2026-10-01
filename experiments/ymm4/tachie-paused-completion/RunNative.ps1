@@ -25,6 +25,26 @@ function Read-DialogText([IntPtr]$Window) {
   return @{available=$true;descendantCount=$elements.Count;text=@($text|Select-Object -Unique);controls=$controls}
  }catch{return @{available=$false;error=$_.Exception.Message;text=@()}}
 }
+function Decline-Association([IntPtr]$Window,$Message) {
+ $body=$Message.text -join "`n"
+ if(-not $Message.available -or $body -notmatch 'The extension for YMM4 is not associated with YUUKURI MovieMaker4' -or $body -notmatch 'Do you want to associate the following extensions\?' -or $body -notmatch '\.ymmp: Project file' -or $body -notmatch '\.ymmt: Template file' -or $body -notmatch '\.ymme: Plugin file'){return $false}
+ try{
+  $root=[System.Windows.Automation.AutomationElement]::FromHandle($Window)
+  $button=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'No'))
+  if($null -eq $button){return $false}
+  $pattern=$null
+  if($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){
+   $pattern.Invoke();'DECLINED_KNOWN_FILE_ASSOCIATION: exact body matched; public No InvokePattern; before baseline'|Add-Content -LiteralPath (Join-Path $OutputDir 'dialog-decisions.log');return $true
+  }
+  $handle=[IntPtr]$button.Current.NativeWindowHandle
+  $class=[Text.StringBuilder]::new(64);[void][PausedNoticeWindows]::GetClassName($handle,$class,$class.Capacity)
+  if($handle -ne [IntPtr]::Zero -and $class.ToString() -eq 'Button'){
+   [void][PausedNoticeWindows]::PostMessage($handle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)
+   'DECLINED_KNOWN_FILE_ASSOCIATION: exact body matched; exact public No Button BM_CLICK; before baseline'|Add-Content -LiteralPath (Join-Path $OutputDir 'dialog-decisions.log');return $true
+  }
+ }catch{}
+ return $false
+}
 Add-Type -TypeDefinition @'
 using System;using System.Text;using System.Runtime.InteropServices;
 public static class PausedNoticeWindows {
@@ -33,6 +53,7 @@ public static class PausedNoticeWindows {
  [DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr window);
  [DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr window,out uint process);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetWindowText(IntPtr window,StringBuilder text,int count);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetClassName(IntPtr window,StringBuilder text,int count);
  [DllImport("user32.dll")]public static extern bool PostMessage(IntPtr window,uint message,IntPtr w,IntPtr l);
 }
 '@
@@ -47,7 +68,10 @@ function Inspect-Dialogs([int]$TaskProcess,[bool]$Observing) {
     if($Observing){$script:unknown+=('Popup during observation; no Close sent: '+$title)}
     else{[void][PausedNoticeWindows]::PostMessage($window,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)}
    }
-   elseif($title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){$script:unknown+=@{title=$title;message=(Read-DialogText $window)}}
+   elseif($title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){
+    $message=Read-DialogText $window
+    if($Observing -or -not(Decline-Association $window $message)){$script:unknown+=@{title=$title;message=$message}}
+   }
   };return $true
  }
  [void][PausedNoticeWindows]::EnumWindows($visit,[IntPtr]::Zero)
