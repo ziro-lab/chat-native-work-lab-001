@@ -354,10 +354,8 @@ static IEnumerable<string> DecodeIl(
         }
 
         string operand = "";
-        try
+        switch (op.OperandType)
         {
-            switch (op.OperandType)
-            {
                 case OperandType.InlineNone:
                     break;
                 case OperandType.ShortInlineI:
@@ -442,16 +440,10 @@ static IEnumerable<string> DecodeIl(
                         operand = ResolveToken(md, methodOwners, token);
                         break;
                     }
-                default:
-                    operand = $"<operand {op.OperandType}>";
-                    yield return $"{start:X4}: {op.Name} {operand}";
-                    yield break;
-            }
-        }
-        catch
-        {
-            yield return $"{start:X4}: {op.Name} <decode-error>";
-            yield break;
+            default:
+                operand = $"<operand {op.OperandType}>";
+                yield return $"{start:X4}: {op.Name} {operand}";
+                yield break;
         }
 
         yield return string.IsNullOrEmpty(operand)
