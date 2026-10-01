@@ -172,7 +172,6 @@ internal static class Harness
     private static readonly Dictionary<int,ItemParameter> activeOwners=[];
     internal static int LastHostFrame=-1;internal static int LastHostUsage=(int)TimelineSourceUsage.Paused;
     private static long navigationVersion;private static FrameActionResult? frameAction;private static int frameActionCalls;
-    private static volatile bool twoStagePending;
     internal static void Connect(int id,ItemParameter parameter){lock(gate)activeOwners[id]=parameter;}
     internal static void Disconnect(int id){lock(gate)activeOwners.Remove(id);}
     internal static void SetInfo(TimelineToolInfo info)
@@ -207,7 +206,6 @@ internal static class Harness
         if(original<0||original>access.LastFrame||access.LastFrame<1){frameAction=new("SKIPPED_BOUNDARY",original,null,original,0,null);return;}
         var target=original<access.LastFrame?original+1:original-1;var writes=0;string? error=null;
         bool OwnerStillCurrent()=>Info!=null&&ReferenceEquals(scope,access.Scope)&&Info.Timeline.Items.OfType<TachieItem>().Any(x=>ReferenceEquals(x.TachieItemParameter,owner));
-        twoStagePending=true;
         try
         {
             writes++;access.Frame=target;
@@ -240,7 +238,7 @@ internal static class Harness
             Log("two-stage-frame-action-complete",new{mode,frameAction,targetWaitMs=wait.ElapsedMilliseconds,restoreWaitMs=restore.ElapsedMilliseconds,hostFrame=Volatile.Read(ref LastHostFrame)});
         }
         catch(Exception e){error=e.GetType().Name+": "+e.Message;frameAction=new("TWO_STAGE_ERROR",original,target,access.Frame,writes,error);}
-        finally{twoStagePending=false;}
+        finally{}
     }
     static string Output=>Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")!;
     internal static void Log(string name,object details)
