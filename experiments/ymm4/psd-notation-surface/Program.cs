@@ -303,9 +303,12 @@ static void DumpTargetIl(
             (owner.EndsWith(".ShiftLayerCommand", StringComparison.Ordinal) && methodName == "Execute") ||
             (owner.Contains("PsdItemViewModel", StringComparison.Ordinal) &&
                 methodName is ".ctor" or "set_IsEnabled" or "UpdateEnable") ||
-            (owner.EndsWith(".PsdFolderViewModel", StringComparison.Ordinal) && methodName == "UpdateEnable") ||
+            (owner.EndsWith(".PsdFolderViewModel", StringComparison.Ordinal) && methodName is ".ctor" or "UpdateEnable") ||
+            (owner.EndsWith(".PsdLayerViewModel", StringComparison.Ordinal) && methodName == ".ctor") ||
+            (owner.EndsWith(".SwitchLayerCommand", StringComparison.Ordinal) && methodName == ".ctor") ||
+            (owner.EndsWith(".ShiftLayerCommand", StringComparison.Ordinal) && methodName == ".ctor") ||
             (owner.EndsWith(".PsdLayerEditorViewModel", StringComparison.Ordinal) &&
-                methodName is "UpdateViewModels" or "Resolve") ||
+                methodName is ".ctor" or "LoadItemsAsync" or "UpdateViewModels" or "Resolve") ||
             (owner.EndsWith(".PsdTachieSource", StringComparison.Ordinal) && methodName == "Update");
 
         if (!target)
