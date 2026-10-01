@@ -309,7 +309,16 @@ static void DumpTargetIl(
             (owner.EndsWith(".ShiftLayerCommand", StringComparison.Ordinal) && methodName == ".ctor") ||
             (owner.EndsWith(".PsdLayerEditorViewModel", StringComparison.Ordinal) &&
                 methodName is ".ctor" or "LoadItemsAsync" or "UpdateViewModels" or "Resolve") ||
-            (owner.EndsWith(".PsdTachieSource", StringComparison.Ordinal) && methodName == "Update");
+            (owner.EndsWith(".PsdTachieSource", StringComparison.Ordinal) &&
+                methodName is ".ctor" or "Update" or "Clear" or "Dispose" or "ApplyAnimation") ||
+            (owner.EndsWith(".PsdFileSourcePlugin", StringComparison.Ordinal) &&
+                methodName is "CreateBitmap" or "Draw" or "DrawFolder" or "DrawLayer" or "ClearCache") ||
+            (owner.EndsWith(".PsdItem", StringComparison.Ordinal) &&
+                methodName is ".ctor" or "get_LayerImageBuffer" or "get_LayerMaskBuffer" or "ClearCache" or "set_IsEnabled") ||
+            (owner.EndsWith(".LayerImageBuffer", StringComparison.Ordinal) &&
+                methodName is ".ctor" or "ToBytes" or "ToD2DBitmap") ||
+            (owner.EndsWith(".LayerMaskBuffer", StringComparison.Ordinal) &&
+                methodName is ".ctor" or "ToBytes" or "ToD2DBitmap");
 
         if (!target)
             continue;
