@@ -229,7 +229,7 @@ public sealed class PluginEntry : ILocalizePlugin
             "YukkuriMovieMaker.Plugin.Tachie.Psd.PsdLayerEditorViewModel",
             throwOnError: false);
         if (editorType is null)
-            return [new EditorAttempt("<none>", false, "PsdLayerEditorViewModel not found.", [])];
+            return [new EditorAttempt("<none>", false, "PsdLayerEditorViewModel not found.", [], [])];
 
         var characterType = tachieAssembly.GetType(
             "YukkuriMovieMaker.Plugin.Tachie.Psd.PsdTachieCharacterParameter",
@@ -256,14 +256,14 @@ public sealed class PluginEntry : ILocalizePlugin
 
                 if (args.Any(a => ReferenceEquals(a, UnsupportedArgument.Instance)))
                 {
-                    attempts.Add(new EditorAttempt(signature, false, "Unsupported constructor argument.", []));
+                    attempts.Add(new EditorAttempt(signature, false, "Unsupported constructor argument.", [], []));
                     continue;
                 }
 
                 var vm = ctor.Invoke(args.Select(a => ReferenceEquals(a, NullArgument.Instance) ? null : a).ToArray());
                 if (vm is null)
                 {
-                    attempts.Add(new EditorAttempt(signature, false, "Constructor returned null.", []));
+                    attempts.Add(new EditorAttempt(signature, false, "Constructor returned null.", [], []));
                     continue;
                 }
 
@@ -280,8 +280,9 @@ public sealed class PluginEntry : ILocalizePlugin
                 }
 
                 var root = editorType.GetProperty("Root", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(vm);
+                var commandTrace = root is null ? [] : ExerciseEditorCommands(root).ToArray();
                 var rows = root is null ? [] : FlattenViewModelTree(root).ToArray();
-                attempts.Add(new EditorAttempt(signature, root is not null, root is null ? "Root remained null." : "Root loaded.", rows));
+                attempts.Add(new EditorAttempt(signature, root is not null, root is null ? "Root remained null." : "Root loaded.", rows, commandTrace));
 
                 if (vm is IDisposable disposable)
                     disposable.Dispose();
@@ -291,11 +292,76 @@ public sealed class PluginEntry : ILocalizePlugin
             }
             catch (Exception ex)
             {
-                attempts.Add(new EditorAttempt(signature, false, ex.GetBaseException().Message, []));
+                attempts.Add(new EditorAttempt(signature, false, ex.GetBaseException().Message, [], []));
             }
         }
 
         return attempts.ToArray();
+    }
+
+    static IEnumerable<string> ExerciseEditorCommands(object root)
+    {
+        var objects = FlattenViewModelObjects(root)
+            .Where(x => !string.IsNullOrEmpty(Read<string>(x, "Name")))
+            .ToDictionary(x => Read<string>(x, "Name") ?? "", StringComparer.Ordinal);
+
+        if (!objects.TryGetValue("*StarA", out var starA) ||
+            !objects.TryGetValue("*StarB", out var starB) ||
+            !objects.TryGetValue("!BangHidden", out var bang) ||
+            !objects.TryGetValue("PlainVisible", out var plain))
+        {
+            yield return "required-items-missing";
+            yield break;
+        }
+
+        SetEnabled(starA, false);
+        SetEnabled(starB, false);
+        SetEnabled(bang, false);
+        SetEnabled(plain, false);
+
+        ExecuteCommand(ReadObject(starA, "ToggleEnableCommand"), null);
+        yield return $"after-toggle-StarA: StarA={Read<bool>(starA, "IsEnabled")}, StarB={Read<bool>(starB, "IsEnabled")}";
+
+        ExecuteCommand(ReadObject(starB, "ToggleEnableCommand"), null);
+        yield return $"after-toggle-StarB: StarA={Read<bool>(starA, "IsEnabled")}, StarB={Read<bool>(starB, "IsEnabled")}";
+
+        ExecuteCommand(ReadObject(bang, "ToggleEnableCommand"), null);
+        yield return $"after-bang-on: Bang={Read<bool>(bang, "IsEnabled")}";
+        ExecuteCommand(ReadObject(bang, "ToggleEnableCommand"), null);
+        yield return $"after-bang-off: Bang={Read<bool>(bang, "IsEnabled")}";
+
+        SetEnabled(plain, true);
+        ExecuteCommand(ReadObject(starB, "SwitchLayerCommand"), starB);
+        yield return $"after-generic-switch-StarB: StarA={Read<bool>(starA, "IsEnabled")}, StarB={Read<bool>(starB, "IsEnabled")}, PlainVisible={Read<bool>(plain, "IsEnabled")}";
+    }
+
+    static IEnumerable<object> FlattenViewModelObjects(object root)
+    {
+        var queue = new Queue<object>();
+        queue.Enqueue(root);
+        while (queue.Count > 0)
+        {
+            var item = queue.Dequeue();
+            yield return item;
+            foreach (var child in GetItems(item))
+                queue.Enqueue(child);
+        }
+    }
+
+    static void SetEnabled(object item, bool value)
+    {
+        var property = item.GetType().GetProperty("IsEnabled", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new MissingMemberException(item.GetType().FullName, "IsEnabled");
+        property.SetValue(item, value);
+    }
+
+    static void ExecuteCommand(object? command, object? parameter)
+    {
+        if (command is null)
+            throw new InvalidOperationException("Command was null.");
+        var method = command.GetType().GetMethod("Execute", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new MissingMethodException(command.GetType().FullName, "Execute");
+        method.Invoke(command, [parameter]);
     }
 
     static IEnumerable<ViewModelState> FlattenViewModelTree(object root)
@@ -545,7 +611,7 @@ sealed record ItemState(
     string Parent);
 
 sealed record ConstructorSurface(string Type, string[] Constructors);
-sealed record EditorAttempt(string Constructor, bool RootLoaded, string Observation, ViewModelState[] Items);
+sealed record EditorAttempt(string Constructor, bool RootLoaded, string Observation, ViewModelState[] Items, string[] CommandTrace);
 sealed record ViewModelState(
     string Type,
     string Name,
