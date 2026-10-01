@@ -53,10 +53,14 @@ function Read-DialogText([IntPtr]$Window) {
 }
 function Decline-Association([IntPtr]$Window,$Message) {
  $body=$Message.text -join "`n"
- if(-not $Message.available -or $body -notmatch 'The extension for YMM4 is not associated with YUUKURI MovieMaker4' -or $body -notmatch 'Do you want to associate the following extensions\?' -or $body -notmatch '\.ymmp: Project file' -or $body -notmatch '\.ymmt: Template file' -or $body -notmatch '\.ymme: Plugin file'){return $false}
+ $english=$Message.available -and $body -match 'The extension for YMM4 is not associated with YUUKURI MovieMaker4' -and $body -match 'Do you want to associate the following extensions\?' -and $body -match '\.ymmp: Project file' -and $body -match '\.ymmt: Template file' -and $body -match '\.ymme: Plugin file'
+ $japaneseExpected='YMM4用の拡張子がゆっくりMovieMaker4に関連付けられていません。 以下の拡張子を関連付けしますか？ - .ymmp: プロジェクトファイル - .ymmt: テンプレートファイル - .ymme: プラグインファイル 関連付けると、各ファイルをダブルクリックしてYMM4を起動できるようになります。'
+ $japanese=$Message.available -and @($Message.text|Where-Object {($_ -replace '\s+',' ').Trim() -ceq $japaneseExpected}).Count -gt 0
+ if(-not $english -and -not $japanese){return $false}
+ $noName=if($japanese){'いいえ(N)'}else{'No'}
  try{
   $root=[System.Windows.Automation.AutomationElement]::FromHandle($Window)
-  $button=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'No'))
+  $button=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$noName))
   if($null -eq $button){return $false}
   $handle=[IntPtr]$button.Current.NativeWindowHandle
   $class=[Text.StringBuilder]::new(64);[void][PausedNoticeWindows]::GetClassName($handle,$class,$class.Capacity)
@@ -70,7 +74,8 @@ function Decline-Association([IntPtr]$Window,$Message) {
 }
 function Close-KnownAssociationInformation([IntPtr]$Window,$Message) {
  $expected='If you want to associate in the future, please click Help (H) → Associate extension for YMM4 → Register to register the file.'
- $matched=@($Message.text|Where-Object {($_ -replace '\s+',' ').Trim() -ceq $expected}).Count -gt 0
+ $japaneseExpected='今後、関連付けしたい場合は ヘルプ(H) → YMM4用拡張子の関連付け → 登録する を実行してください。'
+ $matched=@($Message.text|Where-Object {$normalized=($_ -replace '\s+',' ').Trim();$normalized -ceq $expected -or $normalized -ceq $japaneseExpected}).Count -gt 0
  if(-not $Message.available -or -not $matched){return $false}
  try{
   $root=[System.Windows.Automation.AutomationElement]::FromHandle($Window)
@@ -124,7 +129,7 @@ function Run-Phase([string]$Phase) {
      if($w.title -like '*Check for updates*' -or $w.title -like '*About YukkuriMovieMaker*' -or $w.title -eq 'ゆっくりMovieMakerについて'){
       [void][PausedNoticeWindows]::PostMessage([IntPtr]$w.handle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero);$decision='close-known-information-before-permission'
      }elseif($w.title -match '^(Confirm|確認)$' -and (Decline-Association ([IntPtr]$w.handle) $message)){$decision='decline-exact-file-association-No-before-permission'}
-     elseif($w.title -eq 'Notification' -and (Close-KnownAssociationInformation ([IntPtr]$w.handle) $message)){$decision='close-exact-future-association-information-OK-before-permission'}
+     elseif($w.title -match '^(Notification|通知)$' -and (Close-KnownAssociationInformation ([IntPtr]$w.handle) $message)){$decision='close-exact-future-association-information-OK-before-permission'}
      elseif($w.title -match '^(Confirm|確認|利用規約|License|Terms|Security|セキュリティ|アクセス許可)$'){
       $boundary='unknown-consent';@{status='BLOCKED';phase=$Phase;reason='Unrecognized consent/Confirm dialog; no response sent';dialog=$dialog}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $result -Encoding utf8
      }

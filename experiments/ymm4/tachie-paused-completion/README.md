@@ -7,6 +7,11 @@ version-sensitive public WPF route, not a stable Plugin.dll refresh contract.
 No internal PreviewViewModel/MainViewModel method is invoked. No key settings
 are initialized, modified, or saved by the probe.
 
+The notebook's Japanese first-run association question is declined only when
+its full normalized text matches the inspected official resource and the
+exact native No button is present. The subsequent future-association message
+is closed only on an exact full text match. Register/Yes is never invoked.
+
 Prior source `0865a05c8bd1edcd63c7d9698bef4f2d0c9e017d`, run `36894158801`,
 observed no repaint for direct `Timeline.CurrentFrame` same assignment and
 same-turn `0 -> 1 -> 0` (1.4543 ms / 15.2083 ms). Undo, selection, parameter,
