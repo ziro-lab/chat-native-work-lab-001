@@ -1,21 +1,11 @@
-# Stopped preparation: routed two-stage SeekWithoutSnap round trip
+# Stopped async Tachie: item/parameter refresh matrix
 
-Question: after synthetic Tachie preparation completes, can YMM4's public routed `SeekWithoutSnap` command repaint a stopped real preview if the probe waits for a real `ITachieSource2.Update` at the temporary neighbor frame before routing back to the original frame?
+Tests three no-playhead-movement ideas after CPU preparation finishes while the real YMM4 preview is paused:
 
-This follows valid negatives for one owner-parameter notification, same-value CurrentFrame assignment, immediate CurrentFrame round trip, and same-frame SeekWithoutSnap.
+1. Replace only the live TachieItemParameter with a content-equivalent ready clone.
+2. Replace the live TachieItem with a content-equivalent clone at the same frame/layer/length.
+3. Add a ready clone Item, wait until the host observes it, then remove it and ask whether the original owner is re-observed.
 
-## Protocol
+Each phase runs in a pristine official host copy after a no-action red control. The probe records real ITachieSource2.Update traffic/source IDs, final preview pixels, source creation count, Timeline serialization, parameter JSON, selection, input project bytes and measured Undo state.
 
-- Control: preparation becomes ready, no signal; preview must stay red.
-- Action: at readiness capture F; issue `SeekWithoutSnap(F±1)`; wait up to four seconds for both Timeline.CurrentFrame and real paused source callback at that target; only then issue `SeekWithoutSnap(F)`; wait for the real source callback at F.
-- A subsequent host Update is the only code allowed to apply the green GPU input. The completion worker never calls host Update or touches GPU state.
-- Final Timeline serialization, persisted parameter JSON, selection and measured Undo state must remain unchanged. If playback, owner/timeline identity, or an unexpected frame changes, restoration is not forced across that state.
-- The project has no audio. Transient playhead/pixel flicker and live user races remain outside this automated evidence.
-
-## Verdict
-
-`OBSERVED_ROUTED_TWO_STAGE_REPAINT` requires the no-action control to stay red, two routed commands, real target and restored source callbacks, final original stopped frame and green preview.
-
-`VALID_NEGATIVE_ROUTED_TWO_STAGE` requires the same invariants but final preview remains red.
-
-BLOCKED/FAIL does not support adoption.
+A repaint is not automatically considered preferable: OBSERVED_ITEM_REPAINT_WITH_SIDE_EFFECTS is intentionally distinct from OBSERVED_ITEM_REPAINT_CLEAN. This experiment does not use user material or downstream product code.

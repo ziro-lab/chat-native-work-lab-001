@@ -101,6 +101,24 @@ jobs:
             out/evidence/routed-nudge-start/baseline-permitted.json
             out/evidence/routed-nudge-start/baseline.png
             out/evidence/routed-nudge-start/after.png
+            out/evidence/param-replace/result.json
+            out/evidence/param-replace/startup.json
+            out/evidence/param-replace/plugin-events.jsonl
+            out/evidence/param-replace/baseline-permitted.json
+            out/evidence/param-replace/baseline.png
+            out/evidence/param-replace/after.png
+            out/evidence/item-replace/result.json
+            out/evidence/item-replace/startup.json
+            out/evidence/item-replace/plugin-events.jsonl
+            out/evidence/item-replace/baseline-permitted.json
+            out/evidence/item-replace/baseline.png
+            out/evidence/item-replace/after.png
+            out/evidence/add-remove/result.json
+            out/evidence/add-remove/startup.json
+            out/evidence/add-remove/plugin-events.jsonl
+            out/evidence/add-remove/baseline-permitted.json
+            out/evidence/add-remove/baseline.png
+            out/evidence/add-remove/after.png
             out/evidence/nudge-start/result.json
             out/evidence/nudge-start/startup.json
             out/evidence/nudge-start/plugin-events.jsonl

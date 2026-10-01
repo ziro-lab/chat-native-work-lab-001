@@ -44,6 +44,13 @@ public sealed class ItemParameter:TachieItemParameterBase
     protected override IEnumerable<IAnimatable> GetAnimatables()=>[];
     internal void ObserveUndo(){UndoRedoCommandCreated+=(_,_)=>UndoCommands++;}
     internal void Retire(){retired=true;generation++;}
+    internal ItemParameter CreateReadyClone()
+    {
+        if(!Ready||Pixels is null)throw new InvalidOperationException("Cannot clone before preparation is ready.");
+        var clone=new ItemParameter{File=File,Pixels=Pixels.ToArray()};
+        Volatile.Write(ref clone.ready,true);
+        return clone;
+    }
     internal void Arm(bool notify,Dispatcher owner,Action? afterReady=null)
     {
         owner.VerifyAccess();if(armed)return;armed=true;var stamp=++generation;Harness.Log("preparation-armed",new{notify,generation=stamp,retired});
@@ -114,7 +121,8 @@ internal sealed class SyntheticSource:ITachieSource2
         var p=description.Tachie.ItemParameter as ItemParameter;
         if(p==null)throw new InvalidOperationException("Host did not supply probe parameter");
         if(parameter==null){parameter=p;p.ObserveUndo();}
-        Harness.Parameter=p;Harness.Connect(Id,p);if(description.Usage==TimelineSourceUsage.Paused)Volatile.Write(ref Harness.LastHostFrame,description.TimelinePosition.Frame);
+        Harness.Parameter=p;Harness.Connect(Id,p);Harness.ObserveUpdate(Id,p,description.TimelinePosition.Frame,description.Usage);
+        if(description.Usage==TimelineSourceUsage.Paused)Volatile.Write(ref Harness.LastHostFrame,description.TimelinePosition.Frame);
         Harness.Log("host-update",new{Id,usage=description.Usage.ToString(),position=description.TimelinePosition.Frame,ready=p.Ready});
         if(p.Ready&&!applied){var next=Bitmap(p.Pixels!);transform.SetInput(0,next,true);bitmap.Dispose();bitmap=next;applied=true;Harness.Log("gpu-input-applied",new{Id});}
     }
@@ -171,12 +179,25 @@ internal static class Harness
     static readonly object gate=new();static readonly List<object> events=[];
     internal static int NextSource;internal static ItemParameter? Parameter;internal static string? Error;internal static TimelineToolInfo? Info;
     private static readonly Dictionary<int,ItemParameter> activeOwners=[];
+    private sealed record UpdateStamp(int SourceId,int Frame,int Count,string Usage);
+    private static readonly Dictionary<ItemParameter,UpdateStamp> updates=new(ReferenceEqualityComparer.Instance);
     internal static int LastHostFrame=-1;
     private static long navigationVersion;private static FrameActionResult? frameAction;private static int frameActionCalls;
+    private sealed record ItemRefreshResult(string Mode,string Status,int OriginalSourceId,int FinalSourceId,int SourceCreatesBefore,int SourceCreatesAfter,int UpdatesBefore,int UpdatesAfter,int Commands,string? Error);
+    private static ItemRefreshResult? itemRefresh;private static int itemRefreshCalls;
     private sealed record RoutedSeekResult(string Status,int Original,int Target,int Final,bool TargetUpdateObserved,bool RestoreUpdateObserved,int Commands,string? Error);
     private static RoutedSeekResult? routedSeek;private static int routedSeekCalls;
     internal static void Connect(int id,ItemParameter parameter){lock(gate)activeOwners[id]=parameter;}
     internal static void Disconnect(int id){lock(gate)activeOwners.Remove(id);}
+    internal static void ObserveUpdate(int id,ItemParameter parameter,int frame,TimelineSourceUsage usage)
+    {
+        lock(gate)
+        {
+            var count=updates.TryGetValue(parameter,out var old)?old.Count+1:1;
+            updates[parameter]=new(id,frame,count,usage.ToString());
+        }
+    }
+    static UpdateStamp? Stamp(ItemParameter parameter){lock(gate)return updates.TryGetValue(parameter,out var value)?value:null;}
     internal static void SetInfo(TimelineToolInfo info)
     {
         if(Info!=null)((INotifyPropertyChanged)Info.Timeline).PropertyChanged-=FrameChanged;
@@ -287,6 +308,80 @@ internal static class Harness
             }
         }
     }
+    static void BeginItemRefreshAction(ItemParameter owner,object preview,string mode)
+    {
+        Application.Current.Dispatcher.VerifyAccess();
+        if(++itemRefreshCalls!=1)throw new InvalidOperationException("Item refresh action reentered");
+        _=Run();
+        async Task Run()
+        {
+            var timeline=Info?.Timeline??throw new InvalidOperationException("Timeline unavailable");
+            var item=timeline.Items.OfType<TachieItem>().Single(x=>ReferenceEquals(x.TachieItemParameter,owner));
+            var originalStamp=Stamp(owner);
+            var originalSource=originalStamp?.SourceId??-1;
+            var beforeCount=originalStamp?.Count??0;
+            var sourceCreatesBefore=NextSource;
+            var commands=0;string? error=null;
+            bool Stable()=>ReferenceEquals(Info?.Timeline,timeline)&&Public(preview,"IsPlaying") is false;
+            async Task<UpdateStamp?> WaitUpdate(ItemParameter parameter,int afterCount,int milliseconds=3500)
+            {
+                var end=DateTimeOffset.UtcNow.AddMilliseconds(milliseconds);
+                while(DateTimeOffset.UtcNow<end)
+                {
+                    if(!Stable())return null;
+                    var stamp=Stamp(parameter);
+                    if(stamp is not null&&stamp.Count>afterCount)return stamp;
+                    await Task.Delay(25);
+                }
+                return null;
+            }
+            try
+            {
+                if(!Stable())throw new InvalidOperationException("Player/timeline not stable");
+                if(mode=="param-replace")
+                {
+                    var clone=owner.CreateReadyClone();
+                    commands++;item.TachieItemParameter=clone;
+                    var seen=await WaitUpdate(clone,0);
+                    itemRefresh=new(mode,seen is null?"NO_UPDATE":"UPDATE_OBSERVED",originalSource,seen?.SourceId??-1,sourceCreatesBefore,NextSource,beforeCount,seen?.Count??0,commands,null);
+                }
+                else if(mode=="item-replace")
+                {
+                    var index=timeline.Items.IndexOf(item);
+                    var clone=item.GetClone() as TachieItem??throw new InvalidOperationException("TachieItem.GetClone did not return TachieItem");
+                    var parameter=owner.CreateReadyClone();clone.TachieItemParameter=parameter;
+                    commands++;timeline.Items=timeline.Items.SetItem(index,clone);
+                    var seen=await WaitUpdate(parameter,0);
+                    itemRefresh=new(mode,seen is null?"NO_UPDATE":"UPDATE_OBSERVED",originalSource,seen?.SourceId??-1,sourceCreatesBefore,NextSource,beforeCount,seen?.Count??0,commands,null);
+                }
+                else if(mode=="add-remove")
+                {
+                    var clone=item.GetClone() as TachieItem??throw new InvalidOperationException("TachieItem.GetClone did not return TachieItem");
+                    var parameter=owner.CreateReadyClone();clone.TachieItemParameter=parameter;clone.Layer=item.Layer+1;
+                    commands++;timeline.Items=timeline.Items.Add(clone);
+                    var added=await WaitUpdate(parameter,0);
+                    if(added is null)
+                    {
+                        timeline.Items=timeline.Items.Remove(clone);commands++;
+                        itemRefresh=new(mode,"ADDED_NOT_OBSERVED",originalSource,-1,sourceCreatesBefore,NextSource,beforeCount,Stamp(owner)?.Count??beforeCount,commands,null);
+                    }
+                    else
+                    {
+                        commands++;timeline.Items=timeline.Items.Remove(clone);
+                        var restored=await WaitUpdate(owner,beforeCount);
+                        itemRefresh=new(mode,restored is null?"ORIGINAL_NOT_REOBSERVED":"ORIGINAL_REOBSERVED",originalSource,restored?.SourceId??-1,sourceCreatesBefore,NextSource,beforeCount,restored?.Count??beforeCount,commands,null);
+                    }
+                }
+                else throw new InvalidOperationException("Unknown item refresh mode: "+mode);
+            }
+            catch(Exception e)
+            {
+                error=e.GetType().Name+": "+e.Message;
+                itemRefresh=new(mode,"ERROR",originalSource,Stamp(owner)?.SourceId??-1,sourceCreatesBefore,NextSource,beforeCount,Stamp(owner)?.Count??beforeCount,commands,error);
+            }
+            Log("item-refresh-action",itemRefresh);
+        }
+    }
     static string Output=>Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")!;
     internal static void Log(string name,object details)
     {
@@ -303,6 +398,7 @@ internal static class Harness
                 if(Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")=="seed")
                 {Fixture.Seed(Environment.GetEnvironmentVariable("LAB_PAUSED_WORK")!);Result("SEEDED","Synthetic normal project generated",null);return;}
                 var mode=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")!;var notify=false;
+                var itemMode=mode is "param-replace" or "item-replace" or "add-remove";
                 var routedMode=mode.StartsWith("routed-",StringComparison.Ordinal);
                 var frameMode=mode.StartsWith("same-",StringComparison.Ordinal)||mode.StartsWith("nudge-",StringComparison.Ordinal);
                 FrameworkElement? surface=null;object? preview=null;Window? window=null;Capture.Frame? baseline=null;
@@ -350,13 +446,13 @@ internal static class Harness
                 int updateBefore;lock(gate)updateBefore=events.Count;
                 Log("baseline-established",new{notify,beforeState,dialogState,barrier=System.Text.Json.JsonSerializer.Deserialize<JsonElement>(System.IO.File.ReadAllText(Path.Combine(Output,"baseline-permitted.json")))});
                 System.IO.File.WriteAllText(Path.Combine(Output,"observing.txt"),"No UI interaction beyond this marker");
-                owner.Arm(notify,Application.Current.Dispatcher,routedMode?()=>BeginRoutedSeekRoundTrip(owner,preview!):frameMode?()=>CompleteFrameAction(owner,preview!,mode):null);
+                owner.Arm(notify,Application.Current.Dispatcher,itemMode?()=>BeginItemRefreshAction(owner,preview!,mode):routedMode?()=>BeginRoutedSeekRoundTrip(owner,preview!):frameMode?()=>CompleteFrameAction(owner,preview!,mode):null);
                 // Routed mode may temporarily visit exactly one neighbor. Only real host Update observes completion and permits restoration.
                 Capture.Frame final=baseline;var samples=new List<object>();
                 for(var i=0;i<36;i++)
                 {
                     await Task.Delay(250);if(System.IO.File.Exists(Path.Combine(Output,"result.json")))return;var clear=DialogFree();if(!clear.Clear){Result("BLOCKED","Popup/main-disabled during observation; no UI action",clear);return;}var state=State(preview!,window!);final=Capture.Read(surface);
-                    samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction,routedSeek});
+                    samples.Add(new{ready=owner.Ready,state,final.RedFraction,final.GreenFraction,routedSeek,itemRefresh});
                     if(state.IsPlaying!=false)throw new InvalidOperationException("Playback started during completion observation");
                     if(!routedMode&&state.Frame!=beforeState.Frame)throw new InvalidOperationException("Frame changed during completion observation");
                     if(routedMode&&routedSeek is not null&&routedSeek.Status=="RESTORED_AFTER_REAL_UPDATES"&&state.Frame!=beforeState.Frame)
@@ -372,14 +468,16 @@ internal static class Harness
                 var inputProjectUnchanged=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(inputProject)))==projectHashBefore;
                 var frameActionValid=!frameMode||frameActionCalls==1&&frameAction?.Final==Info.Timeline.CurrentFrame&&(mode.StartsWith("same-",StringComparison.Ordinal)?frameAction.Status=="SAME_ASSIGNED":mode.Contains("error",StringComparison.Ordinal)?frameAction.Status=="ERROR_RESTORED":frameAction.Status=="RESTORED");
                 var routedValid=!routedMode||routedSeekCalls==1&&routedSeek?.Status=="RESTORED_AFTER_REAL_UPDATES"&&routedSeek.TargetUpdateObserved&&routedSeek.RestoreUpdateObserved&&routedSeek.Commands==2&&routedSeek.Final==Info.Timeline.CurrentFrame&&Info.Timeline.CurrentFrame.ToString(CultureInfo.InvariantCulture)==beforeState.Frame;
+                var itemActionExecuted=!itemMode||itemRefreshCalls==1&&itemRefresh is not null&&itemRefresh.Status!="ERROR";
                 var undoUnchanged=commandsBefore==owner.UndoCommands&&historyEvents==0&&undoableBefore==Info.UndoRedoManager.IsUndoable&&redoableBefore==Info.UndoRedoManager.IsRedoable;
                 Info.UndoRedoManager.HistoryChanged-=historyObserver;
-                var signalCorrect=owner.Ready&&owner.Notices==0&&frameActionValid&&routedValid;
+                var signalCorrect=owner.Ready&&owner.Notices==0&&frameActionValid&&routedValid&&itemActionExecuted;
                 var changed=final.GreenFraction>.65;
                 var stayedRed=final.RedFraction>.65&&final.GreenFraction<.05;
                 var validPixels=changed||stayedRed;
-                var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!timelineUnchanged||!selectedUnchanged||!inputProjectUnchanged||!undoUnchanged?"FAIL":routedMode?changed?"PASS_ROUTED_TWO_STAGE_REPAINT":"OBSERVED_NO_REPAINT":frameMode?changed?"PASS_FRAME_ACTION_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
-                Result(status,routedMode?"Real stopped player; routed SeekWithoutSnap two-stage refresh":"Real stopped player; public frame action after readiness",new{mode,frameAction,frameActionCalls,routedSeek,routedSeekCalls,timelineUnchanged,selectedUnchanged,inputProjectUnchanged,notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
+                var clean=itemMode&&timelineUnchanged&&selectedUnchanged&&inputProjectUnchanged&&undoUnchanged&&persistedUnchanged;
+                var status=!validPixels?"BLOCKED":!signalCorrect?"FAIL":itemMode?changed?(clean?"OBSERVED_ITEM_REPAINT_CLEAN":"OBSERVED_ITEM_REPAINT_WITH_SIDE_EFFECTS"):"OBSERVED_NO_REPAINT":!persistedUnchanged||!timelineUnchanged||!selectedUnchanged||!inputProjectUnchanged||!undoUnchanged?"FAIL":routedMode?changed?"PASS_ROUTED_TWO_STAGE_REPAINT":"OBSERVED_NO_REPAINT":frameMode?changed?"PASS_FRAME_ACTION_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
+                Result(status,itemMode?"Real stopped player; item/parameter replacement refresh":routedMode?"Real stopped player; routed SeekWithoutSnap two-stage refresh":"Real stopped player; public frame action after readiness",new{mode,frameAction,frameActionCalls,routedSeek,routedSeekCalls,itemRefresh,itemRefreshCalls,clean,timelineUnchanged,selectedUnchanged,inputProjectUnchanged,notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
             }
             catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,new{stack=e.StackTrace?.Split('\n').Take(8).ToArray()});}
             finally{Parameter?.Retire();}

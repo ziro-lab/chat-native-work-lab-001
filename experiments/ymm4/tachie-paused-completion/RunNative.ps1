@@ -163,13 +163,14 @@ $rows=@()
 try{
  $seed=Run-Phase 'seed';$rows+=$seed
  if($seed.status -eq 'SEEDED'){
-  foreach($phase in @('control-start','routed-nudge-start')){
+  foreach($phase in @('control-start','param-replace','item-replace','add-remove')){
    Start-Sleep -Seconds 1;$row=Run-Phase $phase;$rows+=$row
    if($row.status -in @('BLOCKED','FAIL','OBSERVED_CONTROL_REPAINT')){break}
   }
  }
- $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif($rows.status -contains 'FAIL' -or $rows.Count -ne 3 -or $rows[1].status -ne 'PASS_CONTROL_NO_REPAINT'){'INCONCLUSIVE_OR_FAILED'}elseif($rows[2].status -eq 'PASS_ROUTED_TWO_STAGE_REPAINT'){'OBSERVED_ROUTED_TWO_STAGE_REPAINT'}elseif($rows[2].status -eq 'OBSERVED_NO_REPAINT'){'VALID_NEGATIVE_ROUTED_TWO_STAGE'}else{'INCONCLUSIVE_OR_FAILED'}
- @{schema='lab.paused-routed-two-stage-refresh.v1';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});publicRoute='CommandSettings.Default.GetCommand(SeekWithoutSnap).Execute(int, MainWindow)';restoreWaitsForRealSourceUpdate=$true;targetWaitsForRealSourceUpdate=$true;notificationUsed=$false;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;transientFlickerProvenAbsent=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
+ $valid=@('OBSERVED_ITEM_REPAINT_CLEAN','OBSERVED_ITEM_REPAINT_WITH_SIDE_EFFECTS','OBSERVED_NO_REPAINT')
+ $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif($rows.status -contains 'FAIL' -or $rows.Count -lt 2 -or $rows[1].status -ne 'PASS_CONTROL_NO_REPAINT'){'INCONCLUSIVE_OR_FAILED'}elseif(@($rows|Select-Object -Skip 2|Where-Object {$_.status -notin $valid}).Count -gt 0){'INCONCLUSIVE_OR_FAILED'}else{'OBSERVED_ITEM_REFRESH_MATRIX'}
+ @{schema='lab.paused-item-refresh-matrix.v1';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason;observation=$_.observation}});routes=@('same Item + ready parameter clone','same-content TachieItem clone replacement','temporary ready clone Item add/remove');notificationUsed=$false;frameMoved=$false;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
  Get-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Raw
- if($status -notin @('OBSERVED_ROUTED_TWO_STAGE_REPAINT','VALID_NEGATIVE_ROUTED_TWO_STAGE')){throw "Probe outcome: $status"}
+ if($status -ne 'OBSERVED_ITEM_REFRESH_MATRIX'){throw "Probe outcome: $status"}
 }finally{Remove-Item Env:LAB_PAUSED_OUTPUT,Env:LAB_PAUSED_WORK,Env:LAB_PAUSED_PHASE -ErrorAction SilentlyContinue}
