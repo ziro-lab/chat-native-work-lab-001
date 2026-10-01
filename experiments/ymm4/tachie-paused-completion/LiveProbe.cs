@@ -45,7 +45,7 @@ public sealed class ItemParameter:TachieItemParameterBase
     internal void Retire(){retired=true;generation++;}
     internal void Arm(bool notify,Dispatcher owner)
     {
-        owner.VerifyAccess();if(armed)return;armed=true;var stamp=++generation;
+        owner.VerifyAccess();if(armed)return;armed=true;var stamp=++generation;Harness.Log("preparation-armed",new{notify,generation=stamp,retired});
         _=Prepare();
         async Task Prepare()
         {
@@ -62,7 +62,7 @@ public sealed class ItemParameter:TachieItemParameterBase
                 });
                 await owner.InvokeAsync(()=>
                 {
-                    if(retired||stamp!=generation)return;
+                    if(retired||stamp!=generation){Harness.Log("preparation-stale",new{retired,generation,stamp});return;}
                     Pixels=pixels;Volatile.Write(ref ready,true);
                     Harness.Log("preparation-ready",new{notify});
                     if(notify){Notices++;OnPropertyChanged(nameof(File));Harness.Log("parameter-notification",new{Notices});}
@@ -118,7 +118,8 @@ internal sealed class SyntheticSource:ITachieSource2
     }
     public void Update(TimeSpan a,TimeSpan b,TimeSpan c,TimeSpan d,ITachieCharacterParameter character,ITachieItemParameter item,ITachieFaceParameter face,double mouth)
         =>throw new NotSupportedException("Legacy update lacks independent Usage evidence");
-    public void Dispose(){if(disposed)return;disposed=true;parameter?.Retire();output.Dispose();transform.Dispose();bitmap.Dispose();devices.Dispose();Harness.Log("source-disposed",new{Id});}
+    // The timeline parameter is shared across host source instances. Initial source replacement must not cancel its owner preparation.
+    public void Dispose(){if(disposed)return;disposed=true;output.Dispose();transform.Dispose();bitmap.Dispose();devices.Dispose();Harness.Log("source-disposed",new{Id});}
 }
 internal static class Fixture
 {
@@ -242,6 +243,7 @@ internal static class Harness
                 Result(status,"Real stopped player; completion-only observation",new{notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
             }
             catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,new{stack=e.StackTrace?.Split('\n').Take(8).ToArray()});}
+            finally{Parameter?.Retire();}
         }
     }
     internal sealed record WindowEvidence(string Title,string Type,bool Enabled,bool Main,long Handle);

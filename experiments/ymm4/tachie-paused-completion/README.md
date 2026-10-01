@@ -53,3 +53,5 @@ After a live owner-matched red preview requests baseline, the outer runner requi
 Artifacts additionally allow exact per-phase startup JSON, plugin-events JSONL and control/notify baseline permission JSON; no wildcard upload is used. Source/run attempt identity is recorded.
 
 On 4.56.1.0, declining association was observed to open a same-process native Notification owned by the main HWND, disabling the main window. Its exact text only explains the future Help / Associate extension / Register menu. Only that fully matched message may receive its exact public OK Button before baseline permission; this closes information and does not register file extensions. Unknown Notification bodies remain observed-only and keep the barrier closed. About/splash diagnostics do not extract unrelated release-note text.
+
+The preparation generation belongs to the timeline owner observation, not an individual source instance. Host source replacement during initial project loading must not retire the shared item parameter. The harness retires the owner at observation end; source Dispose only releases that source graphics resources. Arm/stale/ready stages are logged separately.
