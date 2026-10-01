@@ -158,12 +158,14 @@ $rows=@()
 try{
  $seed=Run-Phase 'seed';$rows+=$seed
  if($seed.status -eq 'SEEDED'){
-  Start-Sleep -Seconds 1;$controlResult=Run-Phase 'control';$rows+=$controlResult
-  if($controlResult.status -eq 'PASS_CONTROL_NO_REPAINT'){Start-Sleep -Seconds 1;$rows+=Run-Phase 'notify'}
+  foreach($phase in @('control-start','same-start','nudge-start','control-end','nudge-end','nudge-error-start')){
+   Start-Sleep -Seconds 1;$row=Run-Phase $phase;$rows+=$row
+   if($phase -eq 'same-start' -and $row.status -eq 'PASS_FRAME_ACTION_REPAINT'){break}
+   if($row.status -in @('BLOCKED','FAIL','OBSERVED_CONTROL_REPAINT')){break}
+  }
  }
- $control=$rows|Where-Object phase -eq 'control';$notify=$rows|Where-Object phase -eq 'notify'
- $status=if($control.status -eq 'PASS_CONTROL_NO_REPAINT' -and $notify.status -eq 'PASS_NOTIFY_REPAINT'){'PASS_CAUSAL_PAUSED_REPAINT'}elseif($control.status -eq 'PASS_CONTROL_NO_REPAINT' -and $notify.status -eq 'OBSERVED_NO_REPAINT'){'VALID_NEGATIVE_NO_REPAINT'}elseif($rows.status -contains 'BLOCKED'){'BLOCKED'}else{'INCONCLUSIVE_OR_FAILED'}
- @{schema='lab.paused-tachie-notice.summary.v2';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});notificationRequiresValidControl=$true;dialogFreeBarrierRequired=$true;detachedFallback=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
+ $status=if($rows.status -contains 'BLOCKED'){'BLOCKED'}elseif(($rows|Where-Object phase -like 'same-*').status -contains 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_SAME_ASSIGN_REPAINT'}elseif($rows.status -contains 'FAIL' -or $rows.Count -ne 7){'INCONCLUSIVE_OR_FAILED'}elseif(($rows|Where-Object phase -like 'control-*').status -contains 'OBSERVED_CONTROL_REPAINT'){'INCONCLUSIVE_OR_FAILED'}elseif(($rows|Where-Object phase -like 'same-*').status -contains 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_SAME_ASSIGN_REPAINT'}elseif(($rows|Where-Object phase -like 'nudge-*').status -contains 'PASS_FRAME_ACTION_REPAINT'){'OBSERVED_NUDGE_REPAINT'}else{'VALID_NEGATIVE_FRAME_ACTIONS'}
+ @{schema='lab.paused-frame-refresh.summary.v1';status=$status;sourceHead=$env:SOURCE_HEAD;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;phases=@($rows|ForEach-Object{@{phase=$_.phase;status=$_.status;reason=$_.reason}});publicRoute='Timeline.CurrentFrame';sameUiTurnRoundTrip=$true;notificationRequiresValidControl=$true;dialogFreeBarrierRequired=$true;detachedFallback=$false;audioMeasured=$false;transientFlickerProvenAbsent=$false;liveDirtyFlagMeasured=$false;artifactPolicy='literal JSON/minimal log/synthetic preview PNG allowlist'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Encoding utf8
  Get-Content -LiteralPath (Join-Path $OutputDir 'summary.json') -Raw
- if($status -notin @('PASS_CAUSAL_PAUSED_REPAINT','VALID_NEGATIVE_NO_REPAINT')){throw "Probe outcome: $status"}
+ if($status -notin @('OBSERVED_SAME_ASSIGN_REPAINT','OBSERVED_NUDGE_REPAINT','VALID_NEGATIVE_FRAME_ACTIONS')){throw "Probe outcome: $status"}
 }finally{Remove-Item Env:LAB_PAUSED_OUTPUT,Env:LAB_PAUSED_WORK,Env:LAB_PAUSED_PHASE -ErrorAction SilentlyContinue}

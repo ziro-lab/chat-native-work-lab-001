@@ -43,7 +43,7 @@ public sealed class ItemParameter:TachieItemParameterBase
     protected override IEnumerable<IAnimatable> GetAnimatables()=>[];
     internal void ObserveUndo(){UndoRedoCommandCreated+=(_,_)=>UndoCommands++;}
     internal void Retire(){retired=true;generation++;}
-    internal void Arm(bool notify,Dispatcher owner)
+    internal void Arm(bool notify,Dispatcher owner,Action? afterReady=null)
     {
         owner.VerifyAccess();if(armed)return;armed=true;var stamp=++generation;Harness.Log("preparation-armed",new{notify,generation=stamp,retired});
         _=Prepare();
@@ -66,6 +66,7 @@ public sealed class ItemParameter:TachieItemParameterBase
                     Pixels=pixels;Volatile.Write(ref ready,true);
                     Harness.Log("preparation-ready",new{notify});
                     if(notify){Notices++;OnPropertyChanged(nameof(File));Harness.Log("parameter-notification",new{Notices});}
+                    afterReady?.Invoke();
                 });
             }
             catch(Exception e){Harness.Error=e.GetType().Name+": "+e.Message;}
@@ -112,14 +113,14 @@ internal sealed class SyntheticSource:ITachieSource2
         var p=description.Tachie.ItemParameter as ItemParameter;
         if(p==null)throw new InvalidOperationException("Host did not supply probe parameter");
         if(parameter==null){parameter=p;p.ObserveUndo();}
-        Harness.Parameter=p;
-        Harness.Log("host-update",new{Id,usage=description.Usage.ToString(),position=description.TimelinePosition.ToString(),ready=p.Ready});
+        Harness.Parameter=p;Harness.Connect(Id,p);if(description.Usage==TimelineSourceUsage.Paused)Volatile.Write(ref Harness.LastHostFrame,description.TimelinePosition.Frame);
+        Harness.Log("host-update",new{Id,usage=description.Usage.ToString(),position=description.TimelinePosition.Frame,ready=p.Ready});
         if(p.Ready&&!applied){var next=Bitmap(p.Pixels!);transform.SetInput(0,next,true);bitmap.Dispose();bitmap=next;applied=true;Harness.Log("gpu-input-applied",new{Id});}
     }
     public void Update(TimeSpan a,TimeSpan b,TimeSpan c,TimeSpan d,ITachieCharacterParameter character,ITachieItemParameter item,ITachieFaceParameter face,double mouth)
         =>throw new NotSupportedException("Legacy update lacks independent Usage evidence");
     // The timeline parameter is shared across host source instances. Initial source replacement must not cancel its owner preparation.
-    public void Dispose(){if(disposed)return;disposed=true;output.Dispose();transform.Dispose();bitmap.Dispose();devices.Dispose();Harness.Log("source-disposed",new{Id});}
+    public void Dispose(){if(disposed)return;disposed=true;Harness.Disconnect(Id);output.Dispose();transform.Dispose();bitmap.Dispose();devices.Dispose();Harness.Log("source-disposed",new{Id});}
 }
 internal static class Fixture
 {
@@ -159,7 +160,7 @@ public sealed class ObserverView:UserControl{public ObserverView(){Content=new T
 public sealed class ObserverVm:ITimelineToolViewModel,IToolViewModel
 {
     public string Title=>"Lab paused observer";public bool CanSuspend=>false;
-    public void SetTimelineToolInfo(TimelineToolInfo info){Harness.Info=info;Harness.Log("timeline-tool-connected",new{items=info.Timeline.Items.Count,syntheticItems=info.Timeline.Items.OfType<TachieItem>().Count(x=>x.TachieItemParameter is ItemParameter)});}
+    public void SetTimelineToolInfo(TimelineToolInfo info){Harness.SetInfo(info);Harness.Log("timeline-tool-connected",new{items=info.Timeline.Items.Count,syntheticItems=info.Timeline.Items.OfType<TachieItem>().Count(x=>x.TachieItemParameter is ItemParameter)});}
     public ToolState SaveState()=>new(){Title=Title};public void LoadState(ToolState state){}
     public event PropertyChangedEventHandler? PropertyChanged{add{}remove{}}
     public event EventHandler<CreateNewToolViewRequestedEventArgs>? CreateNewToolViewRequested{add{}remove{}}
@@ -168,6 +169,34 @@ internal static class Harness
 {
     static readonly object gate=new();static readonly List<object> events=[];
     internal static int NextSource;internal static ItemParameter? Parameter;internal static string? Error;internal static TimelineToolInfo? Info;
+    private static readonly Dictionary<int,ItemParameter> activeOwners=[];
+    internal static int LastHostFrame=-1;
+    private static long navigationVersion;private static FrameActionResult? frameAction;private static int frameActionCalls;
+    internal static void Connect(int id,ItemParameter parameter){lock(gate)activeOwners[id]=parameter;}
+    internal static void Disconnect(int id){lock(gate)activeOwners.Remove(id);}
+    internal static void SetInfo(TimelineToolInfo info)
+    {
+        if(Info!=null)((INotifyPropertyChanged)Info.Timeline).PropertyChanged-=FrameChanged;
+        Info=info;navigationVersion++;((INotifyPropertyChanged)info.Timeline).PropertyChanged+=FrameChanged;
+    }
+    static void FrameChanged(object? sender,PropertyChangedEventArgs e)
+    {if(e.PropertyName==nameof(Timeline.CurrentFrame)){navigationVersion++;Log("timeline-frame-changed",new{frame=Info?.Timeline.CurrentFrame,navigationVersion});}}
+    sealed class FrameAccess(ItemParameter owner,object preview):IFrameAccess
+    {
+        public int Frame{get=>Info?.Timeline.CurrentFrame??-1;set{if(Info!=null)Info.Timeline.CurrentFrame=value;}}
+        public int LastFrame=>Info!.Timeline.Length-1;
+        static readonly object MissingScope=new();public object Scope=>Info?.Timeline??MissingScope;
+        public long NavigationVersion=>navigationVersion;
+        public bool CanAct{get{lock(gate)return Info!=null&&Public(preview,"IsPlaying") is false&&Info.Timeline.Items.OfType<TachieItem>().Any(x=>ReferenceEquals(x.TachieItemParameter,owner))&&activeOwners.Values.Any(x=>ReferenceEquals(x,owner));}}
+    }
+    static void CompleteFrameAction(ItemParameter owner,object preview,string mode)
+    {
+        Application.Current.Dispatcher.VerifyAccess();if(++frameActionCalls!=1)throw new InvalidOperationException("Frame refresh reentered");
+        var access=new FrameAccess(owner,preview);
+        var clock=System.Diagnostics.Stopwatch.StartNew();
+        frameAction=mode.StartsWith("same-",StringComparison.Ordinal)?FrameRefresh.Same(access):FrameRefresh.Nudge(access,mode.Contains("error",StringComparison.Ordinal)?()=>throw new InvalidOperationException("Injected after temporary move"):null);
+        Log("completion-frame-action",new{mode,frameAction,frameActionCalls,actionElapsedMs=clock.Elapsed.TotalMilliseconds,sameUiTurn=true});
+    }
     static string Output=>Environment.GetEnvironmentVariable("LAB_PAUSED_OUTPUT")!;
     internal static void Log(string name,object details)
     {
@@ -183,10 +212,11 @@ internal static class Harness
             {
                 if(Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")=="seed")
                 {Fixture.Seed(Environment.GetEnvironmentVariable("LAB_PAUSED_WORK")!);Result("SEEDED","Synthetic normal project generated",null);return;}
-                var notify=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")=="notify";
+                var mode=Environment.GetEnvironmentVariable("LAB_PAUSED_PHASE")!;var notify=false;
+                var frameMode=mode.StartsWith("same-",StringComparison.Ordinal)||mode.StartsWith("nudge-",StringComparison.Ordinal);
                 FrameworkElement? surface=null;object? preview=null;Window? window=null;Capture.Frame? baseline=null;
                 var candidates=new List<object>();
-                var toolOpened=false;
+                var toolOpened=false;var initialFrameSet=false;
                 var startupDeadline=DateTimeOffset.UtcNow.AddSeconds(100);
                 for(var i=0;DateTimeOffset.UtcNow<startupDeadline;i++)
                 {
@@ -198,6 +228,12 @@ internal static class Harness
                     (surface,preview,window)=FindSurface(candidates);
                     if(surface!=null&&Parameter!=null&&Info?.Timeline.Items.OfType<TachieItem>().Any(item=>ReferenceEquals(item.TachieItemParameter,Parameter))==true)
                     {
+                        if(!initialFrameSet)
+                        {
+                            initialFrameSet=true;
+                            if(mode.EndsWith("-end",StringComparison.Ordinal)){Info.Timeline.CurrentFrame=Info.Timeline.Length-1;Log("setup-end-frame-before-baseline",new{frame=Info.Timeline.CurrentFrame});await Task.Delay(250);continue;}
+                        }
+                        if(Volatile.Read(ref LastHostFrame)!=Info.Timeline.CurrentFrame){await Task.Delay(250);continue;}
                         baseline=Capture.Read(surface);
                         if(baseline.RedFraction>.95)
                         {
@@ -214,13 +250,17 @@ internal static class Harness
                 if(beforeState.IsPlaying!=false||beforeState.Frame==null)
                 {Result("BLOCKED","Cannot independently establish paused state and frame through public UI surface",new{beforeState});return;}
                 var owner=Parameter;var savedBefore=JsonConvert.SerializeObject(owner);var commandsBefore=owner.UndoCommands;
+                var timelineBefore=JsonConvert.SerializeObject(Info.Timeline);
+                var selectedBefore=Info.Timeline.SelectedItems.Select(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode).ToArray();
+                var inputProject=Path.Combine(Environment.GetEnvironmentVariable("LAB_PAUSED_WORK")!,"synthetic.ymmp");
+                var projectHashBefore=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(inputProject)));
                 var historyEvents=0;EventHandler historyObserver=(_,_)=>historyEvents++;Info.UndoRedoManager.HistoryChanged+=historyObserver;
                 var undoableBefore=Info.UndoRedoManager.IsUndoable;var redoableBefore=Info.UndoRedoManager.IsRedoable;
                 int updateBefore;lock(gate)updateBefore=events.Count;
                 Log("baseline-established",new{notify,beforeState,dialogState,barrier=System.Text.Json.JsonSerializer.Deserialize<JsonElement>(System.IO.File.ReadAllText(Path.Combine(Output,"baseline-permitted.json")))});
                 System.IO.File.WriteAllText(Path.Combine(Output,"observing.txt"),"No UI interaction beyond this marker");
-                owner.Arm(notify,Application.Current.Dispatcher);
-                // From this point there is no seek, play, selection, edit, command or direct host Update.
+                owner.Arm(notify,Application.Current.Dispatcher,frameMode?()=>CompleteFrameAction(owner,preview!,mode):null);
+                // After CPU readiness, only the explicitly requested public same-frame assignment or synchronous one-frame round trip may run. No host Update, play, selection or persisted edit is forced.
                 Capture.Frame final=baseline;var samples=new List<object>();
                 for(var i=0;i<36;i++)
                 {
@@ -233,14 +273,18 @@ internal static class Harness
                 var afterState=State(preview!,window!);
                 object[] traffic;lock(gate)traffic=events.ToArray();
                 var persistedUnchanged=JsonConvert.SerializeObject(owner)==savedBefore;
+                var timelineUnchanged=JsonConvert.SerializeObject(Info.Timeline)==timelineBefore;
+                var selectedUnchanged=selectedBefore.SequenceEqual(Info.Timeline.SelectedItems.Select(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode));
+                var inputProjectUnchanged=Convert.ToHexString(SHA256.HashData(System.IO.File.ReadAllBytes(inputProject)))==projectHashBefore;
+                var frameActionValid=!frameMode||frameActionCalls==1&&frameAction?.Final==Info.Timeline.CurrentFrame&&(mode.StartsWith("same-",StringComparison.Ordinal)?frameAction.Status=="SAME_ASSIGNED":mode.Contains("error",StringComparison.Ordinal)?frameAction.Status=="ERROR_RESTORED":frameAction.Status=="RESTORED");
                 var undoUnchanged=commandsBefore==owner.UndoCommands&&historyEvents==0&&undoableBefore==Info.UndoRedoManager.IsUndoable&&redoableBefore==Info.UndoRedoManager.IsRedoable;
                 Info.UndoRedoManager.HistoryChanged-=historyObserver;
-                var signalCorrect=owner.Ready&&owner.Notices==(notify?1:0);
+                var signalCorrect=owner.Ready&&owner.Notices==0&&frameActionValid;
                 var changed=final.GreenFraction>.65;
                 var stayedRed=final.RedFraction>.65&&final.GreenFraction<.05;
                 var validPixels=changed||stayedRed;
-                var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!undoUnchanged?"FAIL":notify?changed?"PASS_NOTIFY_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
-                Result(status,"Real stopped player; completion-only observation",new{notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
+                var status=!validPixels?"BLOCKED":!signalCorrect||!persistedUnchanged||!timelineUnchanged||!selectedUnchanged||!inputProjectUnchanged||!undoUnchanged?"FAIL":frameMode?changed?"PASS_FRAME_ACTION_REPAINT":"OBSERVED_NO_REPAINT":stayedRed?"PASS_CONTROL_NO_REPAINT":"OBSERVED_CONTROL_REPAINT";
+                Result(status,"Real stopped player; public frame action after readiness",new{mode,frameAction,frameActionCalls,timelineUnchanged,selectedUnchanged,inputProjectUnchanged,notify,owner.Ready,owner.Notices,undoUnchanged,historyEvents,undoableBefore,redoableBefore,persistedUnchanged,beforeState,afterState,changed,stayedRed,baseline=new{baseline.RedFraction,baseline.GreenFraction},final=new{final.RedFraction,final.GreenFraction},samples,eventsAfterBaseline=traffic.Skip(updateBefore).ToArray(),dialogFreeBaseline=true,dialogFreeThroughout=true,liveUndoHistoryMeasured=true,liveDirtyFlagMeasured=false,windowTitleUnchanged=beforeState.Title==afterState.Title});
             }
             catch(Exception e){Result("BLOCKED","Harness/host boundary: "+e.GetType().Name+": "+e.Message,new{stack=e.StackTrace?.Split('\n').Take(8).ToArray()});}
             finally{Parameter?.Retire();}

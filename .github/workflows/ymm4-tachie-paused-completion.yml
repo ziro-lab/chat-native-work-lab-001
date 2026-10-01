@@ -1,4 +1,4 @@
-name: YMM4 paused Tachie completion notification
+name: YMM4 paused preparation frame refresh
 
 on:
   pull_request:
@@ -58,6 +58,8 @@ jobs:
         run: |
           dotnet build experiments/ymm4/tachie-paused-completion/LiveProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -o out/probe --nologo -warnaserror 2>&1 | Tee-Object out/evidence/build.log
           if($LASTEXITCODE -ne 0){throw 'Independent probe build failed'}
+          dotnet run --project experiments/ymm4/tachie-paused-completion/checks/FrameRefreshChecks.csproj -c Release -- out/evidence/frame-guard-checks.json
+          if($LASTEXITCODE -ne 0){throw 'Frame guards failed'}
           $destination=Join-Path $env:YMM4_DIR 'user/plugin/LabTachiePausedNotice'
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
           Copy-Item -LiteralPath out/probe/Lab.TachiePausedNotice.dll -Destination $destination
@@ -80,17 +82,42 @@ jobs:
             out/evidence/seed/result.json
             out/evidence/seed/startup.json
             out/evidence/seed/plugin-events.jsonl
-            out/evidence/control/result.json
-            out/evidence/control/startup.json
-            out/evidence/control/plugin-events.jsonl
-            out/evidence/control/baseline-permitted.json
-            out/evidence/control/baseline.png
-            out/evidence/control/after.png
-            out/evidence/notify/result.json
-            out/evidence/notify/startup.json
-            out/evidence/notify/plugin-events.jsonl
-            out/evidence/notify/baseline-permitted.json
-            out/evidence/notify/baseline.png
-            out/evidence/notify/after.png
+            out/evidence/frame-guard-checks.json
+            out/evidence/control-start/result.json
+            out/evidence/control-start/startup.json
+            out/evidence/control-start/plugin-events.jsonl
+            out/evidence/control-start/baseline-permitted.json
+            out/evidence/control-start/baseline.png
+            out/evidence/control-start/after.png
+            out/evidence/same-start/result.json
+            out/evidence/same-start/startup.json
+            out/evidence/same-start/plugin-events.jsonl
+            out/evidence/same-start/baseline-permitted.json
+            out/evidence/same-start/baseline.png
+            out/evidence/same-start/after.png
+            out/evidence/nudge-start/result.json
+            out/evidence/nudge-start/startup.json
+            out/evidence/nudge-start/plugin-events.jsonl
+            out/evidence/nudge-start/baseline-permitted.json
+            out/evidence/nudge-start/baseline.png
+            out/evidence/nudge-start/after.png
+            out/evidence/control-end/result.json
+            out/evidence/control-end/startup.json
+            out/evidence/control-end/plugin-events.jsonl
+            out/evidence/control-end/baseline-permitted.json
+            out/evidence/control-end/baseline.png
+            out/evidence/control-end/after.png
+            out/evidence/nudge-end/result.json
+            out/evidence/nudge-end/startup.json
+            out/evidence/nudge-end/plugin-events.jsonl
+            out/evidence/nudge-end/baseline-permitted.json
+            out/evidence/nudge-end/baseline.png
+            out/evidence/nudge-end/after.png
+            out/evidence/nudge-error-start/result.json
+            out/evidence/nudge-error-start/startup.json
+            out/evidence/nudge-error-start/plugin-events.jsonl
+            out/evidence/nudge-error-start/baseline-permitted.json
+            out/evidence/nudge-error-start/baseline.png
+            out/evidence/nudge-error-start/after.png
           if-no-files-found: warn
           retention-days: 14
